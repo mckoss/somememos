@@ -1,6 +1,18 @@
 #!/usr/bin/env python
+"""
+    somememos - Python script commads for SomeMemos web hosting system.
+
+    A SomeMemos web site consists of a collection of (source controlled) files
+    that are rendered by the SomeMemos web server.  Like the Jekyll system,
+    SomeMemos sites can be based on site-wide and document type tempaltes that
+    control how individual pages are rendered.
+
+    Commands:
+    create - Create (empty)
+"""
 import sys
 import argparse
+import somememos
 
 
 def main():
@@ -12,10 +24,12 @@ def main():
     for command in commands:
         usage.append("%s: %s" % (command, globals()[command + '_command'].__doc__))
 
-    parser = argparse.ArgumentParser(description="Somememos command script.", usage='\n'.join(usage))
+    parser = argparse.ArgumentParser(description="Somememos command script.",
+                                     usage='\n'.join(usage))
     parser.add_argument('command', help="Command name.")
     parser.add_argument("extras", nargs='*')
     args = parser.parse_args()
+    args.command = args.command.replace('-', '_')
 
     if args.command not in commands:
         print "Unknown command: %s" % args.command
@@ -29,6 +43,11 @@ def main():
 def create_command(*args):
     """ Create a new web site. """
     print args
+
+
+def run_server_command(*args):
+    """ Run web server (optional directory argument). """
+    pass
 
 
 if __name__ == '__main__':
