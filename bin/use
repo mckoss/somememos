@@ -1,6 +1,16 @@
 BIN_DIR="$(cd `dirname $BASH_SOURCE` && pwd)"
 PROJ_DIR="$(dirname $BIN_DIR)"
-echo Setting up Web Notes environment in $PROJ_DIR
+echo Activating SomeMemos environment in $PROJ_DIR
+
+if [ ! -d $PROJ_DIR/env ]; then
+    read -p "Missing environment - create it? (y/N): "
+    if [[ "$REPLY" != "y" ]]; then
+        return
+    fi
+
+    virtualenv $PROJ_DIR/env
+    $PROJ_DIR/setup.py install
+fi
 
 source $PROJ_DIR/env/bin/activate
 export PYTHONPATH=$PROJ_DIR

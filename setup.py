@@ -2,7 +2,7 @@
 
 from setuptools import setup, find_packages
 
-setup(name='webnotes',
+setup(name='somememos',
       version='0.1a1',
       packages=find_packages(),
       install_requires=['tornado>=2.4'],
@@ -11,6 +11,5 @@ setup(name='webnotes',
       description="A web application for publishing extensible notebooks.",
       license="MIT",
       keywords="tornado web",
-      uri="http://github.com/mckoss/webnotes",
-      scripts=['bin/webnotes'],
+      scripts=['bin/somememos'],
       )

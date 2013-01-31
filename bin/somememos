@@ -6,13 +6,13 @@ import argparse
 def main():
     commands = [func.rsplit('_', 1)[0] for func in globals() if func.endswith('_command')]
     commands.sort()
-    usage = ["webnotes  <" + ' | '.join(commands) + ">"]
+    usage = ["somememos  <" + ' | '.join(commands) + ">"]
     usage.append("Available commands:")
     usage.append('')
     for command in commands:
         usage.append("%s: %s" % (command, globals()[command + '_command'].__doc__))
 
-    parser = argparse.ArgumentParser(description="Webnotes command script.", usage='\n'.join(usage))
+    parser = argparse.ArgumentParser(description="Somememos command script.", usage='\n'.join(usage))
     parser.add_argument('command', help="Command name.")
     parser.add_argument("extras", nargs='*')
     args = parser.parse_args()
