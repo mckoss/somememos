@@ -2,7 +2,7 @@
 
 A web server to serve a notebook-based web site (aka a file-based extensible CMS).
 
-*This software is **NOT** ready for human conumption.*
+This software is **NOT** ready for human conumption.
 
 # Installation (via pip)
 
