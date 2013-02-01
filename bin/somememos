@@ -10,6 +10,7 @@
     Commands:
     create - Create (empty)
 """
+import os
 import sys
 import argparse
 import somememos
@@ -18,25 +19,28 @@ import somememos
 def main():
     commands = [func.rsplit('_', 1)[0] for func in globals() if func.endswith('_command')]
     commands.sort()
-    usage = ["somememos  <" + ' | '.join(commands) + ">"]
+    user_commands = [command.replace('_', '-') for command in commands]
+    usage = ["somememos  <" + ' | '.join(user_commands) + ">"]
     usage.append("Available commands:")
     usage.append('')
     for command in commands:
-        usage.append("%s: %s" % (command, globals()[command + '_command'].__doc__))
+        usage.append("%s: %s" % (command.replace('_', '-'),
+                                 globals()[command + '_command'].__doc__))
 
     parser = argparse.ArgumentParser(description="Somememos command script.",
                                      usage='\n'.join(usage))
-    parser.add_argument('command', help="Command name.")
+    parser.add_argument('command', nargs='?', default='run-server', help="Command name.")
     parser.add_argument("extras", nargs='*')
     args = parser.parse_args()
-    args.command = args.command.replace('-', '_')
 
-    if args.command not in commands:
+    command_name = args.command.replace('-', '_')
+
+    if command_name not in commands:
         print "Unknown command: %s" % args.command
         print parser.print_help()
         sys.exit(1)
 
-    command_func = globals().get(args.command + '_command')
+    command_func = globals().get(command_name + '_command')
     command_func(*args.extras)
 
 
@@ -47,7 +51,9 @@ def create_command(*args):
 
 def run_server_command(*args):
     """ Run web server (optional directory argument). """
-    somememos.start_server()
+    root_dir = args[0] if len(args) > 0 else os.getcwd()
+    root_dir = os.path.realpath(root_dir)
+    somememos.start_server(root_dir)
 
 
 if __name__ == '__main__':

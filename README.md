@@ -1,4 +1,4 @@
-# SomeMemos
+# SomeMemoS
 
 A web server to serve a notebook-based web site (aka a file-based extensible CMS).
 
