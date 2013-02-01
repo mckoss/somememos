@@ -47,8 +47,8 @@ def create_command(*args):
 
 def run_server_command(*args):
     """ Run web server (optional directory argument). """
-    pass
+    somememos.start_server()
 
 
 if __name__ == '__main__':
-   main()
+    main()

@@ -1,5 +1,7 @@
-BIN_DIR="$(cd `dirname $BASH_SOURCE` && pwd)"
-PROJ_DIR="$(dirname $BIN_DIR)"
+export BIN_DIR="$(cd `dirname $BASH_SOURCE` && pwd)"
+source $BIN_DIR/.envrc
+source $BIN_DIR/.aliases
+
 echo Activating SomeMemos environment in $PROJ_DIR
 
 if [ ! -d $PROJ_DIR/env ]; then

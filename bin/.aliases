@@ -1,0 +1,4 @@
+echo "Quick directory commands: home bin"
+
+alias home="cd $PROJ_DIR"
+alias bin="cd $PROJ_DIR/bin"
