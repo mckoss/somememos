@@ -1,6 +1,8 @@
-# Web Notes
+# SomeMemos
 
-A web server to serve a notebook-based web site.
+A web server to serve a notebook-based web site (aka a file-based extensible CMS).
+
+*This software is **NOT** ready for human conumption.*
 
 # Installation (via pip)
 
