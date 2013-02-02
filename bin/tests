@@ -1,6 +1,6 @@
 source .envrc
 
-PEP8_OPTS="--max-line-length=100"
+PEP8_OPTS="--max-line-length=100 --ignore=E123,E125,E126,E127,E128"
 
 pep8 $PEP8_OPTS $BIN_DIR/somememos
 pep8 $PEP8_OPTS $PROJ_DIR/somememos/*.py

@@ -27,3 +27,5 @@
 - Code coloring
 - RSS or Atom
 - JS and CSS combination (hash-based naming - long expires)
+- Multi-site host (with shared resources (templates, static files))
+- nginx integration/documentation
