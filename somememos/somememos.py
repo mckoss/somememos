@@ -13,9 +13,8 @@ from tornado import ioloop
 define('host_port', default=8080, help='Web server port.')
 
 
-class PageRequestHandler(RequestHandler):
-    def get(self, path):
-        self.write("Hello, world: '%s'" % path)
+class PageRequestHandler(StaticFileHandler):
+    pass
 
 
 def start_server(root_dir):
@@ -34,7 +33,7 @@ def start_server(root_dir):
         (r"/images/(.*)", StaticFileHandler, {"path": os.path.join(root_dir, "static/images")}),
         (r"/js/(.*)", StaticFileHandler, {"path": os.path.join(root_dir, "static/js")}),
         (r"/css/(.*)", StaticFileHandler, {"path": os.path.join(root_dir, "static/css")}),
-        (r"/(.*)", PageRequestHandler),
+        (r"/(.*)", PageRequestHandler, {"path": root_dir}),
         ],
         **settings)
 

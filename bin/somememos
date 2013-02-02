@@ -52,7 +52,7 @@ def create_command(*args):
 def run_server_command(*args):
     """ Run web server (optional directory argument). """
     root_dir = args[0] if len(args) > 0 else os.getcwd()
-    root_dir = os.path.realpath(root_dir)
+    root_dir = os.path.abspath(root_dir)
     somememos.start_server(root_dir)
 
 
