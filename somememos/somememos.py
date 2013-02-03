@@ -30,6 +30,7 @@ def start_server(root_dir):
 
 def init_application(root_dir):
     module_dir = os.path.dirname(__file__)
+
     template_search_path = SearchPath(os.path.join(root_dir, "themes", options.theme,
                                                    "templates"),
                                       os.path.join(root_dir, "templates"),
@@ -38,8 +39,13 @@ def init_application(root_dir):
                                       os.path.join(module_dir, "templates"),
                                       )
 
-    file_path = SearchPath(os.path.join(root_dir),
-                           os.path.join(module_dir, "static"))
+    content_search_path = SearchPath(os.path.join(root_dir),
+                                     os.path.join(module_dir, "content"))
+
+    static_search_path = SearchPath(os.path.join(root_dir, "themes", options.theme,
+                                                 "static"),
+                                    os.path.join(root_dir, "static"),
+                                    os.path.join(module_dir, "static"))
 
     settings = dict(
         gzip=True,
@@ -47,10 +53,8 @@ def init_application(root_dir):
         )
 
     application = Application([
-        (r"/images/(.*)", StaticFileHandler, {"path": os.path.join(root_dir, "static/images")}),
-        (r"/js/(.*)", StaticFileHandler, {"path": os.path.join(root_dir, "static/js")}),
-        (r"/css/(.*)", StaticFileHandler, {"path": os.path.join(root_dir, "static/css")}),
-        (r"/(.*)", PageRequestHandler, {"path": file_path}),
+        (r"/((?:img|js|css)/.*)$", PathStaticFileHandler, {"search_path": static_search_path}),
+        (r"/(.*)$", PageRequestHandler, {"search_path": content_search_path}),
         ],
         **settings)
 
@@ -58,17 +62,28 @@ def init_application(root_dir):
 
 
 class PageRequestHandler(RequestHandler):
-    def initialize(self, path=None, **kwargs):
+    def initialize(self, search_path=None, **kwargs):
         super(PageRequestHandler, self).initialize(**kwargs)
-        self.path = path
+        self.search_path = search_path
 
     def get(self, path):
-        full_path = self.path.find_file(path, 'index.html')
+        full_path = self.search_path.find_file(path, 'index.html')
         if full_path is None:
             raise HTTPError(404)
         with open(full_path, "rb") as content_file:
             content = content_file.read()
         self.render('page.html', content=content, **global_template_data)
+
+
+class PathStaticFileHandler(StaticFileHandler):
+    def initialize(self, search_path, default_filename=None):
+        self.root = '/'
+        self.search_path = search_path
+        self.default_filename = default_filename
+
+        def get(self, path, include_body=True):
+            full_path = self.search_path.find_file(path, index_name=self.default_filename)
+            return super(PathStaticFileHandler, self).get(full_path, include_body)
 
 
 class SearchPath(object):

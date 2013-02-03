@@ -9,4 +9,4 @@ cd $PROJ_DIR
 pep8 $PEP8_OPTS somememos/*.py
 pep8 $PEP8_OPTS somememos/tests/*.py
 
-python -m unittest discover
+python -m unittest discover -v
