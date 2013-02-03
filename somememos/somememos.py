@@ -10,6 +10,8 @@ from tornado.web import RequestHandler, Application, StaticFileHandler, HTTPErro
 from tornado.template import Template, BaseLoader
 from tornado import ioloop
 
+from markdown import markdown
+
 from util import Struct
 
 define('host_port', default=8080, help="Web server port.")
@@ -17,6 +19,10 @@ define('theme', default='default', help="Theme name.")
 define('site_title', default='SomeMemos', help="Your site name.")
 
 site_data = None
+
+FORMATTERS = {
+    "md": Struct(format=markdown),
+    }
 
 
 def start_server(root_dir):
@@ -80,6 +86,12 @@ class PageRequestHandler(RequestHandler):
             raise HTTPError(404)
         with open(full_path, "rb") as content_file:
             content = content_file.read()
+
+        basename = os.path.basename(full_path)
+        if '.' in basename:
+            (name, extension) = basename.split('.')
+            if extension in FORMATTERS:
+                content = FORMATTERS[extension].format(content)
 
         page_data = Struct(title=path)
 

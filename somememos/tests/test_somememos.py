@@ -11,8 +11,12 @@ class SomeMemosTest(AsyncHTTPTestCase):
         test_dir = os.path.dirname(__file__)
         return somememos.init_application(os.path.join(test_dir, 'sample'))
 
-    def test_home(self):
+    def test_index(self):
         response = self.fetch('/')
+        self.assertEqual(response.code, 200)
+
+    def test_markdown(self):
+        response = self.fetch('/page.md')
         self.assertEqual(response.code, 200)
 
 
