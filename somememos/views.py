@@ -3,7 +3,7 @@ import os
 from markdown import markdown
 from tornado.web import RequestHandler, StaticFileHandler, HTTPError
 
-from util import Struct
+from util import Struct, normalize_path
 
 FORMATTERS = {
     "md": Struct(format=markdown),
@@ -17,6 +17,10 @@ class PageRequestHandler(RequestHandler):
         self.site_data = site_data
 
     def get(self, path):
+        normal_path = normalize_path(path)
+        if normal_path != path:
+            self.redirect(normal_path, permanent=True)
+            return
         full_path = self.search_path.find_file(path, 'index.html')
         if full_path is None:
             raise HTTPError(404)

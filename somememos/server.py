@@ -42,6 +42,7 @@ def init_application(root_dir):
 
     content_search_path = SearchPath(os.path.join(root_dir),
                                      os.path.join(module_dir, "content"))
+    content_search_path.match_any_extension = True
 
     static_search_path = SearchPath(os.path.join(root_dir, "themes", options.theme,
                                                  "static"),
