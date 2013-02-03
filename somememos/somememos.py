@@ -17,6 +17,7 @@ global_template_data = dict()
 
 
 def start_server(root_dir):
+    conf_file_name = os.path.join(root_dir, "somememos.conf")
     if os.path.exists(conf_file_name):
         parse_config_file(conf_file_name)
     parse_command_line()
@@ -29,7 +30,6 @@ def start_server(root_dir):
 
 def init_application(root_dir):
     module_dir = os.path.dirname(__file__)
-    conf_file_name = os.path.join(root_dir, "somememos.conf")
     template_search_path = SearchPath(os.path.join(root_dir, "themes", options.theme,
                                                    "templates"),
                                       os.path.join(root_dir, "templates"),
