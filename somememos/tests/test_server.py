@@ -3,13 +3,13 @@ import os
 import unittest
 from tornado.testing import AsyncHTTPTestCase
 
-import somememos
+from somememos import server
 
 
 class SomeMemosTest(AsyncHTTPTestCase):
     def get_app(self):
         test_dir = os.path.dirname(__file__)
-        return somememos.init_application(os.path.join(test_dir, 'sample'))
+        return server.init_application(os.path.join(test_dir, 'sample'))
 
     def test_index(self):
         response = self.fetch('/')
