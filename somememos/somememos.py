@@ -54,6 +54,7 @@ def init_application(root_dir):
 
     application = Application([
         (r"/((?:img|js|css)/.*)$", PathStaticFileHandler, {"search_path": static_search_path}),
+        (r"/(favicon\.ico)$", PathStaticFileHandler, {"search_path": static_search_path + 'img'}),
         (r"/(.*)$", PageRequestHandler, {"search_path": content_search_path}),
         ],
         **settings)
@@ -81,9 +82,11 @@ class PathStaticFileHandler(StaticFileHandler):
         self.search_path = search_path
         self.default_filename = default_filename
 
-        def get(self, path, include_body=True):
-            full_path = self.search_path.find_file(path, index_name=self.default_filename)
-            return super(PathStaticFileHandler, self).get(full_path, include_body)
+    def get(self, path=None, include_body=True):
+        full_path = self.search_path.find_file(path, index_name=self.default_filename)
+        if full_path is None:
+            raise HTTPError(404)
+        return super(PathStaticFileHandler, self).get(full_path, include_body)
 
 
 class SearchPath(object):
@@ -97,6 +100,10 @@ class SearchPath(object):
             full_path = os.path.join(path, rel_path)
             if os.path.exists(full_path):
                 return full_path
+        logging.info("Could not find file '%s' in path %r", rel_path, self.file_paths)
+
+    def __add__(self, other):
+        return SearchPath(*[os.path.join(path, other) for path in self.file_paths])
 
 
 class PathTemplateLoader(BaseLoader):
