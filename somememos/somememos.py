@@ -10,10 +10,13 @@ from tornado.web import RequestHandler, Application, StaticFileHandler, HTTPErro
 from tornado.template import Template, BaseLoader
 from tornado import ioloop
 
-define('host_port', default=8080, help='Web server port.')
-define('theme', default='default', help='Theme name.')
+from util import Struct
 
-global_template_data = dict()
+define('host_port', default=8080, help="Web server port.")
+define('theme', default='default', help="Theme name.")
+define('site_title', default='SomeMemos', help="Your site name.")
+
+site_data = None
 
 
 def start_server(root_dir):
@@ -29,6 +32,8 @@ def start_server(root_dir):
 
 
 def init_application(root_dir):
+    global site_data
+
     module_dir = os.path.dirname(__file__)
 
     template_search_path = SearchPath(os.path.join(root_dir, "themes", options.theme,
@@ -59,6 +64,8 @@ def init_application(root_dir):
         ],
         **settings)
 
+    site_data = Struct(title=options.site_title)
+
     return application
 
 
@@ -73,7 +80,10 @@ class PageRequestHandler(RequestHandler):
             raise HTTPError(404)
         with open(full_path, "rb") as content_file:
             content = content_file.read()
-        self.render('page.html', content=content, **global_template_data)
+
+        page_data = Struct(title=path)
+
+        self.render('page.html', content=content, site=site_data, page=page_data)
 
 
 class PathStaticFileHandler(StaticFileHandler):
