@@ -1,7 +1,9 @@
 # V1.0 Features
 
-- Render raw pages
-- Content type
+X Render raw pages
+X Content type
+- Static content within content space - use file extension to differentiate processing.
+- Plugins within MarkDown
 - 301 redirect path canonicalization
   - Remove file extensions .htm, .html
   - mixed-case paths -> lower case
