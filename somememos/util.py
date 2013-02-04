@@ -1,5 +1,4 @@
 import os
-import re
 import glob
 import logging
 
@@ -55,20 +54,26 @@ class SearchPath(object):
         return SearchPath(*[os.path.join(path, other) for path in self.file_paths])
 
 
-reg_camel = re.compile(r"[a-z][A-Z]")
+def parse_path(path):
+    """
+    Return (path, filename, extension).
 
-
-def normalize_path(path):
-    """ Ensure all lower case, remove file extension, convert camel case to hyphenated. """
-    def hyphenate(match):
-        pair = match.group(0)
-        pair = pair.lower()
-        return pair[0] + '-' + pair[1]
-
-    path = reg_camel.sub(hyphenate, path).lower()
-    if len(path) == 0 or path[-1] == '/':
-        return path
-
+    >>> parse_path('a/b')
+    ('a', 'b', '')
+    >>> parse_path('a/b.c')
+    ('a', 'b', 'c')
+    >>> parse_path('a.b/c')
+    ('a.b', 'c', '')
+    >>> parse_path('a/b/c.d.e')
+    ('a/b', 'c.d', 'e')
+    >>> parse_path('')
+    ('', '', '')
+    >>> parse_path('a/b/')
+    ('a/b', '', '')
+    """
     parts = path.rsplit('/', 1)
-    parts[-1] = parts[-1].rsplit('.', 1)[0]
-    return ''.join(parts)
+    parent_path = parts[0] if len(parts) == 2 else ''
+    filename_parts = parts[-1].rsplit('.', 1)
+    filename = filename_parts[0]
+    extension = filename_parts[1] if len(filename_parts) == 2 else ''
+    return (parent_path, filename, extension)
