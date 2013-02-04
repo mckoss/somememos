@@ -1,5 +1,9 @@
 # V1.0 Features
 
+- Add check command to look for filename case problems.
+- Add fix command to fix all the checked errors.
+- setup install static files
+
 X Render raw pages
 X Content type
 - Static content within content space - use file extension to differentiate processing.
