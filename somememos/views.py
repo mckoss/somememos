@@ -77,15 +77,19 @@ class PageRequestHandler(RequestHandler):
             pair = pair.lower()
             return pair[0] + '-' + pair[1]
 
+        # Input uses '/' - output is file system path
+        if os.path.sep != '/':
+            path.replace('/', os.path.sep)
+
         path = reg_camel.sub(hyphenate, path).lower()
-        if len(path) == 0 or path[-1] == '/':
+        if len(path) == 0 or path[-1] == os.path.sep:
             return path
 
         (path, filename, extension) = parse_path(path)
-        result = path + '/' + filename if len(path) > 0 else filename
+        result = os.path.join(path, filename) if len(path) > 0 else filename
         if extension != '' and (remove_extensions is None or extension not in remove_extensions):
             result += '.' + extension
-        if result.endswith('/' + INDEX_NAME) or result == INDEX_NAME:
+        if result.endswith(os.path.sep + INDEX_NAME) or result == INDEX_NAME:
             result = result[:-len(INDEX_NAME)]
         return result
 

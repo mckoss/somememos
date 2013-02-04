@@ -18,7 +18,7 @@ from tornado.template import Template, BaseLoader
 
 from util import Struct, SearchPath
 
-from views import PathStaticFileHandler, PageRequestHandler
+from views import PageRequestHandler
 
 define('host_port', default=8080, help="Web server port.")
 define('theme', default='default', help="Theme name.")
@@ -32,22 +32,12 @@ def init_application(root_dir):
 
     module_dir = os.path.dirname(__file__)
 
-    template_search_path = SearchPath(os.path.join(root_dir, "themes", options.theme,
-                                                   "templates"),
-                                      os.path.join(root_dir, "templates"),
-                                      os.path.join(module_dir, "themes", options.theme,
-                                                   "templates"),
-                                      os.path.join(module_dir, "templates"),
-                                      )
+    template_search_path = SearchPath(*(theme_paths(root_dir, 'templates') +
+                                        theme_paths(module_dir, 'templates')))
 
     content_search_path = SearchPath(os.path.join(root_dir),
-                                     os.path.join(module_dir, "content"))
-    content_search_path.match_any_extension = True
-
-    static_search_path = SearchPath(os.path.join(root_dir, "themes", options.theme,
-                                                 "static"),
-                                    os.path.join(root_dir, "static"),
-                                    os.path.join(module_dir, "static"))
+                                     *theme_paths(module_dir, 'content'))
+    content_search_path.wildcard_extension = True
 
     settings = dict(
         gzip=True,
@@ -57,14 +47,18 @@ def init_application(root_dir):
     site_data = Struct(title=options.site_title)
 
     application = Application([
-        (r"/((?:img|js|css)/.*)$", PathStaticFileHandler, {"search_path": static_search_path}),
-        (r"/(favicon\.ico)$", PathStaticFileHandler, {"search_path": static_search_path + 'img'}),
+        (r"/(favicon\.ico)$", PageRequestHandler, {"search_path": content_search_path.join('img')}),
         (r"/(.*)$", PageRequestHandler, {"search_path": content_search_path,
                                          "site_data": site_data}),
         ],
         **settings)
 
     return application
+
+
+def theme_paths(root_dir, dir_name):
+    return [os.path.join(root_dir, 'themes', options.theme, dir_name),
+            os.path.join(root_dir, dir_name)]
 
 
 class PathTemplateLoader(BaseLoader):

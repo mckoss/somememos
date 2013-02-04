@@ -16,6 +16,12 @@ class SomeMemosTest(AsyncHTTPTestCase):
         response = self.fetch('/')
         self.assertEqual(response.code, 200)
 
+    def test_static(self):
+        response = self.fetch('/js/jquery.js')
+        self.assertEqual(response.code, 200)
+        response = self.fetch('/css/bootstrap.css')
+        self.assertEqual(response.code, 200)
+
     def test_redir(self):
         tests = [('/index', '/'),
                  ('/index.html', '/'),

@@ -28,7 +28,7 @@ class Struct(dict):
 class SearchPath(object):
     def __init__(self, *file_paths):
         self.file_paths = [os.path.abspath(path) for path in file_paths]
-        self.match_any_extension = False
+        self.wildcard_extension = False
 
     def find_file(self, rel_path, index_name=None):
         if index_name is not None and rel_path == '' or rel_path[-1] == '/':
@@ -36,9 +36,10 @@ class SearchPath(object):
 
         for search_path in self.file_paths:
             full_path = os.path.join(search_path, rel_path)
+            (path, filename, extension) = parse_path(full_path)
 
-            if self.match_any_extension:
-                for file_path in glob.iglob(full_path + '*'):
+            if self.wildcard_extension and extension == '':
+                for file_path in glob.iglob(full_path + '.*'):
                     if os.path.isdir(file_path):
                         continue
                     return file_path
@@ -48,30 +49,31 @@ class SearchPath(object):
                 continue
 
             return full_path
+
         logging.info("Could not find file '%s' in path %r", rel_path, self.file_paths)
 
-    def __add__(self, other):
-        return SearchPath(*[os.path.join(path, other) for path in self.file_paths])
+    def join(self, *more):
+        return SearchPath(*[os.path.join(path, *more) for path in self.file_paths])
 
 
 def parse_path(path):
     """
     Return (path, filename, extension).
 
-    >>> parse_path('a/b')
+    >>> parse_path(os.path.join('a', 'b'))
     ('a', 'b', '')
-    >>> parse_path('a/b.c')
+    >>> parse_path(os.path.join('a', 'b.c'))
     ('a', 'b', 'c')
-    >>> parse_path('a.b/c')
+    >>> parse_path(os.path.join('a.b', 'c'))
     ('a.b', 'c', '')
-    >>> parse_path('a/b/c.d.e')
+    >>> parse_path(os.path.join('a', 'b', 'c.d.e'))
     ('a/b', 'c.d', 'e')
     >>> parse_path('')
     ('', '', '')
-    >>> parse_path('a/b/')
+    >>> parse_path(os.path.join('a', 'b', ''))
     ('a/b', '', '')
     """
-    parts = path.rsplit('/', 1)
+    parts = path.rsplit(os.path.sep, 1)
     parent_path = parts[0] if len(parts) == 2 else ''
     filename_parts = parts[-1].rsplit('.', 1)
     filename = filename_parts[0]
