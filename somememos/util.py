@@ -32,7 +32,9 @@ class SearchPath(object):
         self.wildcard_extension = False
 
     def find_file(self, rel_path, index_name=None):
-        if index_name is not None and rel_path == '' or rel_path[-1] == '/':
+        rel_path = rel_path.replace('/', os.path.sep)
+
+        if index_name is not None and (rel_path == '' or rel_path[-1] == '/'):
             rel_path += index_name
 
         for search_path in self.file_paths:
@@ -41,7 +43,7 @@ class SearchPath(object):
 
             if self.wildcard_extension and extension == '':
                 for file_path in glob.iglob(full_path + '.*'):
-                    # TODO: Should we force 301 redirect for directories withou terminal '/'?
+                    # TODO: Should we force 301 redirect for directories without terminal '/'?
                     if os.path.isdir(file_path):
                         return self.find_file(os.path.join(rel_path, index_name))
                     return file_path
@@ -58,7 +60,38 @@ class SearchPath(object):
         return SearchPath(*[os.path.join(path, *more) for path in self.file_paths])
 
 
-def parse_path(path):
+def normalize_path(path, hidden_extensions=None, index_name='index'):
+    """
+    Ensure all lower case, remove file extension, convert camel case to hyphenated.  If the
+    index name is explicitly included, remove it.
+
+    >>> normalize_path('ABC')
+    'abc'
+    >>> normalize_path('camelCase')
+    'camel-case'
+    >>> normalize_path('a/b/test.txt')
+    'a/b/test.txt'
+    >>> normalize_path('a/b/test.md', ['md'])
+    'a/b/test'
+    >>> normalize_path('a/index')
+    'a/'
+    >>> normalize_path('index')
+    ''
+    """
+    path = slugify_path(path)
+    if len(path) == 0:
+        return path
+
+    (path, file_name, extension) = parse_path(path, sep='/')
+    result = '/'.join([path, file_name]) if len(path) > 0 else file_name
+    if extension != '' and (hidden_extensions is None or extension not in hidden_extensions):
+        result += '.' + extension
+    if result.endswith('/' + index_name) or result == index_name:
+        result = result[:-len(index_name)]
+    return result
+
+
+def parse_path(path, sep=None):
     """
     Return (path, filename, extension).
 
@@ -77,7 +110,9 @@ def parse_path(path):
     >>> parse_path('.git')
     ('', '.git', '')
     """
-    parts = path.rsplit(os.path.sep, 1)
+    if sep is None:
+        sep = os.path.sep
+    parts = path.rsplit(sep, 1)
     parent_path = parts[0] if len(parts) == 2 else ''
     filename_parts = parts[-1].rsplit('.', 1)
     filename = filename_parts[0]

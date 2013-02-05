@@ -6,10 +6,7 @@ import mimetypes
 from markdown import markdown
 from tornado.web import RequestHandler, StaticFileHandler, HTTPError
 
-from util import Struct, parse_path, slugify_path
-
-
-INDEX_NAME = 'index'
+from util import Struct, parse_path, slugify_path, normalize_path
 
 
 FORMATTERS = {
@@ -25,11 +22,11 @@ class PageRequestHandler(RequestHandler):
         self.site_data = site_data
 
     def get(self, path):
-        normal_path = self.normalize_path(path, remove_extensions=FORMATTERS.keys())
+        normal_path = normalize_path(path, hidden_extensions=FORMATTERS.keys())
         if normal_path != path:
             self.redirect('/' + normal_path, permanent=True)
             return
-        full_path = self.search_path.find_file(path, INDEX_NAME)
+        full_path = self.search_path.find_file(path, index_name='index')
         if full_path is None:
             raise HTTPError(404)
         (path, filename, extension) = parse_path(full_path)
@@ -50,44 +47,9 @@ class PageRequestHandler(RequestHandler):
 
         self.render('page.html', content=content, site=self.site_data, page=page_data)
 
-    @staticmethod
-    def normalize_path(path, remove_extensions=None):
-        """
-        Ensure all lower case, remove file extension, convert camel case to hyphenated.
-
-        >>> P = PageRequestHandler
-        >>> P.normalize_path('ABC')
-        'abc'
-        >>> P.normalize_path('camelCase')
-        'camel-case'
-        >>> P.normalize_path('a/b/test.txt')
-        'a/b/test.txt'
-        >>> P.normalize_path('a/b/test.md', ['md'])
-        'a/b/test'
-        >>> P.normalize_path('a/index')
-        'a/'
-        >>> P.normalize_path('index')
-        ''
-        """
-        # Input uses '/' - output is file system path
-        if os.path.sep != '/':
-            path.replace('/', os.path.sep)
-
-        path = slugify_path(path)
-        if len(path) == 0 or path[-1] == os.path.sep:
-            return path
-
-        (path, filename, extension) = parse_path(path)
-        result = os.path.join(path, filename) if len(path) > 0 else filename
-        if extension != '' and (remove_extensions is None or extension not in remove_extensions):
-            result += '.' + extension
-        if result.endswith(os.path.sep + INDEX_NAME) or result == INDEX_NAME:
-            result = result[:-len(INDEX_NAME)]
-        return result
-
 
 class PathStaticFileHandler(StaticFileHandler):
-    def initialize(self, search_path, default_filename=None):
+    def initialize(self, search_path, default_filename='index.html'):
         self.root = '/'
         self.search_path = search_path
         self.default_filename = default_filename
