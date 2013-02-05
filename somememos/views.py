@@ -6,7 +6,7 @@ import mimetypes
 from markdown import markdown
 from tornado.web import RequestHandler, StaticFileHandler, HTTPError
 
-from util import Struct, parse_path
+from util import Struct, parse_path, slugify_path
 
 
 INDEX_NAME = 'index'
@@ -16,9 +16,6 @@ FORMATTERS = {
     "md": Struct(format=markdown),
     "html": Struct(format=lambda x: x),
     }
-
-
-reg_camel = re.compile(r"[a-z][A-Z]")
 
 
 class PageRequestHandler(RequestHandler):
@@ -72,16 +69,11 @@ class PageRequestHandler(RequestHandler):
         >>> P.normalize_path('index')
         ''
         """
-        def hyphenate(match):
-            pair = match.group(0)
-            pair = pair.lower()
-            return pair[0] + '-' + pair[1]
-
         # Input uses '/' - output is file system path
         if os.path.sep != '/':
             path.replace('/', os.path.sep)
 
-        path = reg_camel.sub(hyphenate, path).lower()
+        path = slugify_path(path)
         if len(path) == 0 or path[-1] == os.path.sep:
             return path
 

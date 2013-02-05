@@ -15,7 +15,8 @@ import logging
 from tornado.options import define, options, parse_config_file, parse_command_line
 from tornado import ioloop
 
-from server import init_application
+from server import init_application, file_walk
+from util import parse_path
 
 
 def main():
@@ -47,10 +48,27 @@ def main():
 
 
 def run_server_command(*args):
-    """ Run web server (optional directory argument). """
+    """
+    Run web server for a given directory root location.
+
+    $ run-server [directory]
+    """
+    start_server(get_root_dir(*args))
+
+
+def check_files_command(*args):
+    """
+    Check all files and directory names for compliance with
+    addressable naming conventions (all lower case).
+    """
+    for full_name in file_walk(get_root_dir(*args)):
+        print full_name
+
+
+def get_root_dir(*args):
     root_dir = args[0] if len(args) > 0 else os.getcwd()
     root_dir = os.path.abspath(root_dir)
-    start_server(root_dir)
+    return root_dir
 
 
 def start_server(root_dir):

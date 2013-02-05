@@ -1,4 +1,5 @@
 import os
+import re
 import glob
 import logging
 
@@ -40,8 +41,9 @@ class SearchPath(object):
 
             if self.wildcard_extension and extension == '':
                 for file_path in glob.iglob(full_path + '.*'):
+                    # TODO: Should we force 301 redirect for directories withou terminal '/'?
                     if os.path.isdir(file_path):
-                        continue
+                        return self.find_file(os.path.join(rel_path, index_name))
                     return file_path
                 return None
 
@@ -72,10 +74,66 @@ def parse_path(path):
     ('', '', '')
     >>> parse_path(os.path.join('a', 'b', ''))
     ('a/b', '', '')
+    >>> parse_path('.git')
+    ('', '.git', '')
     """
     parts = path.rsplit(os.path.sep, 1)
     parent_path = parts[0] if len(parts) == 2 else ''
     filename_parts = parts[-1].rsplit('.', 1)
     filename = filename_parts[0]
     extension = filename_parts[1] if len(filename_parts) == 2 else ''
+    if filename == '' and extension != '':
+        filename = '.' + extension
+        extension = ''
     return (parent_path, filename, extension)
+
+
+def slugify_path(s):
+    """
+    Slugify each of the components of a path string.
+
+    >>> slugify_path('.git/camelCase/a##b')
+    '.git/camel-case/a-b'
+    >>> slugify_path('simple')
+    'simple'
+    >>> slugify_path('simple test/another test')
+    'simple-test/another-test'
+    """
+    parts = s.split(os.path.sep)
+    parts = map(slugify, parts)
+    return os.path.sep.join(parts)
+
+
+reg_nonchar = re.compile(r"[^\w\.]")
+reg_dashes = re.compile(r"[\-]+")
+reg_dash_ends = re.compile(r"(^-+)|(-+$)")
+reg_camel = re.compile(r"[a-z][A-Z]")
+
+
+def slugify(s):
+    """
+    Convert runs of all non-alphanumeric characters to single dashes
+
+    >>> slugify('hello')
+    'hello'
+    >>> slugify('hello there')
+    'hello-there'
+    >>> slugify('  1 a --c--- foo ')
+    '1-a-c-foo'
+    >>> slugify("A b's")
+    'a-b-s'
+    >>> slugify('camelCase')
+    'camel-case'
+    >>> slugify('file.txt')
+    'file.txt'
+    """
+    def hyphenate(match):
+        pair = match.group(0)
+        pair = pair.lower()
+        return pair[0] + '-' + pair[1]
+
+    s = reg_camel.sub(hyphenate, s).lower()
+    s = reg_nonchar.sub('-', s)
+    s = reg_dashes.sub('-', s)
+    s = reg_dash_ends.sub('', s)
+    return s

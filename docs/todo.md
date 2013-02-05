@@ -3,6 +3,8 @@
 - Add check command to look for filename case problems.
 - Add fix command to fix all the checked errors.
 - setup install static files
+- add code coverage
+- log files
 
 X Render raw pages
 X Content type
