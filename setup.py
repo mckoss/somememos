@@ -3,7 +3,7 @@
 from setuptools import setup, find_packages
 
 setup(name='somememos',
-      version='0.1a2',
+      version='0.1a3',
       packages=find_packages(),
       package_data={
         'somememos': ['content/js/*.js', 'content/css/*.css', 'img/*.png', 'img/*.ico',
