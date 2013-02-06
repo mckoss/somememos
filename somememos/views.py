@@ -2,6 +2,7 @@ import os
 import re
 from datetime import datetime
 import mimetypes
+import logging
 
 from tornado.web import RequestHandler, StaticFileHandler, HTTPError
 
@@ -28,10 +29,11 @@ class PageRequestHandler(RequestHandler):
         with open(full_path, "rb") as content_file:
             content = content_file.read()
 
-        if extension not in self.formatters.keys():
+        if self.formatters is None or extension not in self.formatters.keys():
             mime_type = mimetypes.guess_type(full_path)[0]
-            if mime_type:
-                self.set_header("Content-Type", mime_type)
+            if mime_type is None:
+                mime_type = 'application/octet-stream'
+            self.set_header("Content-Type", mime_type)
             self.finish(content)
             return
 

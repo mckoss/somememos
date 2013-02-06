@@ -102,7 +102,10 @@ class SearchPath(object):
         return path
 
     def join(self, *more):
-        return SearchPath(*[os.path.join(path, *more) for path in self.search_roots])
+        return SearchPath([os.path.join(path, *more) for path in self.search_roots],
+                          index_name=self.index_name,
+                          hidden_extensions=self.hidden_extensions,
+                          protected_files=self.protected_files)
 
 
 class NormalizedSearchPath(SearchPath):

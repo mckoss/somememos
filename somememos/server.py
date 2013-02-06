@@ -39,6 +39,7 @@ protected_files = re.compile(r"(\..*|.*~|.*\.(py|pyc|DS_Store))$")
 FORMATTERS = {
     "md": Struct(format=markdown),
     "html": Struct(format=lambda x: x),
+    "htm": Struct(format=lambda x: x),
     }
 
 
@@ -73,7 +74,7 @@ def init_application(root_dir):
 
 
 def get_content_search_path(root_dir, module_dir):
-    return NormalizedSearchPath([os.path.join(root_dir)] + theme_paths(module_dir, 'content'),
+    return NormalizedSearchPath([root_dir] + theme_paths(module_dir, 'content'),
                                 index_name='index',
                                 hidden_extensions=FORMATTERS.keys(),
                                 protected_files=protected_files)
