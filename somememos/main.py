@@ -15,7 +15,7 @@ import logging
 from tornado.options import define, options, parse_config_file, parse_command_line
 from tornado import ioloop
 
-from server import init_application, file_walk
+from server import init_application, get_content_search_path
 from util import parse_path
 
 
@@ -61,7 +61,9 @@ def check_files_command(*args):
     Check all files and directory names for compliance with
     addressable naming conventions (all lower case).
     """
-    for full_name in file_walk(get_root_dir(*args)):
+    module_dir = os.path.dirname(__file__)
+    content_search_path = get_content_search_path(get_root_dir(*args), module_dir)
+    for full_name in content_search_path.all_files():
         print full_name
 
 

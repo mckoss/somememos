@@ -5,7 +5,7 @@ import mimetypes
 
 from tornado.web import RequestHandler, StaticFileHandler, HTTPError
 
-from util import Struct, parse_path, slugify_path, normalize_path
+from util import Struct, parse_path
 
 
 class PageRequestHandler(RequestHandler):
@@ -16,7 +16,7 @@ class PageRequestHandler(RequestHandler):
         self.formatters = formatters
 
     def get(self, path):
-        normal_path = normalize_path(path, hidden_extensions=self.formatters.keys(), sep='/')
+        normal_path = self.search_path.normalize_path(path)
         if normal_path != path:
             self.redirect('/' + normal_path, permanent=True)
             return
