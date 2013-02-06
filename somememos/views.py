@@ -7,6 +7,7 @@ import logging
 from tornado.web import RequestHandler, StaticFileHandler, HTTPError
 
 from util import Struct, parse_path
+from formatters import StaticFormatter
 
 
 class PageRequestHandler(RequestHandler):
@@ -14,7 +15,8 @@ class PageRequestHandler(RequestHandler):
         super(PageRequestHandler, self).initialize(**kwargs)
         self.search_path = search_path
         self.site_data = site_data
-        self.formatters = formatters
+        self.formatters = formatters or []
+        self.static_formatter = StaticFormatter()
 
     def get(self, path):
         normal_path = self.search_path.normalize_path(path)
@@ -24,24 +26,14 @@ class PageRequestHandler(RequestHandler):
         full_path = self.search_path.find_file(path)
         if full_path is None:
             raise HTTPError(404)
-        (path, filename, extension) = parse_path(full_path)
+        (path, file_name, extension) = parse_path(full_path)
 
         with open(full_path, "rb") as content_file:
             content = content_file.read()
 
-        if self.formatters is None or extension not in self.formatters.keys():
-            mime_type = mimetypes.guess_type(full_path)[0]
-            if mime_type is None:
-                mime_type = 'application/octet-stream'
-            self.set_header("Content-Type", mime_type)
-            self.finish(content)
-            return
-
-        content = self.formatters[extension].format(content)
-
+        formatter = self.formatters.get(extension, self.static_formatter)
         page_data = Struct(title=path)
-
-        self.render('page.html', content=content, site=self.site_data, page=page_data)
+        formatter.render(self, content, extension, site=self.site_data, page=page_data)
 
 
 class PathStaticFileHandler(StaticFileHandler):
