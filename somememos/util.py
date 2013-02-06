@@ -45,7 +45,7 @@ class SearchPath(object):
         if self.protected_files and self.protected_files.match(rel_path):
             return None
 
-        rel_path = rel_path.replace('/', os.path.sep)
+        rel_path = self.normalize_path(rel_path.replace('/', os.path.sep))
 
         if self.index_name is not None and (rel_path == '' or rel_path[-1] == '/'):
             rel_path += self.index_name
@@ -113,7 +113,13 @@ class NormalizedSearchPath(SearchPath):
     index name is explicitly included, remove it.
     """
     def prescan_files(self):
-        pass
+        self.path_map = dict(self.all_files())
+
+    def find_file(self, rel_path):
+        if not hasattr(self, 'path_map'):
+            self.prescan_files()
+
+        return self.path_map.get(self.normalize_path(rel_path))
 
     def normalize_path(self, path, sep=None):
         """
