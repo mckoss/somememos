@@ -8,6 +8,7 @@
 """
 import os
 import sys
+import re
 import argparse
 import somememos
 import logging
@@ -15,6 +16,7 @@ import logging
 from tornado.options import define, options
 from tornado.web import Application, HTTPError
 from tornado.template import Template, BaseLoader
+from markdown import markdown
 
 from util import Struct, SearchPath, parse_path
 
@@ -26,7 +28,12 @@ define('site_title', default='SomeMemos', help="Your site name.")
 
 site_data = None
 
-IGNORED_EXTENSIONS = ['py', 'pyc', 'DS_Store']
+protected_files = re.compile(r".*\.(py|pyc|DS_Store)")
+
+FORMATTERS = {
+    "md": Struct(format=markdown),
+    "html": Struct(format=lambda x: x),
+    }
 
 
 def init_application(root_dir):
@@ -34,12 +41,13 @@ def init_application(root_dir):
 
     module_dir = os.path.dirname(__file__)
 
-    template_search_path = SearchPath(*(theme_paths(root_dir, 'templates') +
-                                        theme_paths(module_dir, 'templates')))
+    template_search_path = SearchPath(theme_paths(root_dir, 'templates') +
+                                      theme_paths(module_dir, 'templates'))
 
-    content_search_path = SearchPath(os.path.join(root_dir),
-                                     *theme_paths(module_dir, 'content'))
-    content_search_path.wildcard_extension = True
+    content_search_path = SearchPath([os.path.join(root_dir)] + theme_paths(module_dir, 'content'),
+                                     index_name='index',
+                                     hidden_extensions=FORMATTERS.keys(),
+                                     protected_files=protected_files)
 
     settings = dict(
         gzip=True,
@@ -51,7 +59,8 @@ def init_application(root_dir):
     application = Application([
         (r"/(favicon\.ico)$", PageRequestHandler, {"search_path": content_search_path.join('img')}),
         (r"/(.*)$", PageRequestHandler, {"search_path": content_search_path,
-                                         "site_data": site_data}),
+                                         "site_data": site_data,
+                                         "formatters": FORMATTERS}),
         ],
         **settings)
 
@@ -67,15 +76,15 @@ def file_walk(root_dir):
     """ Iterate over all "publishable" files in site directory. """
     for (dirpath, dir_names, file_names) in os.walk(root_dir):
         for d in dir_names:
-            if not is_valid_path(d):
+            if not is_servable_file(d):
                 dir_names.remove(d)
         for file_name in file_names:
-            if not is_valid_path(file_name):
+            if not is_servable_file(os.path.join(dirpath, file_name)):
                 continue
             yield os.path.join(dirpath, file_name)
 
 
-def is_valid_path(full_path):
+def is_servable_file(full_path):
     (parent_path, file_name, extension) = parse_path(full_path)
     if extension in IGNORED_EXTENSIONS:
         return False

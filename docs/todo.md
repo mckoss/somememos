@@ -1,6 +1,7 @@
 # V1.0 Features
 
 - Add check command to look for filename case problems.
+- Build file mapping for normalized file names.
 - Add fix command to fix all the checked errors.
 - setup install static files
 - add code coverage

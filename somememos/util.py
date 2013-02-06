@@ -27,32 +27,38 @@ class Struct(dict):
 
 
 class SearchPath(object):
-    def __init__(self, *file_paths):
+    def __init__(self, file_paths, index_name=None, hidden_extensions=None, protected_files=None):
         self.file_paths = [os.path.abspath(path) for path in file_paths]
-        self.wildcard_extension = False
+        self.index_name = index_name
+        self.hidden_extensions = hidden_extensions or []
+        self.protected_files = protected_files
 
-    def find_file(self, rel_path, index_name=None):
+    def find_file(self, rel_path):
         rel_path = rel_path.replace('/', os.path.sep)
 
-        if index_name is not None and (rel_path == '' or rel_path[-1] == '/'):
-            rel_path += index_name
+        if self.index_name is not None and (rel_path == '' or rel_path[-1] == '/'):
+            rel_path += self.index_name
 
         for search_path in self.file_paths:
             full_path = os.path.join(search_path, rel_path)
-            (path, filename, extension) = parse_path(full_path)
 
-            if self.wildcard_extension and extension == '':
-                for file_path in glob.iglob(full_path + '.*'):
-                    # TODO: Should we force 301 redirect for directories without terminal '/'?
-                    if os.path.isdir(file_path):
-                        return self.find_file(os.path.join(rel_path, index_name))
-                    return file_path
+            if os.path.exists(full_path):
+                if os.path.isdir(full_path):
+                    full_path = os.path.join(full_path, self.index_name)
+                    if not os.path.exists(index_path) or os.path.isdir(full_path):
+                        continue
+                return full_path
+
+            (path, file_name, path_extension) = parse_path(full_path)
+            if self.protected_files and self.protected_files.match(file_name):
                 return None
-
-            if not os.path.exists(full_path) or os.path.isdir(full_path):
+            if path_extension != '':
                 continue
 
-            return full_path
+            for extension in self.hidden_extensions:
+                extended_path = full_path + '.' + extension
+                if os.path.isfile(extended_path):
+                    return extended_path
 
         logging.info("Could not find file '%s' in path %r", rel_path, self.file_paths)
 
@@ -60,7 +66,7 @@ class SearchPath(object):
         return SearchPath(*[os.path.join(path, *more) for path in self.file_paths])
 
 
-def normalize_path(path, hidden_extensions=None, index_name='index'):
+def normalize_path(path, hidden_extensions=None, index_name='index', sep=None):
     """
     Ensure all lower case, remove file extension, convert camel case to hyphenated.  If the
     index name is explicitly included, remove it.
@@ -78,7 +84,9 @@ def normalize_path(path, hidden_extensions=None, index_name='index'):
     >>> normalize_path('index')
     ''
     """
-    path = slugify_path(path)
+    if sep is None:
+        sp = os.path.sep
+    path = slugify_path(path, sep=sep)
     if len(path) == 0:
         return path
 
@@ -95,19 +103,19 @@ def parse_path(path, sep=None):
     """
     Return (path, filename, extension).
 
-    >>> parse_path(os.path.join('a', 'b'))
+    >>> parse_path('a/b', '/')
     ('a', 'b', '')
-    >>> parse_path(os.path.join('a', 'b.c'))
+    >>> parse_path('a/b.c', '/')
     ('a', 'b', 'c')
-    >>> parse_path(os.path.join('a.b', 'c'))
+    >>> parse_path('a.b/c', '/')
     ('a.b', 'c', '')
-    >>> parse_path(os.path.join('a', 'b', 'c.d.e'))
+    >>> parse_path('a/b/c.d.e', '/')
     ('a/b', 'c.d', 'e')
     >>> parse_path('')
     ('', '', '')
-    >>> parse_path(os.path.join('a', 'b', ''))
+    >>> parse_path('a/b/', '/')
     ('a/b', '', '')
-    >>> parse_path('.git')
+    >>> parse_path('.git', '/')
     ('', '.git', '')
     """
     if sep is None:
@@ -123,18 +131,20 @@ def parse_path(path, sep=None):
     return (parent_path, filename, extension)
 
 
-def slugify_path(s):
+def slugify_path(s, sep=None):
     """
     Slugify each of the components of a path string.
 
-    >>> slugify_path('.git/camelCase/a##b')
+    >>> slugify_path('.git/camelCase/a##b', '/')
     '.git/camel-case/a-b'
     >>> slugify_path('simple')
     'simple'
-    >>> slugify_path('simple test/another test')
+    >>> slugify_path('simple test/another test', '/')
     'simple-test/another-test'
     """
-    parts = s.split(os.path.sep)
+    if sep is None:
+        sep = os.path.sep
+    parts = s.split(sep)
     parts = map(slugify, parts)
     return os.path.sep.join(parts)
 
