@@ -27,6 +27,11 @@ class Struct(dict):
 
 
 class SearchPath(object):
+    """
+    Search file directories looking for matching path.  Allows for implied file extensions
+    and regular expression for prohibited files.  Directory matches return the corresponding
+    index file if given.
+    """
     def __init__(self, file_paths, index_name=None, hidden_extensions=None, protected_files=None):
         self.file_paths = [os.path.abspath(path) for path in file_paths]
         self.index_name = index_name
@@ -34,6 +39,9 @@ class SearchPath(object):
         self.protected_files = protected_files
 
     def find_file(self, rel_path):
+        if self.protected_files and self.protected_files.match(rel_path):
+            return None
+
         rel_path = rel_path.replace('/', os.path.sep)
 
         if self.index_name is not None and (rel_path == '' or rel_path[-1] == '/'):
@@ -42,25 +50,26 @@ class SearchPath(object):
         for search_path in self.file_paths:
             full_path = os.path.join(search_path, rel_path)
 
-            if os.path.exists(full_path):
-                if os.path.isdir(full_path):
-                    full_path = os.path.join(full_path, self.index_name)
-                    if not os.path.exists(index_path) or os.path.isdir(full_path):
-                        continue
-                return full_path
+            extended_path = self.extended_file_exists(full_path)
+            if extended_path is not None:
+                return extended_path
 
-            (path, file_name, path_extension) = parse_path(full_path)
-            if self.protected_files and self.protected_files.match(file_name):
-                return None
-            if path_extension != '':
-                continue
-
-            for extension in self.hidden_extensions:
-                extended_path = full_path + '.' + extension
-                if os.path.isfile(extended_path):
-                    return extended_path
+            if os.path.isdir(full_path):
+                if self.index_name is None:
+                    return full_path
+                full_path = self.extended_file_exists(os.path.join(full_path, self.index_name))
+                if full_path is not None:
+                    return full_path
 
         logging.info("Could not find file '%s' in path %r", rel_path, self.file_paths)
+
+    def extended_file_exists(self, path):
+        if os.path.isfile(path):
+            return path
+        for extension in self.hidden_extensions:
+            extended_path = path + '.' + extension
+            if os.path.isfile(extended_path):
+                return extended_path
 
     def join(self, *more):
         return SearchPath(*[os.path.join(path, *more) for path in self.file_paths])
