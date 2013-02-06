@@ -75,7 +75,7 @@ def init_application(root_dir):
 
 def get_content_search_path(root_dir, module_dir):
     return NormalizedSearchPath([root_dir] + theme_paths(module_dir, 'content'),
-                                index_name='index',
+                                index_names=('index', 'default'),
                                 hidden_extensions=FORMATTERS.keys(),
                                 protected_files=protected_files)
 

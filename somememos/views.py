@@ -34,16 +34,3 @@ class PageRequestHandler(RequestHandler):
         formatter = self.formatters.get(extension, self.static_formatter)
         page_data = Struct(title=path)
         formatter.render(self, content, extension, site=self.site_data, page=page_data)
-
-
-class PathStaticFileHandler(StaticFileHandler):
-    def initialize(self, search_path, default_filename='index.html'):
-        self.root = '/'
-        self.search_path = search_path
-        self.default_filename = default_filename
-
-    def get(self, path=None, include_body=True):
-        full_path = self.search_path.find_file(path, index_name=self.default_filename)
-        if full_path is None:
-            raise HTTPError(404)
-        super(PathStaticFileHandler, self).get(full_path, include_body)

@@ -32,9 +32,10 @@ class SearchPath(object):
     and regular expression for prohibited files.  Directory matches return the corresponding
     index file if given.
     """
-    def __init__(self, search_roots, index_name=None, hidden_extensions=None, protected_files=None):
+    def __init__(self, search_roots, index_names=None, hidden_extensions=None,
+                 protected_files=None):
         self.search_roots = [os.path.abspath(path) for path in search_roots]
-        self.index_name = index_name
+        self.index_names = index_names
         self.hidden_extensions = hidden_extensions or []
         self.protected_files = protected_files
 
@@ -45,10 +46,14 @@ class SearchPath(object):
         if self.protected_files and self.protected_files.match(rel_path):
             return None
 
-        rel_path = self.normalize_path(rel_path.replace('/', os.path.sep))
+        if self.index_names is not None and (rel_path == '' or rel_path[-1] == '/'):
+            for index_name in self.index_names:
+                full_path = self.find_file(rel_path + '/' + index_name)
+                if full_path is not None:
+                    return full_path
+            return None
 
-        if self.index_name is not None and (rel_path == '' or rel_path[-1] == '/'):
-            rel_path += self.index_name
+        rel_path = self.normalize_path(rel_path.replace('/', os.path.sep))
 
         for search_path in self.search_roots:
             full_path = os.path.join(search_path, rel_path)
@@ -58,11 +63,12 @@ class SearchPath(object):
                 return extended_path
 
             if os.path.isdir(full_path):
-                if self.index_name is None:
+                if self.index_names is None:
                     return full_path
-                full_path = self.extended_file_exists(os.path.join(full_path, self.index_name))
-                if full_path is not None:
-                    return full_path
+                for index_name in self.index_names:
+                    full_path = self.extended_file_exists(os.path.join(full_path, index_name))
+                    if full_path is not None:
+                        return full_path
 
         logging.info("Could not find file '%s' in path %r", rel_path, self.search_roots)
 
@@ -103,7 +109,7 @@ class SearchPath(object):
 
     def join(self, *more):
         return SearchPath([os.path.join(path, *more) for path in self.search_roots],
-                          index_name=self.index_name,
+                          index_names=self.index_names,
                           hidden_extensions=self.hidden_extensions,
                           protected_files=self.protected_files)
 
@@ -129,7 +135,7 @@ class NormalizedSearchPath(SearchPath):
         Ensure all lower case, remove file extension, convert camel case to hyphenated.  If the
         index name is explicitly included, remove it.
 
-        >>> S = NormalizedSearchPath(['/root'], hidden_extensions=['md'], index_name='index')
+        >>> S = NormalizedSearchPath(['/root'], hidden_extensions=['md'], index_names=('index',))
         >>> S.normalize_path('ABC')
         'abc'
         >>> S.normalize_path('camelCase')
@@ -153,10 +159,12 @@ class NormalizedSearchPath(SearchPath):
         result = '/'.join([path, file_name]) if len(path) > 0 else file_name
         if extension != '' and (extension not in self.hidden_extensions):
             result += '.' + extension
-        if self.index_name is None:
+        if self.index_names is None:
             return result
-        if result.endswith('/' + self.index_name) or result == self.index_name:
-            result = result[:-len(self.index_name)]
+        for index_name in self.index_names:
+            if result.endswith('/' + index_name) or result == index_name:
+                result = result[:-len(index_name)]
+                break
         return result
 
 
