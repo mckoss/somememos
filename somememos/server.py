@@ -16,11 +16,11 @@ import logging
 from tornado.options import define, options
 from tornado.web import Application, HTTPError
 from tornado.template import Template, BaseLoader
-from markdown import markdown
 
 from util import Struct, SearchPath, NormalizedSearchPath, parse_path
 
 from views import PageRequestHandler
+import formatters
 
 define('host_port', default=8080, help="Web server port.")
 define('theme', default='default', help="Theme name.")
@@ -37,9 +37,9 @@ site_data = None
 protected_files = re.compile(r"(\..*|.*~|.*\.(py|pyc|DS_Store))$")
 
 FORMATTERS = {
-    "md": Struct(format=markdown),
-    "html": Struct(format=lambda x: x),
-    "htm": Struct(format=lambda x: x),
+    "md": formatters.Markdown(),
+    "html": formatters.HTML(),
+    "htm": formatters.HTML(),
     }
 
 
