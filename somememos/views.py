@@ -15,7 +15,7 @@ class PageRequestHandler(RequestHandler):
         super(PageRequestHandler, self).initialize(**kwargs)
         self.search_path = search_path
         self.site_data = site_data
-        self.formatters = formatters or []
+        self.formatters = formatters or {}
         self.static_formatter = StaticFormatter()
 
     def get(self, path):
