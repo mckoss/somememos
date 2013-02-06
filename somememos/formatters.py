@@ -1,4 +1,9 @@
+"""
+    formatters.py - File rendering classes.
+"""
+import re
 import mimetypes
+
 from markdown import markdown
 
 
@@ -8,14 +13,21 @@ class Formatter(object):
         return content
 
 
+reg_html = re.compile(r"\s*<html", re.IGNORECASE)
+
+
 class HTML(Formatter):
-    pass
+    def render(self, handler, content, extension, **kwargs):
+        if reg_html.match(content):
+            handler.write(content)
+            return
+        super(HTML, self).render(handler, content, extension, **kwargs)
 
 
 class Markdown(Formatter):
     def render(self, handler, content, extension, **kwargs):
         content = markdown(content)
-        handler.render('page.html', content=content, **kwargs)
+        super(Markdown, self).render(handler, content, extension, **kwargs)
 
 
 class StaticFormatter(Formatter):

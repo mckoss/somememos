@@ -15,6 +15,12 @@ class SomeMemosTest(AsyncHTTPTestCase):
     def test_index(self):
         response = self.fetch('/')
         self.assertEqual(response.code, 200)
+        self.assertIn("<html>", response.body)
+
+    def test_raw(self):
+        response = self.fetch('/raw')
+        self.assertEqual(response.code, 200)
+        self.assertTrue(response.body.startswith("<HTML"), response.body)
 
     def test_static(self):
         response = self.fetch('/js/jquery.js')
@@ -49,6 +55,7 @@ class SomeMemosTest(AsyncHTTPTestCase):
 
         response = self.fetch('/page')
         self.assertEqual(response.code, 200)
+        self.assertIn("<html>", response.body)
 
 
 if __name__ == '__main__':
