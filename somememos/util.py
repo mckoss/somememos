@@ -100,6 +100,7 @@ class SearchPath(object):
                         continue
                     full_path = os.path.join(dirpath, file_name)
                     normal_path = self.normalize_path(full_path[len(root_dir) + 1:])
+                    normal_path.replace(os.path.sep, '/')
                     if normal_path not in duplicates:
                         duplicates.add(normal_path)
                         yield (normal_path, full_path)
@@ -122,13 +123,18 @@ class NormalizedSearchPath(SearchPath):
     index name is explicitly included, remove it.
     """
     def prescan_files(self):
-        self.path_map = dict(self.all_files())
+        self.path_map = {}
+        for (path, full_path) in self.all_files():
+            self.path_map[path] = full_path
+            if path.endswith('/'):
+                self.path_map[path[:-1]] = os.path.dirname(full_path)
 
     def find_file(self, rel_path):
         if not hasattr(self, 'path_map'):
             self.prescan_files()
 
-        return self.path_map.get(self.normalize_path(rel_path))
+        normal_path = self.normalize_path(rel_path, sep='/')
+        return self.path_map.get(normal_path)
 
     def normalize_path(self, path, sep=None):
         """
@@ -150,19 +156,19 @@ class NormalizedSearchPath(SearchPath):
         ''
         """
         if sep is None:
-            sp = os.path.sep
+            sep = os.path.sep
         path = slugify_path(path, sep=sep)
         if len(path) == 0:
             return path
 
-        (path, file_name, extension) = parse_path(path, sep='/')
-        result = '/'.join([path, file_name]) if len(path) > 0 else file_name
+        (path, file_name, extension) = parse_path(path, sep=sep)
+        result = sep.join([path, file_name]) if len(path) > 0 else file_name
         if extension != '' and (extension not in self.hidden_extensions):
             result += '.' + extension
         if self.index_names is None:
             return result
         for index_name in self.index_names:
-            if result.endswith('/' + index_name) or result == index_name:
+            if result.endswith(sep + index_name) or result == index_name:
                 result = result[:-len(index_name)]
                 break
         return result
@@ -218,7 +224,7 @@ def slugify_path(s, sep=None):
     return os.path.sep.join(parts)
 
 
-reg_nonchar = re.compile(r"[^\w\.]")
+reg_nonchar = re.compile(r"[^a-zA-Z0-9\.]")
 reg_dashes = re.compile(r"[\-]+")
 reg_dash_ends = re.compile(r"(^-+)|(-+$)")
 reg_camel = re.compile(r"[a-z][A-Z]")
@@ -240,6 +246,8 @@ def slugify(s):
     'camel-case'
     >>> slugify('file.txt')
     'file.txt'
+    >>> slugify('hello_there')
+    'hello-there'
     """
     def hyphenate(match):
         pair = match.group(0)

@@ -19,13 +19,16 @@ class PageRequestHandler(RequestHandler):
         self.static_formatter = StaticFormatter()
 
     def get(self, path):
-        normal_path = self.search_path.normalize_path(path)
+        normal_path = self.search_path.normalize_path(path, sep='/')
         if normal_path != path:
             self.redirect('/' + normal_path, permanent=True)
             return
         full_path = self.search_path.find_file(path)
         if full_path is None:
             raise HTTPError(404)
+        if os.path.isdir(full_path):
+            self.redirect('/' + normal_path + '/', permanent=True)
+            return
         (path, file_name, extension) = parse_path(full_path)
 
         with open(full_path, "rb") as content_file:

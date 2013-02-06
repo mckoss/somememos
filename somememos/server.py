@@ -25,6 +25,7 @@ import formatters
 define('host_port', default=8080, help="Web server port.")
 define('theme', default='default', help="Theme name.")
 define('site_title', default='SomeMemos', help="Your site name.")
+define('debug', default=True, help="Debug server mode.")
 
 site_data = None
 
@@ -58,6 +59,7 @@ def init_application(root_dir):
     settings = dict(
         gzip=True,
         template_loader=PathTemplateLoader(template_search_path),
+        debug=options.debug,
         )
 
     site_data = Struct(title=options.site_title)
