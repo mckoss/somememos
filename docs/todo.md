@@ -1,21 +1,23 @@
 # V1.0 Features
 
 - Add check command to look for filename case problems.
-- Build file mapping for normalized file names.
+X Build file mapping for normalized file names.
 - Add fix command to fix all the checked errors.
-- setup install static files
+- renmae files (git compatible)
+- Check for non-unicode characters in files
+X setup install static files
 - add code coverage
 - log files
 
 X Render raw pages
 X Content type
-- Static content within content space - use file extension to differentiate processing.
+X Static content within content space - use file extension to differentiate processing.
 - Plugins within MarkDown
-- 301 redirect path canonicalization
+X 301 redirect path canonicalization
   - Remove file extensions .htm, .html
   - mixed-case paths -> lower case
   - Turn camel-case paths to hyphen puntuated paths
-- Render Markdown.
+X Render Markdown.
 - Site templates.
 - Multi-part files -> or add extensions within MarkDown file.
 - Front matter (cf Jekyll standards).
@@ -28,13 +30,18 @@ X Content type
 - Memcache
 - Admin support
   - Rsync to host and restart server
-- Image thumbnails
+- Automatic Image thumbnails
 - Mobile (or progressive) rendering.
 - Extensions
   - Widgets
   - Themes
-- Code coloring
+- Code coloring plugin
 - RSS or Atom
 - JS and CSS combination (hash-based naming - long expires)
 - Multi-site host (with shared resources (templates, static files))
 - nginx integration/documentation
+- index page enumeration of child pages
+- directory-based templates
+- Watch for filesytem changes to reset caches
+- Page editing interface
+  - Google/Facebook/Twitter/Email user login
