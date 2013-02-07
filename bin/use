@@ -1,8 +1,8 @@
 export BIN_DIR="$(cd `dirname $BASH_SOURCE` && pwd)"
 source $BIN_DIR/.envrc
-source $BIN_DIR/.aliases
-
 echo Activating SomeMemos environment in $PROJ_DIR
+
+source $BIN_DIR/.aliases
 
 if [ ! -d $PROJ_DIR/env ]; then
     read -p "Missing environment - create it? (y/N): "
