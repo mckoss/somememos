@@ -7,17 +7,15 @@
     control how individual pages are rendered.
 """
 import os
-import sys
 import re
-import argparse
-import somememos
 import logging
 
 from tornado.options import define, options
-from tornado.web import Application, HTTPError
+from tornado.web import Application
 from tornado.template import Template, BaseLoader
+from tornado import ioloop
 
-from util import Struct, SearchPath, NormalizedSearchPath, parse_path
+from util import Struct, SearchPath, NormalizedSearchPath
 from pidfile import PidFile
 
 from views import PageRequestHandler

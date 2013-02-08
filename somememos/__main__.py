@@ -10,13 +10,10 @@
 import os
 import sys
 import argparse
-import logging
 
-from tornado.options import define, options, parse_config_file, parse_command_line
-from tornado import ioloop
+from tornado.options import parse_config_file, parse_command_line
 
-from server import init_application, get_content_search_path
-from util import parse_path
+from server import start_server, get_content_search_path
 
 
 def main():
@@ -53,11 +50,12 @@ def run_server_command(*args):
 
     $ run-server [directory]
     """
+    root_dir = get_root_dir(*args)
     conf_file_name = os.path.join(root_dir, "somememos.conf")
     if os.path.exists(conf_file_name):
         parse_config_file(conf_file_name)
     parse_command_line()
-    server.start_server(get_root_dir(*args))
+    start_server(root_dir)
 
 
 def check_files_command(*args):

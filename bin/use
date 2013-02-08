@@ -13,7 +13,7 @@ if [ ! -d $PROJ_DIR/env ]; then
     virtualenv $PROJ_DIR/env
     source $PROJ_DIR/env/bin/activate
     $PROJ_DIR/setup.py develop
-    pip install pep8
+    pip install pylint
 else
     source $PROJ_DIR/env/bin/activate
 fi

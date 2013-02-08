@@ -1,5 +1,6 @@
 import os
 import sys
+import time
 import signal
 import logging
 
@@ -32,7 +33,7 @@ class PidFile(object):
                     raise PidError("Duplicate pid file (%s) in use (pid = %s)." %
                                    (file_path, pid))
                 else:
-                    logging.warning("Abandoned pid file, %s - process inactive." % file_path)
+                    logging.warning("Abandoned pid file, %s - process inactive.", file_path)
         self.pid = os.getpid()
         with open(file_path, 'w') as f:
             f.write('%d\n' % self.pid)
@@ -47,7 +48,7 @@ class PidFile(object):
     def __enter__(self):
         # Find home directory for logs so that know what's running.
         home = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
-        logging.critical("Process startup (pid=%d, home=%s)." % (self.pid, home))
+        logging.critical("Process startup (pid=%d, home=%s).", self.pid, home)
         return self
 
     def __exit__(self, exc_type=None, exc_value=None, traceback=None):
@@ -56,7 +57,7 @@ class PidFile(object):
                 self.on_exit()
             except Exception, e:
                 logging.error("Exception in exit function for %s (%s).", self.file_path, e)
-        logging.critical("Process terminating (pid=%d)." % self.pid)
+        logging.critical("Process terminating (pid=%d).", self.pid)
         os.remove(self.file_path)
         # Suppress error message for keyboard interrupt.
         if exc_type == KeyboardInterrupt:
@@ -72,8 +73,6 @@ class PidFile(object):
         return True
 
     def _daemonize(self):
-        # TODO: os.chdir to good place?
-
         # Double fork as described in the Stevens book.
         pid = os.fork()
         if pid > 0:
@@ -99,21 +98,21 @@ class PidFile(object):
             if os.WIFSIGNALED(code):
                 c = os.WTERMSIG(code)
                 reason = 'signal %d' % c
-                exit = c in (9, 15)
+                do_exit = c in (9, 15)
             elif os.WIFEXITED(code):
                 c = os.WEXITSTATUS(code)
                 reason = 'status %d' % c
-                exit = c == 0
+                do_exit = c == 0
             else:
                 reason = 'value %d' % code
-                exit = False
+                do_exit = False
 
             retry_count += 2
-            if not exit and time.time() < start_window and retry_count >= 2:
+            if not do_exit and time.time() < start_window and retry_count >= 2:
                 reason = '%s after %d tries' % (reason, retry_count)
-                exit = True
+                do_exit = True
 
-            if exit:
+            if do_exit:
                 logging.info("Process %d exited with %s. Exiting.", p, reason)
                 sys.exit(0)
 

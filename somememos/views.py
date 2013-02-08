@@ -1,10 +1,6 @@
 import os
-import re
-from datetime import datetime
-import mimetypes
-import logging
 
-from tornado.web import RequestHandler, StaticFileHandler, HTTPError
+from tornado.web import RequestHandler, HTTPError
 
 from util import Struct, parse_path
 from formatters import StaticFormatter
@@ -18,7 +14,7 @@ class PageRequestHandler(RequestHandler):
         self.formatters = formatters or {}
         self.static_formatter = StaticFormatter()
 
-    def get(self, path):
+    def get(self, path, *args, **kwargs):
         normal_path = self.search_path.normalize_path(path, sep='/')
         if normal_path != path:
             self.redirect('/' + normal_path, permanent=True)
@@ -29,7 +25,7 @@ class PageRequestHandler(RequestHandler):
         if os.path.isdir(full_path):
             self.redirect('/' + normal_path + '/', permanent=True)
             return
-        (path, file_name, extension) = parse_path(full_path)
+        (path, _file_name, extension) = parse_path(full_path)
 
         with open(full_path, "rb") as content_file:
             content = content_file.read()
