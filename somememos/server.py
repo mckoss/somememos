@@ -18,6 +18,7 @@ from tornado.web import Application, HTTPError
 from tornado.template import Template, BaseLoader
 
 from util import Struct, SearchPath, NormalizedSearchPath, parse_path
+from pidfile import PidFile
 
 from views import PageRequestHandler
 import formatters
@@ -42,6 +43,13 @@ FORMATTERS = {
     "html": formatters.HTML(),
     "htm": formatters.HTML(),
     }
+
+
+def start_server(root_dir):
+    application = init_application(root_dir)
+    logging.info("Starting SomeMemoS server on port %d.", options.host_port)
+    application.listen(options.host_port)
+    ioloop.IOLoop.instance().start()
 
 
 def init_application(root_dir):

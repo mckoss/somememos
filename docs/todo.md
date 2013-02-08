@@ -4,11 +4,22 @@
 X Build file mapping for normalized file names.
 - Add fix command to fix all the checked errors.
 - renmae files (git compatible)
-- Check for non-unicode characters in files
+- Check for non-ascii characters in files
 X setup install static files
 - add code coverage
 - log files
+- Full docs See markdown pypi docs for example!
+- Use markdown extensions
+- Put sample markdown file in default theme content
 
+- tags
+- Summary sections (based on tag and date queries)
+- Commit hook from github
+- Host somememos at Amazon
+  - Version to use host headers - match github repo name (first come first served).
+  - Directory of recently updated repos on somememos.com.
+  - Pull themes from external github repo
+  - Render 'staging' branch for testing (as opposed to master).
 X Render raw pages
 X Content type
 X Static content within content space - use file extension to differentiate processing.

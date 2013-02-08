@@ -1,7 +1,9 @@
-echo "Quick directory commands: home bin module tests"
+echo "Quick directory commands: home bin doc module tests"
 
 alias home="cd $PROJ_DIR"
 alias bin="cd $PROJ_DIR/bin"
+alias docs="cd $PROJ_DIR/docs"
 alias module="cd $PROJ_DIR/$PROJECT"
 alias tests="cd $PROJ_DIR/$PROJECT/tests"
+
 alias reuse="source $PROJ_DIR/bin/use"
