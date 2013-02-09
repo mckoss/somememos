@@ -25,6 +25,7 @@ define('host_port', default=8080, help="Web server port.")
 define('theme', default='default', help="Theme name.")
 define('site_title', default='SomeMemos', help="Your site name.")
 define('debug', default=True, help="Debug server mode.")
+define('daemon', default=False, help='Run as daemon')
 
 site_data = None
 
@@ -47,7 +48,22 @@ def start_server(root_dir):
     application = init_application(root_dir)
     logging.info("Starting SomeMemoS server on port %d.", options.host_port)
     application.listen(options.host_port)
-    ioloop.IOLoop.instance().start()
+    pid_dir = os.path.join(root_dir, 'env', 'run')
+    if not os.path.isdir(pid_dir):
+        if raw_input("OK to create directory %s? (y/N): " % pid_dir) != "y":
+            exit(1)
+        os.makedirs(pid_dir)
+    with PidFile(os.path.join(pid_dir, 'somememos-%d.pid' % options.host_port),
+                 server_shutdown, daemon=options.daemon, on_signal=on_signal):
+        ioloop.IOLoop.instance().start()
+
+
+def server_shutdown():
+    pass
+
+
+def on_signal(sig_num, frame):
+    logging.critical("Process being killed (%d).", sig_num)
 
 
 def init_application(root_dir):

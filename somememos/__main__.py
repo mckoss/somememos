@@ -8,40 +8,31 @@
     control how individual pages are rendered.
 """
 import os
-import sys
-import argparse
 
 from tornado.options import parse_config_file, parse_command_line
 
 from server import start_server, get_content_search_path
+from commands import CommandDispatch
 
 
 def main():
-    commands = [func.rsplit('_', 1)[0] for func in globals() if func.endswith('_command')]
-    commands.sort()
-    user_commands = [command.replace('_', '-') for command in commands]
-    usage = ["somememos  <" + ' | '.join(user_commands) + ">"]
-    usage.append("Available commands:")
-    usage.append('')
-    for command in commands:
-        usage.append("%s: %s" % (command.replace('_', '-'),
-                                 globals()[command + '_command'].__doc__))
+    cmd = CommandDispatch(globals())
+    conf_file_name = os.path.join(root_dir, "somememos.conf")
+    if os.path.exists(conf_file_name):
+        parse_config_file(conf_file_name)
+    args = parse_command_line()
 
-    parser = argparse.ArgumentParser(description="Somememos command script.",
-                                     usage='\n'.join(usage))
-    parser.add_argument('command', nargs='?', default='run-server', help="Command name.")
-    parser.add_argument("extras", nargs='*')
-    args = parser.parse_args()
-
-    command_name = args.command.replace('-', '_')
-
-    if command_name not in commands:
-        print "Unknown command: %s" % args.command
-        print parser.print_help()
-        sys.exit(1)
+    if len(args) == 0:
+        command_name = 'run_server'
+    else:
+        command_name = args[0].replace('-', '_')
+        if command_name in commands:
+            del args[0]
+        else:
+            command_name = 'run_server'
 
     command_func = globals().get(command_name + '_command')
-    command_func(*args.extras)
+    command_func(*args)
 
 
 def run_server_command(*args):
@@ -51,10 +42,6 @@ def run_server_command(*args):
     $ run-server [directory]
     """
     root_dir = get_root_dir(*args)
-    conf_file_name = os.path.join(root_dir, "somememos.conf")
-    if os.path.exists(conf_file_name):
-        parse_config_file(conf_file_name)
-    parse_command_line()
     start_server(root_dir)
 
 
