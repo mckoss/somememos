@@ -15,7 +15,7 @@
     cmd = CommandDispatch(self)
 """
 import re
-from types import FunctionType, ModuleType, ClassType
+from types import FunctionType
 
 
 class CommandDispatch(object):
