@@ -11,6 +11,7 @@ X setup install static files
 - Full docs See markdown pypi docs for example!
 - Use markdown extensions
 - Put sample markdown file in default theme content
+- Add default favicon.
 
 - tags
 - Summary sections (based on tag and date queries)

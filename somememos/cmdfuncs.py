@@ -22,11 +22,12 @@ class CommandDispatch(object):
     def __init__(self, command_dict):
         if hasattr(command_dict, '__dict__'):
             command_dict = command_dict.__dict__
-        self.command_dict = command_dict
-        self.command_names = [name.rsplit('_', 1)[0] for name in command_dict.keys()
-                              if name.endswith('_command') and
-                              isinstance(command_dict[name], FunctionType)]
-        self.command_names.sort()
+        command_names = [name.rsplit('_', 1)[0] for name in command_dict.keys()
+                          if name.endswith('_command') and
+                          isinstance(command_dict[name], FunctionType)]
+        self.commands = dict([(name, command_dict[name + '_command']) for name in command_names])
+        if 'help' not in self.commands:
+            self.commands['help'] = self.help_command
 
     def dispatch(self, args, default=None):
         """
@@ -52,14 +53,19 @@ class CommandDispatch(object):
 
     def get_func(self, command_name):
         command_name = command_name.replace('-', '_')
-        if command_name in self.command_names:
-            return self.command_dict[command_name + '_command']
+        if command_name in self.commands:
+            return self.commands[command_name]
+
+    def help_command(self, *args):
+        """ Print list of commands. """
+        print self.get_usage()
 
     def get_usage(self):
-        usage = '\n'.join(["  {:10s}  ".format(name.replace('_', '-')) +
-                           indent_text(self.get_func(name).__doc__, 14, hanging=True)
-                           for name in self.command_names])
-        return usage
+        usage = ["Commands:"]
+        usage.extend(["  {:28s} ".format(name.replace('_', '-')) +
+                      indent_text(self.get_func(name).__doc__, 31, hanging=True)
+                      for name in self.commands])
+        return '\n\n'.join(usage)
 
 
 def indent_text(s, spaces=4, hanging=False):
@@ -100,7 +106,17 @@ def remove_indent(s):
     >>> print remove_indent('  a\\n b')
     a
     b
+    >>> print remove_indent('\\n    a\\n    b')
+    a
+    b
+    >>> remove_indent(None)
+    ''
+    >>> remove_indent(1)
+    '1'
     """
+    if s is None:
+        return ''
+    s = str(s)
     lines = s.split('\n')
     if len(lines) == 0:
         return ''
@@ -115,7 +131,7 @@ def remove_indent(s):
         if len(lines) == 0:
             return ''
 
-    first_indent = len(reg_spaces.match(s).group(0))
+    first_indent = len(reg_spaces.match(lines[0]).group(0))
     for i in range(len(lines)):
         indent = len(reg_spaces.match(lines[i]).group(0))
         lines[i] = lines[i][min(indent, first_indent):]

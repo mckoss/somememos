@@ -8,25 +8,50 @@
     control how individual pages are rendered.
 """
 import os
+import sys
 
-from tornado.options import parse_config_file, parse_command_line
+from tornado.options import options, parse_config_file, parse_command_line
+from tornado import options as options_module
 
 from server import start_server, get_content_search_path
 from cmdfuncs import CommandDispatch
 
 
+cmd = None
+
+
 def main():
+    global cmd
+
     cmd = CommandDispatch(globals())
     args = parse_command_line()
     if not cmd.dispatch(args, default='run-server'):
-        print cmd.get_usage()
+        print "Unknown command: %s" % args[0]
+        print_help()
+
+
+def print_help(output=sys.stdout):
+    """Prints all the command line options to stdout - replacment for tornano's print_help. """
+    options.print_help(output)
+    if cmd is not None:
+        print >> output, cmd.get_usage()
+
+
+options_module.print_help = print_help
+
+
+def help_command(*args):
+    """ Print this help message. """
+    print_help()
 
 
 def run_server_command(*args):
     """
     Run web server for a given directory root location.
 
-    $ run-server [directory]
+        run-server [directory]
+
+    This is default command if none given.
     """
     root_dir = get_root_dir(*args)
     conf_file_name = os.path.join(root_dir, "somememos.conf")
