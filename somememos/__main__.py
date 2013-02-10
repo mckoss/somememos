@@ -12,27 +12,14 @@ import os
 from tornado.options import parse_config_file, parse_command_line
 
 from server import start_server, get_content_search_path
-from commands import CommandDispatch
+from cmdfuncs import CommandDispatch
 
 
 def main():
     cmd = CommandDispatch(globals())
-    conf_file_name = os.path.join(root_dir, "somememos.conf")
-    if os.path.exists(conf_file_name):
-        parse_config_file(conf_file_name)
     args = parse_command_line()
-
-    if len(args) == 0:
-        command_name = 'run_server'
-    else:
-        command_name = args[0].replace('-', '_')
-        if command_name in commands:
-            del args[0]
-        else:
-            command_name = 'run_server'
-
-    command_func = globals().get(command_name + '_command')
-    command_func(*args)
+    if not cmd.dispatch(args, default='run-server'):
+        print cmd.get_usage()
 
 
 def run_server_command(*args):
@@ -42,6 +29,10 @@ def run_server_command(*args):
     $ run-server [directory]
     """
     root_dir = get_root_dir(*args)
+    conf_file_name = os.path.join(root_dir, "somememos.conf")
+    if os.path.exists(conf_file_name):
+        parse_config_file(conf_file_name)
+
     start_server(root_dir)
 
 

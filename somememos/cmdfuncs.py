@@ -15,25 +15,49 @@
     cmd = CommandDispatch(self)
 """
 import re
-from types import FunctionType
+from types import FunctionType, ModuleType, ClassType
 
 
 class CommandDispatch(object):
-    def __init__(self, module):
-        self.module = module
-        self.command_names = [name.rsplit('_', 1)[0] for name in dir(modules)
+    def __init__(self, command_dict):
+        if hasattr(command_dict, '__dict__'):
+            command_dict = command_dict.__dict__
+        self.command_dict = command_dict
+        self.command_names = [name.rsplit('_', 1)[0] for name in command_dict.keys()
                               if name.endswith('_command') and
-                                  type(getattr(module, name)) == FunctionType]
+                              isinstance(command_dict[name], FunctionType)]
         self.command_names.sort()
 
+    def dispatch(self, args, default=None):
+        """
+        Dispatch command line where first argument is command name.
+
+        Returns True if succsessful.
+        """
+        args = list(args)
+        if len(args) == 0:
+            command_name = default
+        else:
+            command_name = args[0]
+            if self.get_func(command_name) is not None:
+                del args[0]
+            else:
+                command_name = default
+
+        command_func = self.get_func(command_name)
+        if command_func is not None:
+            command_func(*args)
+            return True
+        return False
+
     def get_func(self, command_name):
-        command_name = user_name.replace('-', '_')
+        command_name = command_name.replace('-', '_')
         if command_name in self.command_names:
-            return getattr(self.module, command_name + '_command')
+            return self.command_dict[command_name + '_command']
 
     def get_usage(self):
         usage = '\n'.join(["  {:10s}  ".format(name.replace('_', '-')) +
-                           indent_text(self.get_func(name), 14, hanging=True)
+                           indent_text(self.get_func(name).__doc__, 14, hanging=True)
                            for name in self.command_names])
         return usage
 

@@ -1,0 +1,4 @@
+source .envrc
+
+cd $PROJ_DIR/somememos/tests/sample
+somememos $*
