@@ -13,6 +13,7 @@ import logging
 from tornado.options import define, options
 from tornado.web import Application
 from tornado.template import Template, BaseLoader
+from tornado.autoreload import add_reload_hook
 from tornado import ioloop
 
 from util import Struct, SearchPath, NormalizedSearchPath
@@ -54,12 +55,14 @@ def start_server(root_dir):
             exit(1)
         os.makedirs(pid_dir)
     with PidFile(os.path.join(pid_dir, 'somememos-%d.pid' % options.host_port),
-                 server_shutdown, daemon=options.daemon, on_signal=on_signal):
+                 on_exit=server_shutdown, daemon=options.daemon, on_signal=on_signal) as pid:
+        if options.debug:
+            add_reload_hook(pid.__exit__)
         ioloop.IOLoop.instance().start()
 
 
 def server_shutdown():
-    pass
+    logging.info("Stopping SomeMemoS server.", options.host_port)
 
 
 def on_signal(sig_num, frame):
