@@ -106,17 +106,97 @@ export function stripInlineMarkdown(text: string): string {
   return pieces.join('').replace(/\s+/g, ' ').trim();
 }
 
+/** For each index of `s`, the index of the next character at or after it that passes `test`, or -1. */
+function nextWhere(s: string, test: (c: string) => boolean): Int32Array {
+  const next = new Int32Array(s.length + 1);
+  next[s.length] = -1;
+  for (let i = s.length - 1; i >= 0; i--)
+    next[i] = test(s[i] as string) ? i : (next[i + 1] as number);
+  return next;
+}
+
+/**
+ * Replaces, left to right and without overlaps (as a global regex replace
+ * does), every match that `at` finds at an occurrence of `start`.
+ */
+function scanReplace(
+  s: string,
+  start: string,
+  at: (i: number) => { readonly end: number; readonly out: string } | null,
+): string {
+  let i = s.indexOf(start);
+  if (i < 0) return s;
+  let out = '';
+  let last = 0;
+  while (i >= 0) {
+    const m = at(i);
+    if (m) {
+      out += s.slice(last, i) + m.out;
+      last = m.end;
+      i = s.indexOf(start, m.end);
+    } else i = s.indexOf(start, i + 1);
+  }
+  return out + s.slice(last);
+}
+
+/** `[text](url)` (or `![alt](url)` with `bang`) to its text: `/!?\[([^\]]*)\]\([^)]*\)/g`, in linear time. */
+function stripLinks(s: string, bang: boolean): string {
+  const close = nextWhere(s, (c) => c === ']');
+  const paren = nextWhere(s, (c) => c === ')');
+  return scanReplace(s, bang ? '!' : '[', (i) => {
+    const open = bang ? i + 1 : i;
+    if (s[open] !== '[') return null;
+    const j = close[open + 1] as number;
+    if (j < 0 || s[j + 1] !== '(') return null;
+    const k = paren[j + 2] as number;
+    return k < 0 ? null : { end: k + 1, out: s.slice(open + 1, j) };
+  });
+}
+
+/** `[text][ref]` to its text: `/\[([^\]]*)\]\[[^\]]*\]/g`, in linear time. */
+function stripRefLinks(s: string): string {
+  const close = nextWhere(s, (c) => c === ']');
+  return scanReplace(s, '[', (i) => {
+    const j = close[i + 1] as number;
+    if (j < 0 || s[j + 1] !== '[') return null;
+    const k = close[j + 2] as number;
+    return k < 0 ? null : { end: k + 1, out: s.slice(i + 1, j) };
+  });
+}
+
+/** `<https://…>` to its address: `/<((?:https?|mailto):[^>\s]+)>/g`, in linear time. */
+function stripAutolinks(s: string): string {
+  const stop = nextWhere(s, (c) => c === '>' || /\s/.test(c));
+  return scanReplace(s, '<', (i) => {
+    const scheme = ['http:', 'https:', 'mailto:'].find((p) => s.startsWith(p, i + 1));
+    if (scheme === undefined) return null;
+    const from = i + 1 + scheme.length;
+    const k = stop[from] as number;
+    return k <= from || s[k] !== '>' ? null : { end: k + 1, out: s.slice(i + 1, k) };
+  });
+}
+
+/** HTML tags removed: `/<\/?[A-Za-z][^>]*>/g`, in linear time. */
+function stripTags(s: string): string {
+  const gt = nextWhere(s, (c) => c === '>');
+  return scanReplace(s, '<', (i) => {
+    const q = s[i + 1] === '/' ? i + 2 : i + 1;
+    if (!/[A-Za-z]/.test(s[q] ?? '')) return null;
+    const k = gt[q + 1] as number;
+    return k < 0 ? null : { end: k + 1, out: '' };
+  });
+}
+
+// Links, autolinks and tags are matched by scanning rather than with the
+// equivalent regular expressions, which backtrack: on hostile input (a long
+// heading of `[[[[…` or `<a<a…`) they take time quadratic in its length, and
+// headings are stripped while a note is indexed, on the server too.
 function stripPlain(s: string): string {
-  return s
-    .replace(/!?\[\[([^[\]\n]*)\]\]/g, (_m, inner: string) => {
-      const { target, heading, alias } = splitWikiLink(inner);
-      return alias ?? (heading ? `${target} > ${heading}` : target);
-    })
-    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[([^\]]*)\]\[[^\]]*\]/g, '$1')
-    .replace(/<((?:https?|mailto):[^>\s]+)>/g, '$1')
-    .replace(/<\/?[A-Za-z][^>]*>/g, '')
+  const wiki = s.replace(/!?\[\[([^[\]\n]*)\]\]/g, (_m, inner: string) => {
+    const { target, heading, alias } = splitWikiLink(inner);
+    return alias ?? (heading ? `${target} > ${heading}` : target);
+  });
+  return stripTags(stripAutolinks(stripRefLinks(stripLinks(stripLinks(wiki, true), false))))
     .replace(/(\*\*|__)(?=\S)(.+?)\1/g, '$2')
     .replace(/~~(.+?)~~/g, '$1')
     .replace(/==(.+?)==/g, '$1')
