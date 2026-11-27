@@ -101,6 +101,7 @@ Goal: the installable PWA of PLAN.md section 6, working entirely on data in the 
 - [ ] **2.1 In-browser storage.** The storage interfaces on SQLite compiled for the browser, in a background worker with persistent storage, passing the shared conformance suite in a real browser. Note bodies are stored locally too.
 - [ ] **2.2 Brain engine in the worker.** Indexing, folding, ranking and search run in the worker behind a small request interface the pages call.
 - [ ] **2.3 Editor.** CodeMirror 6 source editor that stores exactly what was typed, with a live preview, `[[link]]` autocomplete, and create, save and rename. Side by side on desktop, one pane with a toggle on a phone.
+- [ ] **2.3a Blog posts.** The `blog` folder role in core and the app. In the editor, a note in the blog folder shows a draft or published badge and a control that sets or removes `published: true` in its front matter, with a confirmation before publishing.
 - [ ] **2.4 Search and activation views.** The four modes, results with score breakdowns, the hot, trending and neglected lists, and dangling links.
 - [ ] **2.5 Note view.** Rendered markdown, backlinks, and the note's change history. Opening a note logs a read.
 - [ ] **2.6 Folder import.** Bring a folder of markdown files into the app from the device, honoring roles and exclusions.

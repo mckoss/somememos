@@ -484,6 +484,7 @@ Decided 2026-11-27: a brain has a `blog/` folder of dated posts that its owner c
 
 - **A post is an ordinary note** in `blog/`, with its date in the path (for example `blog/2026/2026-11-27-why-memos.md`). It is written, edited, searched and scored like any memo, in the same editor, online or offline.
 - **A post is public only when its front matter says `published: true`** (decided 2026-11-27). Anything else in the blog folder is a draft and stays private, so a half-written post can't go public by accident. Removing the line, or setting it to `false`, takes the post down.
+- **The editor has a publish control for blog posts.** When the open note is in the blog folder, the editor shows whether it is a draft or published, and a control that publishes or unpublishes it. The control only writes or removes the `published: true` line in the front matter, which the person can also type by hand, so the markdown stays the single record of the post's state. Publishing asks for confirmation, since it makes the post public. Until the post has synced, the editor says it is waiting to be published.
 - **Publishing happens on the server**, when the post syncs. The site serves the rendered post at a public address under the owner's name, with an index of posts and a feed.
 - **It is the one public part of an otherwise private brain, so the boundary has to be strict:**
   - Only files in the blog folder can ever be public. Nothing else in a brain is reachable from a public page.
