@@ -637,7 +637,8 @@ Decided 2026-11-27: a brain has a `blog/` folder of dated posts that its owner c
 
 Decided by Mike on 2026-11-26:
 
-- **TypeScript everywhere.** Node 22+ LTS, native ESM.
+- **TypeScript everywhere,** native ESM.
+- **Node 26 LTS** (decided 2026-11-27) for development, CI, the server and the web app, pinned in `.nvmrc`. The CLI and the packages it bundles (core and the SQLite store) also support Node 22.13 or later, because agents run the CLI in environments that may still ship Node 22; a separate CI job on Node 22 runs their unit tests and the one-file bundle. All TypeScript uses only erasable syntax (`erasableSyntaxOnly`), so Node can run sources by stripping types alone.
 - **SvelteKit for the server and the PWA client**, as one app. Server routes provide the sync API and, later, the remote MCP endpoint and accounts. The same app serves the offline-first PWA.
 - **A Node-based CLI**, the `somememos` command. It is how agents use a brain (section 6). From milestone 5 it also runs the local stdio MCP server (`somememos mcp`).
 
