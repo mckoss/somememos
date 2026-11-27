@@ -8,7 +8,9 @@
   import MarkdownEditor from '#lib/components/MarkdownEditor.svelte';
   import MarkdownView from '#lib/components/MarkdownView.svelte';
   import PublishControl from '#lib/components/PublishControl.svelte';
+  import type { NoteSyncState } from '#lib/brain/host.ts';
   import { brain, changed, host, skipNextRead } from '#lib/ui/brain.svelte.ts';
+  import { syncState } from '#lib/ui/sync.svelte.ts';
   import { errorCode, errorMessage } from '#lib/ui/errors.ts';
   import { relativeTime } from '#lib/ui/format.ts';
   import { isPublished, setPublished } from '#lib/ui/frontmatter.ts';
@@ -51,6 +53,25 @@
     (base?.role ?? null) === 'blog' || (base !== null && isBlogPath(base.path, brain.roles)),
   );
   const published = $derived(isPublished(text));
+
+  // Whether the saved version is on the server (a blog post's badge says so).
+  let savedSynced = $state<NoteSyncState>('off');
+  $effect(() => {
+    const b = base;
+    void syncState.revision;
+    if (!b || b.hash === null || !isBlog) return;
+    const { path: p, hash } = b;
+    void (async () => {
+      try {
+        savedSynced = await (await host()).sync.noteState(p, hash);
+      } catch {
+        savedSynced = 'off';
+      }
+    })();
+  });
+  const noteSynced = $derived<NoteSyncState>(
+    !syncState.view?.connected ? 'off' : dirty || isNew ? 'waiting' : savedSynced,
+  );
 
   // Load the note (without logging a read: opening the editor is not reading).
   let request = 0;
@@ -375,7 +396,7 @@
           }}
         />
         {#if isBlog}
-          <PublishControl {published} onchange={togglePublish} compact />
+          <PublishControl {published} onchange={togglePublish} compact synced={noteSynced} />
         {/if}
       </div>
       {#if restoredAt}
