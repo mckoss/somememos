@@ -1,21 +1,50 @@
 // Folder roles (PLAN.md section 4, "Folder roles and the default layout"):
-// path patterns, the dates in `dated` paths, and classifying a note's path.
+// path patterns, the dates in `dated` and `blog` paths, and classifying a
+// note's path.
 
 import { isMarkdownPath } from './paths.js';
 
-export type FolderRole = 'memo' | 'dated' | 'source' | 'excluded';
+/**
+ * - `memo`: a lasting note; a scored item.
+ * - `dated`: an entry for one day, its date from the path.
+ * - `source`: immutable source material.
+ * - `blog`: a post the owner may publish (PLAN.md section 8). Scored exactly
+ *   like a memo, and, when its pattern has date placeholders, dated from its
+ *   path like a `dated` entry (the date is optional: null otherwise).
+ * - `excluded`: never indexed, logged or shown.
+ */
+export type FolderRole = 'memo' | 'dated' | 'source' | 'blog' | 'excluded';
 
 /** Roles in precedence order: the first role with a matching pattern wins. */
-export const ROLE_PRECEDENCE: readonly FolderRole[] = ['excluded', 'source', 'dated', 'memo'];
+export const ROLE_PRECEDENCE: readonly FolderRole[] = [
+  'excluded',
+  'source',
+  'dated',
+  'blog',
+  'memo',
+];
+
+/** Roles whose notes are scored items (edit, read and mention events; the activation lists). */
+export const SCORED_ROLES: readonly FolderRole[] = Object.freeze(['memo', 'blog'] as const);
+
+/** True for `memo` and `blog`: the roles whose notes are scored items. */
+export function isScoredRole(role: FolderRole | null | undefined): boolean {
+  return role === 'memo' || role === 'blog';
+}
 
 /** A brain's role config: each role maps to a list of path patterns. */
 export type FolderRolesConfig = Partial<Record<FolderRole, readonly string[]>>;
 
-/** The layout new brains start with. */
+/**
+ * The layout new brains start with. Blog posts have two patterns, tried in
+ * order: a dated post (`blog/2026/2026-11-27-why-memos.md`) gets its date
+ * from the path; anything else in `blog/` is a post with no date.
+ */
 export const DEFAULT_FOLDER_ROLES: FolderRolesConfig = {
   memo: ['memos/'],
   dated: ['diary/{YYYY}/{MM}/{YYYY}-{MM}-{DD}.md'],
   source: ['sources/'],
+  blog: ['blog/{YYYY}/{YYYY}-{MM}-{DD}-*.md', 'blog/'],
 };
 
 export class PathPatternError extends Error {
@@ -55,6 +84,8 @@ export interface PathPattern {
   source: string;
   /** True when the pattern has all of `{YYYY}`, `{MM}` and `{DD}`. */
   hasDate: boolean;
+  /** True when the pattern has at least one date placeholder. */
+  hasPlaceholder?: boolean;
   /**
    * Matches a brain-relative path. Returns null for no match. For a pattern
    * with a date, the date (`YYYY-MM-DD`) is returned and an impossible date
@@ -129,6 +160,7 @@ export function compilePathPattern(pattern: string): PathPattern {
   return {
     source: pattern,
     hasDate,
+    hasPlaceholder: seen.size > 0,
     match(path: string) {
       const m = regex.exec(path);
       if (!m) return null;
@@ -178,7 +210,7 @@ export interface RoleMatch {
   role: FolderRole;
   /** The pattern that matched; absent for the no-roles default. */
   pattern?: string;
-  /** For `dated` paths: the entry's date, `YYYY-MM-DD`. */
+  /** For `dated` paths, and `blog` paths whose pattern has a date: the date, `YYYY-MM-DD`. */
   date?: string;
 }
 
@@ -193,10 +225,13 @@ export interface RoleClassifier {
 
 /**
  * Builds a classifier from a role config, validating every pattern. `excluded`
- * wins over `source`, then `dated`, then `memo`. A dated pattern whose path
- * holds an impossible date does not match, so the path falls through to the
- * next role. A config that declares no patterns makes every `.md` file a memo;
- * once any role is declared, a file that matches nothing has no role.
+ * wins over `source`, then `dated`, then `blog`, then `memo`; within a role,
+ * patterns are tried in config order. A dated pattern (in `dated` or `blog`)
+ * whose path holds an impossible date does not match, so the path falls
+ * through to the next pattern or role. A `blog` pattern may have no date
+ * placeholders (its posts then have no date), but not just some of them. A
+ * config that declares no patterns makes every `.md` file a memo; once any
+ * role is declared, a file that matches nothing has no role.
  */
 export function createRoleClassifier(config: FolderRolesConfig = {}): RoleClassifier {
   const compiled = ROLE_PRECEDENCE.map((role) => {
@@ -205,6 +240,15 @@ export function createRoleClassifier(config: FolderRolesConfig = {}): RoleClassi
       for (const p of patterns) {
         if (!p.hasDate) {
           throw new PathPatternError(`Dated pattern lacks {YYYY}, {MM} or {DD}: ${p.source}`);
+        }
+      }
+    }
+    if (role === 'blog') {
+      for (const p of patterns) {
+        if (p.hasPlaceholder && !p.hasDate) {
+          throw new PathPatternError(
+            `Blog pattern has some but not all of {YYYY}, {MM} and {DD}: ${p.source}`,
+          );
         }
       }
     }
@@ -223,7 +267,7 @@ export function createRoleClassifier(config: FolderRolesConfig = {}): RoleClassi
           const m = pattern.match(path);
           if (!m) continue;
           const result: RoleMatch = { role, pattern: pattern.source };
-          if (role === 'dated' && m.date !== undefined) result.date = m.date;
+          if ((role === 'dated' || role === 'blog') && m.date !== undefined) result.date = m.date;
           return result;
         }
       }

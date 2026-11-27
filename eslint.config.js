@@ -12,10 +12,13 @@ export default ts.config(
   {
     ignores: [
       '**/node_modules/',
+      '.claude/**',
       '**/dist/',
       '**/build/',
       '**/coverage/',
       '**/.svelte-kit/',
+      '**/test-results/',
+      '**/playwright-report/',
       'packages/core/src/version.ts',
     ],
   },

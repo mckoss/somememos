@@ -23,7 +23,7 @@ half-lives, roles). Runs the index pass first, so the counts are current.
 ${GLOBAL_OPTIONS_HELP}
 
 Output: a few labelled lines. With --json: {root, clientId, notes: {total,
-memo, dated, source}, sections, dangling, events: {read, edit, mention,
+memo, dated, source, blog}, sections, dangling, events: {read, edit, mention,
 rename}, changes, uncommitted, fold: {cursor, lastSeq}, firstIndexedAt,
 config: {weights, alpha, halfLives, roles, analyzer, changeOps}, index}.
 
@@ -65,7 +65,7 @@ function formatStatus(r: StatusRecord): string[] {
   const roles = Object.entries(r.config.roles);
   const lines = [
     `brain: ${r.root}`,
-    `notes: ${r.notes.total} (memo ${r.notes.memo}, dated ${r.notes.dated}, source ${r.notes.source}); ${plural(r.sections, 'section')}; ${plural(r.dangling, 'dangling link target')}`,
+    `notes: ${r.notes.total} (memo ${r.notes.memo}, dated ${r.notes.dated}, source ${r.notes.source}, blog ${r.notes.blog}); ${plural(r.sections, 'section')}; ${plural(r.dangling, 'dangling link target')}`,
     `events: ${r.events.edit} edit, ${r.events.mention} mention, ${r.events.read} read, ${r.events.rename} rename; ${plural(r.changes, 'change record')}`,
     `folded: through ${r.fold.cursor} of ${r.fold.lastSeq}`,
   ];

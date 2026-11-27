@@ -230,7 +230,7 @@ export interface NoteRecord {
   /** File modification time, Unix seconds (an integer). */
   readonly mtime: number;
   readonly role: NoteRole;
-  /** For a `dated` note, its date (`YYYY-MM-DD`); otherwise null. */
+  /** For a `dated` note, or a `blog` post with a date in its path, the date (`YYYY-MM-DD`); otherwise null. */
   readonly date: string | null;
 }
 

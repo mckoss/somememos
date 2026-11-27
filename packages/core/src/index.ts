@@ -12,3 +12,4 @@ export * as ranking from './ranking/index.js';
 export * as evaluation from './evaluation/index.js';
 export * as indexing from './indexing/index.js';
 export * as engine from './engine/index.js';
+export * as sync from './sync/index.js';

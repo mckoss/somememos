@@ -1,4 +1,5 @@
 import { VERSION } from '@somememos/core';
+import { AGENTS_GUIDE } from './commands/agents.js';
 import { commands, findCommand } from './commands/index.js';
 import { EXIT_FAILURE, EXIT_OK, EXIT_USAGE, UsageError, processContext } from './context.js';
 import type { Context } from './context.js';
@@ -12,13 +13,14 @@ export function usage(): string {
   const width = Math.max(4, ...commands.map((command) => command.name.length));
   const list = [
     ...commands.map((command) => `  ${command.name.padEnd(width)}  ${command.summary}`),
-    `  ${'help'.padEnd(width)}  Show help for a command`,
+    `  ${'help'.padEnd(width)}  Show help for a command; 'help agents' for the agent guide`,
   ].join('\n');
   return `somememos ${VERSION}: a second brain of markdown notes with time-aware working memory.
 
 Usage:
   somememos <command> [options]
   somememos help <command>
+  somememos help agents    The search, read, edit, commit flow for AI agents
 
 Commands:
 ${list}
@@ -104,6 +106,10 @@ export async function run(argv: string[], ctx: Context = processContext()): Prom
     const topic = rest[0];
     if (topic === undefined) {
       ctx.stdout(usage());
+      return EXIT_OK;
+    }
+    if (topic === 'agents') {
+      ctx.stdout(AGENTS_GUIDE);
       return EXIT_OK;
     }
     const command = findCommand(topic);

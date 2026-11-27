@@ -3,7 +3,11 @@ dist/
 build/
 coverage/
 .svelte-kit/
+test-results/
+playwright-report/
 package-lock.json
 packages/core/src/version.ts
 # Prose is formatted by hand.
 *.md
+.claude/
+test-results/

@@ -17,7 +17,8 @@
 //
 // Events follow the live index pass (packages/core/src/indexing/pass.ts), dated
 // at each commit's author time (at most now):
-// - `edit` for a memo a commit added or changed (also a renamed one, R<100);
+// - `edit` for a memo (or blog post: every scored note, `markdown.isScoredRole`;
+//   "memo" below means either) a commit added or changed (also a renamed one, R<100);
 // - `mention` for each link item (memo path or dangling key) that a changed
 //   memo or dated note's new version links and its old version did not, both
 //   resolved against the note paths as of that commit; links into excluded
@@ -125,6 +126,8 @@ export class ImportGitError extends Error {
 }
 
 type Role = markdown.FolderRole;
+/** Memos and blog posts are scored items; "memo" below means either. */
+const isScored = (role: Role | null): boolean => markdown.isScoredRole(role);
 type Links = readonly { readonly target: string }[];
 
 /** One note's change in a commit, after roles are applied. */
@@ -377,7 +380,7 @@ export async function importGitHistory(options: ImportGitOptions): Promise<Impor
       // A move between a memo and another role is a delete plus a new note,
       // as in the live index pass.
       const sameKind =
-        oldOk && newOk && (roleOf(c.oldPath) === 'memo') === (roleOf(c.newPath) === 'memo');
+        oldOk && newOk && isScored(roleOf(c.oldPath)) === isScored(roleOf(c.newPath));
       if (c.status === 'R' && sameKind) {
         noteChanges.push({
           type: 'rename',
@@ -415,7 +418,7 @@ export async function importGitHistory(options: ImportGitOptions): Promise<Impor
 
     // Rename records, kept even for ignored commits so history follows the note.
     for (const n of noteChanges) {
-      if (n.type !== 'rename' || roleOf(n.from) !== 'memo') continue;
+      if (n.type !== 'rename' || !isScored(roleOf(n.from))) continue;
       push({
         id: importId([commit.hash, 'rename', n.from, n.to]),
         kind: 'rename',
@@ -430,7 +433,7 @@ export async function importGitHistory(options: ImportGitOptions): Promise<Impor
     // A new memo that a dangling key with mentions now resolves to: the key's
     // history moves to the note, as the live indexer does.
     for (const path of appeared) {
-      if (roleOf(path) !== 'memo') continue;
+      if (!isScored(roleOf(path))) continue;
       const keys = dangling.get(markdown.normalizeDanglingKey(markdown.baseName(path)));
       if (!keys) continue;
       for (const key of [...keys]) {
@@ -457,7 +460,7 @@ export async function importGitHistory(options: ImportGitOptions): Promise<Impor
       if (n.type === 'add') item = n.path;
       else if (n.type === 'modify' && n.oldSha !== n.newSha) item = n.path;
       else if (n.type === 'rename' && n.changed) item = n.to;
-      if (item === null || roleOf(item) !== 'memo') continue;
+      if (item === null || !isScored(roleOf(item))) continue;
       push({
         id: importId([commit.hash, 'edit', item]),
         kind: 'edit',
@@ -499,7 +502,7 @@ export async function importGitHistory(options: ImportGitOptions): Promise<Impor
         );
         for (const item of added) {
           const isPath = paths.has(item);
-          if (isPath && roleOf(item) !== 'memo') continue;
+          if (isPath && !isScored(roleOf(item))) continue;
           if (!isPath) addDangling(item);
           push({
             id: importId([commit.hash, 'mention', item, s.path]),

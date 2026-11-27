@@ -8,6 +8,7 @@
 
 import type { Snippet } from '../keyword/snippet.js';
 import type { SearchHit } from '../keyword/search.js';
+import { isScoredRole } from '../markdown/roles.js';
 import type { NoteRole } from '../storage/types.js';
 import { parseSectionId } from '../storage/validate.js';
 import type { ItemScores } from '../timescore/events.js';
@@ -92,7 +93,8 @@ export interface RankedResult {
 
 /**
  * How an item takes part in activation lists:
- * - `'memo'`: a stored memo note: rankable.
+ * - `'memo'`: a stored scored note (a memo or a blog post,
+ *   `markdown.isScoredRole`): rankable.
  * - `'dangling'`: not a stored note, and not shaped like a note path: a
  *   dangling-link key (keys are lower-cased and never end in `.md`): rankable.
  * - `'excluded'`: a stored note of another role, or a `.md` path that is no
@@ -103,7 +105,7 @@ export function classifyItem(
   notes: ReadonlyMap<string, NoteMeta>,
 ): 'memo' | 'dangling' | 'excluded' {
   const note = notes.get(item);
-  if (note) return note.role === 'memo' ? 'memo' : 'excluded';
+  if (note) return isScoredRole(note.role) ? 'memo' : 'excluded';
   return /\.md$/i.test(item) ? 'excluded' : 'dangling';
 }
 

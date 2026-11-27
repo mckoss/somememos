@@ -1,0 +1,12 @@
+**/node_modules
+**/dist
+**/build
+**/.svelte-kit
+**/test-results
+**/coverage
+.git
+.env
+.env.*
+**/.somememos
+*.sqlite
+*.sqlite-*

@@ -86,12 +86,14 @@ describe('init', () => {
     expect(r.code).toBe(EXIT_OK);
     expect(r.stderr).toBe('');
     expect(r.stdout).toContain(`initialized a brain in ${dir}`);
-    expect(r.stdout).toContain('created folders: memos/, diary/, sources/');
-    for (const f of ['memos', 'diary', 'sources']) expect(existsSync(join(dir, f))).toBe(true);
+    expect(r.stdout).toContain('created folders: memos/, diary/, sources/, blog/');
+    for (const f of ['memos', 'diary', 'sources', 'blog'])
+      expect(existsSync(join(dir, f))).toBe(true);
     const config = JSON.parse(readFileSync(join(dir, '.somememos/config.json'), 'utf8'));
     expect(config.roles).toEqual({
       source: ['sources/'],
       dated: ['diary/{YYYY}/{MM}/{YYYY}-{MM}-{DD}.md'],
+      blog: ['blog/{YYYY}/{YYYY}-{MM}-{DD}-*.md', 'blog/'],
       memo: ['memos/'],
     });
     expect(config.clientId).toMatch(/^[0-9a-f-]{36}$/);
@@ -323,7 +325,7 @@ describe('status', () => {
     const lines = r.stdout.trimEnd().split('\n');
     expect(lines).toEqual([
       `brain: ${dir}`,
-      'notes: 3 (memo 2, dated 0, source 1); 3 sections; 1 dangling link target',
+      'notes: 3 (memo 2, dated 0, source 1, blog 0); 3 sections; 1 dangling link target',
       'events: 1 edit, 2 mention, 0 read, 0 rename; 0 change records',
       'folded: through 3 of 3',
       'uncommitted: 1 changed note (somememos commit -m "<why>")',
@@ -352,7 +354,7 @@ describe('status', () => {
         'uncommitted',
       ].sort(),
     );
-    expect(record.notes).toEqual({ total: 3, memo: 2, dated: 0, source: 1 });
+    expect(record.notes).toEqual({ total: 3, memo: 2, dated: 0, source: 1, blog: 0 });
     expect(record.events).toEqual({ read: 0, edit: 0, mention: 0, rename: 0 });
     expect(record.firstIndexedAt).toBe(NOW);
     expect(Object.keys(record.config as object).sort()).toEqual(

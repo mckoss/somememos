@@ -160,8 +160,8 @@ export function assertValidNote(note: NoteRecord): void {
   if (!Number.isSafeInteger(note.mtime)) {
     throw new RangeError(`note mtime must be an integer (Unix seconds), not ${note.mtime}`);
   }
-  if (!['memo', 'dated', 'source'].includes(note.role)) {
-    throw new RangeError(`note role must be memo, dated or source, not ${String(note.role)}`);
+  if (!['memo', 'dated', 'source', 'blog'].includes(note.role)) {
+    throw new RangeError(`note role must be memo, dated, source or blog, not ${String(note.role)}`);
   }
   if (note.date !== null && !/^\d{4}-\d{2}-\d{2}$/.test(note.date)) {
     throw new RangeError(`note date must be YYYY-MM-DD or null, not ${String(note.date)}`);

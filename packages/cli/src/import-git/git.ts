@@ -281,6 +281,37 @@ export function streamLog(cwd: string, revisions: readonly string[] = []): LogSt
 }
 
 // ---------------------------------------------------------------------------
+// Trees
+
+/** One file in a commit's tree, from `git ls-tree`. */
+export interface TreeEntry {
+  /** The file mode as an octal string (`100644`, `100755`, `120000`, …). */
+  readonly mode: string;
+  readonly sha: string;
+  /** Relative to the directory the command ran in. */
+  readonly path: string;
+}
+
+/**
+ * Every blob in `commit`'s tree under `cwd`, with paths relative to `cwd`
+ * (one `git ls-tree -r -z` call; submodules and trees are left out).
+ */
+export async function listTree(cwd: string, commit: string): Promise<TreeEntry[]> {
+  if (!/^[0-9a-f]{4,64}$/.test(commit)) throw new GitError(`not a commit id: ${commit}`);
+  const out = await runGit(cwd, ['ls-tree', '-r', '-z', '--no-abbrev', commit, '--', '.']);
+  const entries: TreeEntry[] = [];
+  for (const record of out.split('\0')) {
+    if (record === '') continue;
+    const tab = record.indexOf('\t');
+    if (tab < 0) throw new GitError('unexpected git ls-tree output');
+    const [mode, type, sha] = record.slice(0, tab).split(' ') as [string, string, string];
+    if (type !== 'blob') continue;
+    entries.push({ mode, sha, path: record.slice(tab + 1) });
+  }
+  return entries;
+}
+
+// ---------------------------------------------------------------------------
 // Blobs
 
 /** Buffered reads of exact byte counts and lines from a stream. */

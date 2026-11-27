@@ -22,13 +22,14 @@ import type { Command } from './types.js';
 export const GITIGNORE_LINE = `${SIDECAR_DIR}/*.sqlite*`;
 
 /** Folders a new, empty brain starts with (PLAN.md section 4, "Folder roles"). */
-export const DEFAULT_FOLDERS = ['memos', 'diary', 'sources'] as const;
+export const DEFAULT_FOLDERS = ['memos', 'diary', 'sources', 'blog'] as const;
 
 const ROLES_HINT =
   'No folder roles are declared, so every note is a memo. Before the first index, declare roles in ' +
   `${SIDECAR_DIR}/${CONFIG_FILE} if some folders hold diaries, sources or private notes, for example ` +
   '"roles": {"memo": ["memos/"], "dated": ["diary/{YYYY}/{MM}/{YYYY}-{MM}-{DD}.md"], ' +
-  '"source": ["sources/"], "excluded": ["private/"]}. Then run \'somememos index\'.';
+  '"source": ["sources/"], "blog": ["blog/{YYYY}/{YYYY}-{MM}-{DD}-*.md", "blog/"], ' +
+  '"excluded": ["private/"]}. Then run \'somememos index\'.';
 
 const usage = `Usage: somememos init [dir]
 
@@ -36,8 +37,11 @@ Make <dir> (default: --brain, else the working directory) a brain: write
 ${SIDECAR_DIR}/${CONFIG_FILE} with the default settings and a new client id.
 
 - In a directory with no markdown files, also create the folders memos/,
-  diary/ and sources/, declare them as the memo, dated and source roles, and
-  take the baseline index (so every note written from now on is logged).
+  diary/, sources/ and blog/, declare them as the memo, dated, source and
+  blog roles, and take the baseline index (so every note written from now on
+  is logged). Blog posts are scored like memos; a post named like
+  blog/2026/2026-11-27-title.md takes its date from the path, and one is
+  published only when its front matter says 'published: true'.
 - In a directory that already holds markdown files, create no folders and
   declare no roles (every note is a memo), and do not index yet: declare
   roles first, especially "excluded" for private folders, then run

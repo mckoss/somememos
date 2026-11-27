@@ -13,8 +13,9 @@
 //
 // Events, only after the baseline (the first pass over an empty index logs
 // nothing, since nothing is known to have changed):
-// - `edit`, for a memo whose content changed, or a new memo, at the file's
-//   mtime (at most now).
+// - `edit`, for a scored note (a memo or a blog post; `markdown.isScoredRole`)
+//   whose content changed, or a new one, at the file's mtime (at most now).
+//   Below, "memo" means any scored note.
 // - `mention`, for each link item (memo path or dangling key) that a changed
 //   or new memo or dated note's new version links and its old version did not
 //   (`markdown.addedLinkItems` semantics, both versions resolved against the
@@ -89,6 +90,15 @@ export interface IndexPassOptions {
    * one is not read. Use it after a save, so a coarse mtime can't hide it.
    */
   readonly paths?: readonly string[];
+  /**
+   * Log the events the changes imply, and mark changed paths as uncommitted.
+   * Default true. False is for changes that arrived from elsewhere (sync,
+   * PLAN.md section 4, "What does not count"): the client that made them
+   * already logged their edits, mentions, renames and dangling carry-overs,
+   * and those records arrive through the event log. The derived data
+   * (notes, links, sections, relinking) is updated exactly as usual.
+   */
+  readonly record?: boolean;
 }
 
 export interface IndexSummary {
@@ -131,7 +141,7 @@ export async function derivedId(...parts: readonly (string | number)[]): Promise
 export interface ListedFile {
   readonly path: string;
   readonly role: NoteRole;
-  /** For a `dated` file, its date (`YYYY-MM-DD`); otherwise null. */
+  /** For a `dated` file or a dated `blog` post, its date (`YYYY-MM-DD`); otherwise null. */
   readonly date: string | null;
   readonly size: number;
   /** Whole Unix seconds (what notes and events record). */
@@ -143,7 +153,7 @@ export interface ListedFile {
 }
 
 export interface ContentListing {
-  /** Indexable files (role memo, dated or source), by path, in sorted path order. */
+  /** Indexable files (role memo, dated, source or blog), by path, in sorted path order. */
   readonly files: ReadonlyMap<string, ListedFile>;
   /**
    * Paths of `excluded` files. Kept in memory only, so links to them can be
@@ -272,7 +282,7 @@ async function indexChanges(opts: IndexPassOptions, rebuild: boolean): Promise<P
       );
     }
   }
-  const logEvents = !baseline;
+  const logEvents = !baseline && (opts.record ?? true);
 
   // --- Classify each listed file.
   interface Loaded {
@@ -324,9 +334,9 @@ async function indexChanges(opts: IndexPassOptions, rebuild: boolean): Promise<P
   for (const [path, loaded] of [...added].sort(([a], [b]) => (a < b ? -1 : 1))) {
     const candidates = byHash.get(loaded.hash);
     if (!candidates) continue;
-    const isMemo = loaded.file.role === 'memo';
+    const isMemo = markdown.isScoredRole(loaded.file.role);
     const i = candidates.findIndex(
-      (m) => ((prior.get(m) as NoteRecord).role === 'memo') === isMemo,
+      (m) => markdown.isScoredRole((prior.get(m) as NoteRecord).role) === isMemo,
     );
     if (i < 0) continue;
     const from = candidates.splice(i, 1)[0] as string;
@@ -408,7 +418,7 @@ async function indexChanges(opts: IndexPassOptions, rebuild: boolean): Promise<P
     }
     if (!logEvents) return;
     const time = eventTime(file);
-    if (file.role === 'memo') {
+    if (markdown.isScoredRole(file.role)) {
       logEntries.push({
         id: await derivedId('edit', file.path, oldHash, hash, time),
         kind: 'edit',
@@ -421,7 +431,7 @@ async function indexChanges(opts: IndexPassOptions, rebuild: boolean): Promise<P
     const before = new Set(resolveLinks(oldTargets, file.path).map((l) => l.target));
     for (const link of resolveLinks(newTargets, file.path)) {
       if (before.has(link.target)) continue;
-      if (!link.dangling && files.get(link.target)?.role !== 'memo') continue;
+      if (!link.dangling && !markdown.isScoredRole(files.get(link.target)?.role)) continue;
       logEntries.push({
         id: await derivedId('mention', file.path, link.target, oldHash, hash, time),
         kind: 'mention',
@@ -449,7 +459,7 @@ async function indexChanges(opts: IndexPassOptions, rebuild: boolean): Promise<P
     const from = movedTo.get(path);
     if (from !== undefined) {
       changed.add(from);
-      if (loaded.file.role === 'memo' && logEvents) {
+      if (markdown.isScoredRole(loaded.file.role) && logEvents) {
         logEntries.push({
           id: await derivedId('rename', from, path, loaded.hash),
           kind: 'rename',
@@ -504,7 +514,7 @@ async function indexChanges(opts: IndexPassOptions, rebuild: boolean): Promise<P
           if (markdown.hasNonMarkdownExtension(target)) continue;
           const is = resolver.resolve(target, newPath);
           if (is.kind !== 'resolved' || !added.has(is.path)) continue;
-          if (files.get(is.path)?.role !== 'memo') continue;
+          if (!markdown.isScoredRole(files.get(is.path)?.role)) continue;
           carried.set(was.key, is.path);
         }
       }
@@ -548,6 +558,7 @@ async function indexChanges(opts: IndexPassOptions, rebuild: boolean): Promise<P
   if (logEntries.length > 0) await stores.events.append(logEntries, { now });
 
   const changedList = logEvents ? [...changed].sort() : [];
+  // With `record: false`, `changed` is not reported either: nothing is uncommitted.
   if (changedList.length > 0) {
     await writeUncommitted(meta, [...(await readUncommitted(meta)), ...changedList]);
   }

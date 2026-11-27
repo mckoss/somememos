@@ -23,6 +23,7 @@ export { maskCodeSpans, splitWikiLink, stripInlineMarkdown, type WikiLinkParts }
 export { addedLinkItems, linkItems } from './link-diff.js';
 export { linksFromScan, parseLinks, type WikiLink } from './links.js';
 export { parseNote, type ParsedNote } from './note.js';
+export { isPublished } from './publish.js';
 export {
   baseName,
   dirName,
@@ -43,9 +44,11 @@ export {
   DEFAULT_FOLDER_ROLES,
   PathPatternError,
   ROLE_PRECEDENCE,
+  SCORED_ROLES,
   classifyPath,
   compilePathPattern,
   createRoleClassifier,
+  isScoredRole,
   isValidCalendarDate,
   matchDatedPath,
   parseCalendarDate,

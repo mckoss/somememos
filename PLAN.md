@@ -368,6 +368,24 @@ No ranking parameter is chosen by intuition. `somememos eval` replays the brain'
   - Tests and documentation use a synthetic brain made by a generator script, never a sample of real notes.
   - The repo's `.gitignore` covers every sidecar file, and CI fails if a database or an event log export is committed.
 
+### First experiment results (2026-11-27)
+
+Run with `somememos eval` on one real vault: about seven months of history, imported from git. Only aggregate numbers are recorded here. There were 247 search cases (each commit's message as the query, the memos it changed as the answers, the index rebuilt as of the commit's parent) and 272 orientation cases (which memos have activity in the following week). MRR is mean reciprocal rank; R@10 is recall in the top ten.
+
+| Question | Result |
+|---|---|
+| Does activation help search? | **Yes.** Keyword only: MRR 0.43, R@10 0.60. Keyword plus activation: MRR 0.59, R@10 0.77 |
+| How strongly should activation count (`α`)? | **Less than 1.** MRR 0.51 at `α` = 2, 0.59 at 1, 0.62 at 0.5, 0.64 at 0.25 |
+| Which half-life drives `hot`? | **Week** for search (MRR 0.59, against 0.57 day, 0.53 month, 0.45 year). For orientation, day has the best MRR (0.72 against 0.64) and week the best R@20 |
+| Count a burst of events on one note as one? | **Yes.** With a one-hour window, orientation MRR rises from 0.64 to 0.75 and search from 0.59 to 0.61 |
+| Weight of a mention against an edit | **No clear winner.** 0.5 and 1 are within noise; 0 hurts orientation (MRR 0.61 against 0.64 to 0.66); 2 is slightly worse |
+| Keyword parameters | **Title weight 5 and body `b` 0.5** are best (keyword-only MRR 0.46, against 0.43 at the placeholders). `k1` makes no measurable difference |
+| Link spreading | **It hurts in every form tried.** Search MRR falls from 0.59 to between 0.30 and 0.51. Stays off |
+
+**Defaults chosen from this:** `α` 0.5, a one-hour burst window, title weight 5, body `b` 0.5, `hot` on the week half-life, mention weight 1, link spreading off. With `α` 0.5, the burst window and the keyword changes together, search MRR is 0.64 and R@10 0.81.
+
+**How far to trust it:** this is one vault and one kind of query, the settings were chosen and measured on the same cases, and differences under about 0.02 are noise. The read weight is unmeasured, because imported history has no reads. Section-level scoring has not been tried. Rerun as real use accumulates.
+
 ### Keyword scoring details
 
 Implemented in `packages/core/src/keyword`. The parameter values below are **placeholders until the experiments set them**.
@@ -460,6 +478,50 @@ A client that must work offline holds a full local copy: the markdown, the event
 - **Events: send the log, never the scores.** The client pushes the events it logged while offline. Every event has a globally unique id, and the server ignores any id it already has, so a retried push counts nothing twice. Score tables are never merged or sent; each copy derives its scores from the log. Folding is order-independent (`combine()` is commutative and associative), so every copy that holds the same events computes the same scores.
 - **Edits** made offline are sent like a commit, each with its base hash.
 - A change that arrives from the server is not a new event on the receiving client.
+
+### Sync protocol (first version)
+
+Written 2026-11-27 so the server and the app can be built against one description. It follows the rules above and adds the concrete shapes.
+
+**One request does a whole sync.** An offline copy sends `POST /api/brains/{brain}/sync` with what it has to push and the last mutation number it has seen, and gets back everything newer.
+
+```
+request:  { since,                       // last mutation number this client has applied
+            events:  [...],              // event log entries logged locally (with their ids)
+            changes: [...],              // change records written locally (with their ids)
+            edits:   [ { id, op: "write" | "delete" | "rename", path, to?, baseHash, text? } ] }
+
+response: { mutation,                    // the server's counter after this request
+            results: [ { id, status: "applied" | "duplicate" | "conflict", hash?, currentHash?, currentText? } ],
+            notes:   [ { path, hash, text } | { path, deleted: true } | { path, renamedTo } ],
+            events:  [...], changes: [...] }      // everything after `since`, from any client
+```
+
+- **Order on the server:** edits first, then events and change records, all for one brain inside one lock, so the counter and the git history agree.
+- **An edit is applied only if `baseHash` matches** the note's current hash (`null` means "create; the note must not exist"). An applied edit becomes one git commit, whose message is the change record that names it, and takes the next mutation number.
+- **Events and change records are deduplicated by id.** The client that made an edit logged its own `edit` and `mention` events and its change record, and pushes them. The server does not log events for edits that arrive through sync, or they would be counted twice.
+- **Applying what comes back:** the client writes the returned notes into its content store and indexes them *without logging events*, appends the returned events and change records (ignoring ids it has), folds, and stores `mutation` as its new `since`.
+- **A conflict never loses text.** For an edit refused as stale, the client keeps its own version as `name.conflict-<client>-<date>.md`, takes the server's version at the original path, and tells the person. A later version can offer a three-way merge using the base version from the server's git history.
+- **Retries are safe.** Repeating a request whose response was lost re-sends the same ids: events and changes are duplicates, and an edit whose text already matches the stored note is reported as `duplicate`, not as a conflict.
+- **A first sync** is the same request with `since: 0` from an empty copy, or, for a brain that started on the device, a push of everything it has.
+- **Large brains:** the response is paged. It carries `more: true` and the client repeats with the new `since` until it is false.
+
+**Remote clients use the engine over HTTP.** An agent's CLI in remote mode holds no copy. It calls routes that map one-to-one onto the engine (`search`, `list`, `readNote`, `saveNote`, `log`, `status`), and for those calls the *server's* engine logs the read, edit and mention events, since no client has.
+
+**Access.** Every request carries a bearer token. The first version is a single-user server with one token set in its environment; real sign-in replaces how a token is obtained, not the protocol.
+
+### The server as built
+
+Implemented on 2026-11-27 in `packages/server`, mounted by the web app under `/api`. See `docs/deploy.md` for running it.
+
+- **Git is the only copy of note text on the server.** Postgres holds the event log, change records, scores, the index, and a record of which note version took which mutation number.
+- **One request, one transaction.** Each request runs in a single Postgres transaction under a lock for its brain. The git commit is made first and the database commit second, and the database commit is what makes the change real. If the process dies between the two, the next request finds git ahead, sets that commit aside under a ref, and the client's retry is deduplicated.
+- **Additions to the sync shapes above:** a request may name its `client`; an edit can come back `refused` with a reason code (for example, changing an immutable source); the response carries `more` when it is paged.
+- **The client side of sync lives in core** (`prepareSync`, `applySync`, `runSync`, `applyRemote`), so the browser, the CLI and tests all use the same code. A copy remembers the last mutation number it applied and the hash each note had at the last sync, and works out its edits by comparing.
+- **Renames apply by time whatever order entries arrive in.** Two copies that receive the same entries in different orders compute the same scores. A rename that arrives late triggers a refold.
+- **Access** is a bearer token from the server's environment, compared in constant time, with failed attempts rate-limited and cross-origin requests refused. Real accounts can replace the token check without changing a route.
+- **Without a database** the server still serves the web app, and the API answers 503.
+- **Folder roles are set when a brain is created** on the server, and a syncing copy takes them from there.
 
 ### Edits and conflicts
 

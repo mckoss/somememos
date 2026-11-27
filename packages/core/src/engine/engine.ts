@@ -22,6 +22,7 @@ import type {
   Stores,
 } from '../storage/types.js';
 import { changeOp, newId, normalizeChangePaths, unixNow } from '../storage/validate.js';
+import { createSyncMethods } from './sync.js';
 import {
   EngineError,
   type ChangeOptions,
@@ -38,6 +39,7 @@ import {
   type IndexOptions,
   type ListOptions,
   type LogOptions,
+  type NoteTitle,
   type NoteView,
   type ReadNoteOptions,
   type RenameResult,
@@ -130,7 +132,14 @@ export function createEngine(options: EngineOptions): Engine {
     return match.role;
   };
 
-  const pass = (opts: IndexOptions = {}): Promise<IndexSummary> =>
+  /** A blog post's publish state, read from its front matter; null for other roles. */
+  const publishedOf = async (note: NoteRecord): Promise<boolean | null> => {
+    if (note.role !== 'blog') return null;
+    const text = await content.read(note.path);
+    return text === undefined ? false : markdown.isPublished(text);
+  };
+
+  const pass = (opts: IndexOptions & { readonly record?: boolean } = {}): Promise<IndexSummary> =>
     runIndexPass({
       stores,
       content,
@@ -139,6 +148,7 @@ export function createEngine(options: EngineOptions): Engine {
       now,
       ...(opts.rebuild ? { rebuild: true } : {}),
       ...(opts.paths && opts.paths.length > 0 ? { paths: opts.paths } : {}),
+      ...(opts.record === false ? { record: false } : {}),
     });
 
   /** Appends one change record for `paths` and drops them from the uncommitted list. Under the index lock. */
@@ -175,10 +185,14 @@ export function createEngine(options: EngineOptions): Engine {
   ): Promise<SearchResponse> => {
     const at = now();
     const notes = new Map<string, NoteRecord>();
+    const published = new Map<string, boolean | null>();
     for (const r of results) {
       if (r.path === null || notes.has(r.path)) continue;
       const n = await stores.notes.getNote(r.path);
-      if (n) notes.set(r.path, n);
+      if (n) {
+        notes.set(r.path, n);
+        published.set(r.path, await publishedOf(n));
+      }
     }
     return {
       mode,
@@ -193,6 +207,7 @@ export function createEngine(options: EngineOptions): Engine {
           title: r.title,
           role: note?.role ?? null,
           date: note?.date ?? null,
+          published: r.path === null ? null : (published.get(r.path) ?? null),
           sectionId: r.sectionId,
           heading: r.heading,
           snippet: r.snippet,
@@ -254,8 +269,25 @@ export function createEngine(options: EngineOptions): Engine {
     return { path, date: day };
   };
 
+  const sync = createSyncMethods({
+    stores,
+    content,
+    config,
+    classifier,
+    now,
+    pass: (opts = {}) => pass(opts),
+    recordChange: (paths, message) => recordChange(paths, message),
+    today: () => localDate(now()),
+  });
+
   const engine: Engine = {
     config,
+
+    applyRemote: (input) => serial(() => sync.applyRemote(input ?? {})),
+    syncStatus: () => serial(() => sync.syncStatus()),
+    prepareSync: (opts) => serial(() => sync.prepareSync(opts)),
+    applySync: (prepared, response) => serial(() => sync.applySync(prepared, response)),
+    resetSync: () => serial(() => sync.resetSync()),
 
     index: (opts = {}) => serial(() => pass(opts)),
 
@@ -273,7 +305,7 @@ export function createEngine(options: EngineOptions): Engine {
         let ranked = await rankSearch(stores, query, {
           ...rankingInput,
           mode,
-          ...(dated ? { searchRoles: ['dated'] as const } : { limit }),
+          ...(dated ? { searchRoles: ['dated', 'blog'] as const } : { limit }),
         });
         if (dated) {
           const inRange = async (r: RankedResult): Promise<boolean> => {
@@ -310,7 +342,7 @@ export function createEngine(options: EngineOptions): Engine {
         }
         if (!note) throw new EngineError('not-found', `no note at ${path}`, path);
         let recorded = false;
-        if ((opts.record ?? true) && note.role === 'memo') {
+        if ((opts.record ?? true) && markdown.isScoredRole(note.role)) {
           const time = now();
           const event: LogInput = {
             id: newId(),
@@ -331,6 +363,7 @@ export function createEngine(options: EngineOptions): Engine {
           title: note.title,
           role: note.role,
           date: note.date,
+          published: note.role === 'blog' ? markdown.isPublished(text) : null,
           sections: (await stores.terms.sectionsOf(path)).map((s) => ({
             index: s.index,
             heading: s.heading,
@@ -458,7 +491,7 @@ export function createEngine(options: EngineOptions): Engine {
     status: () =>
       serial(async (): Promise<EngineStatus> => {
         const notes = await stores.notes.listNotes();
-        const byRole = { memo: 0, dated: 0, source: 0 };
+        const byRole = { memo: 0, dated: 0, source: 0, blog: 0 };
         for (const n of notes) byRole[n.role]++;
         return {
           clientId: config.clientId,
@@ -485,13 +518,19 @@ export function createEngine(options: EngineOptions): Engine {
       }),
 
     noteTitles: () =>
-      serial(async () =>
-        (await stores.notes.listNotes()).map((n) => ({
-          path: n.path,
-          title: n.title,
-          role: n.role,
-        })),
-      ),
+      serial(async () => {
+        const out: NoteTitle[] = [];
+        for (const n of await stores.notes.listNotes()) {
+          out.push({
+            path: n.path,
+            title: n.title,
+            role: n.role,
+            date: n.date,
+            published: await publishedOf(n),
+          });
+        }
+        return out;
+      }),
 
     danglingLinks: () => serial(async () => stores.notes.danglingTargets()),
 

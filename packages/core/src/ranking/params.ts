@@ -113,7 +113,7 @@ export interface RankingParams {
    * `now` and `halfLifeSeconds` when > 0.
    */
   readonly neglectedMinLongScore: number;
-  /** Roles a keyword search returns. Activation lists always show `memo` notes and dangling items. */
+  /** Roles a keyword search returns. Activation lists always show scored notes (memos, blog posts) and dangling items. */
   readonly searchRoles: readonly NoteRole[];
   /** Return at most this many results. Default: all. */
   readonly limit: number | undefined;
@@ -163,7 +163,7 @@ export const DEFAULT_RANKING_PARAMS: RankingParams = Object.freeze({
   trendingCandidates: 100,
   neglectedCandidates: 100,
   neglectedMinLongScore: 0,
-  searchRoles: Object.freeze(['memo', 'dated', 'source'] as const),
+  searchRoles: Object.freeze(['memo', 'dated', 'source', 'blog'] as const),
   limit: undefined,
   now: undefined,
   halfLifeSeconds: undefined,

@@ -1,6 +1,6 @@
 {
   "name": "somememos",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "A second brain made of plain markdown files, with time-aware working memory.",
   "license": "Apache-2.0",
@@ -15,7 +15,7 @@
   "scripts": {
     "postinstall": "node packages/core/scripts/gen-version.mjs",
     "gen:version": "node packages/core/scripts/gen-version.mjs",
-    "build": "npm run build -w @somememos/core && npm run build -w @somememos/sqlite-store && npm run build -w @somememos/cli && npm run build -w @somememos/web",
+    "build": "npm run build -w @somememos/core && npm run build -w @somememos/sqlite-store && npm run build -w @somememos/pg-store && npm run build -w @somememos/server && npm run build -w @somememos/cli && npm run build -w @somememos/web",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write . && eslint --fix .",
     "pretypecheck": "npm run gen:version",
@@ -24,7 +24,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "check:privacy": "node scripts/check-no-brain-data.mjs",
-    "check": "npm run check:privacy && npm run lint && npm run typecheck && npm test && npm run build"
+    "check": "npm run check:privacy && npm run lint && npm run typecheck && npm test && npm run build && npm run e2e -w @somememos/web",
+    "e2e": "npm run build && npm run e2e -w @somememos/web"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
