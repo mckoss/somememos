@@ -5,6 +5,8 @@ coverage/
 .env
 .env.*
 
-# Rebuildable sidecar index (the scores snapshot is NOT ignored)
-.somememos/index.sqlite
-.somememos/index.sqlite-*
+# Brain data must never be committed here (see AGENTS.md: no personal data).
+.somememos/
+*.sqlite
+*.sqlite-*
+events.jsonl

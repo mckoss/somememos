@@ -320,7 +320,11 @@ No ranking parameter is chosen by intuition. `somememos eval` replays the brain'
 - **Metrics.** *Recall@k*: the share of right notes that appear in the top k. *MRR* (mean reciprocal rank): 1 divided by the position of the first right note, averaged over cases. These only compare setups offline. They never touch a score.
 - **What gets compared:** per-kind weights, `α`, half-lives and which of them drive each mode, how bursts of edits are counted, heading vs body weight in `bm25`, link spreading (off, outgoing, backlinks; strength), and note-level vs section-level scoring.
 - **Limits.** Imported history holds edits and mentions but no reads. The read weight can be measured once the log has collected reads from real use.
-- **Privacy.** Evaluation cases come from private notes. Case files and per-case output stay in the brain or on the local machine. Only the harness code and aggregate results belong in this repo.
+- **Privacy.** Evaluation cases come from private notes, and this repository is public. Nothing from a real brain may reach it:
+  - Case files and per-case output are written only inside the brain's own `.somememos/` directory. `eval` refuses to write anywhere inside a somememos source checkout.
+  - What may be recorded here is aggregate numbers only: a metric per parameter setting, and the number of cases. No query, path, title or name, and no example drawn from a real case.
+  - Tests and documentation use a synthetic brain made by a generator script, never a sample of real notes.
+  - The repo's `.gitignore` covers every sidecar file, and CI fails if a database or an event log export is committed.
 
 ## 6. Interfaces
 
@@ -474,11 +478,13 @@ Each milestone should leave something usable. [IMPLEMENTATION.md](IMPLEMENTATION
 - The vault lives in git today. Its history is imported once with `somememos import-git`. From milestone 3 the server holds the vault, and git stops being how it moves between machines.
 - Agents working in the vault must read notes with `somememos read`, not `cat`, so that reads are recorded. The amended `AGENTS.md` says so.
 
+- **Keep the vault out of this repo.** The vault is private and this repository is public. Work on the vault happens in the vault's own directory and repository. Nothing learned from its contents is written here beyond the general layout above and aggregate experiment numbers (see the privacy rules in section 5 and in `AGENTS.md`).
+
 ## 12. Open questions
 
 Settled on 2026-11-27, and removed from this list: the primary purpose (agent memory), dangling links (in from M1), the look-ahead channel (events are dated by interaction, so calendar dates are just content), how scoring choices get made (by experiment), raw activity (an event log is kept), git (the server's version store, one repository per brain, with no git interface exposed), and the change log (kept by somememos from commit messages, not written by agents).
 
-1. **Evaluation queries.** Partly answered by reading the vault's logs on 2026-11-27: the `ingest` entries and the wiki `update` entries make good search cases, but the nightly diary entries and the older untimed headings don't. Expect 50 to 100 usable cases, so a small hand-written case file is still needed. How many is enough?
+1. **Evaluation queries.** Changelog entries and commit messages give some usable search cases, but not all of them describe their task well enough, so a hand-written case file is also needed. How many cases are enough for a stable comparison?
 2. **Ranking parameters, all to be answered by experiment:** per-kind weights, `α`, half-lives per mode, how bursts of edits count, heading vs body weight, link spreading (whether, which direction, how strong), and section-level vs note-level scoring.
 3. **The read feedback loop.** Does counting agent reads make the hot list reinforce itself, and does the read weight need a guard?
 4. **Semantic search.** No embeddings for now. Revisit only if experiments show keyword search missing notes that rephrasing doesn't find. If added, it is one more ranking signal (for example with sqlite-vec), with section-level vectors.
