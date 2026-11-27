@@ -35,9 +35,16 @@ Collected while Mike was away overnight (from 2026-11-27). None of these blocked
 11. **Time in caches after unpublishing.** A page can stay in a browser or proxy cache for up to a minute after its post is unpublished.
     - *Meanwhile:* one minute. It can be shorter at the cost of more requests.
 
-12. **Folder roles across devices.** Roles are set when a brain is created on the server. Changing them later on one device is not pushed to the server or to other devices.
-    - *Meanwhile:* the app warns that the change applies to that device only. Decide whether roles should be editable on the server and pushed out.
+12. **Folder roles across devices.** Settled overnight: a brain's shared settings, roles included, now sync, and two devices that both changed them get a choice, never a silent overwrite. Excluding a folder never deletes its notes anywhere.
+    - *Still yours to decide:* should a newly excluded folder's notes ever be removed from the server's repository? Today they never are.
 
-13. **Blog settings screen.** Turning a blog on and naming it is done through the API for now; the app has no screen for it.
-    - *Meanwhile:* the routes are described in PLAN.md section 8.
+13. **Blog settings screen.** Settled overnight: the app has a Public blog section in More.
+
+14. **Security review follow-ups** (`docs/security-review-2026-11-27.md`). Nothing critical or high is open. Left for you:
+    - Should images in notes be limited to the app's own site? Today a note can load an image from any https site, which tells that site when you open the note.
+    - The contact line in `SECURITY.md` is a placeholder.
+    - Whether to add a strict-transport-security header once the domain is settled.
+
+15. **Exporting notes from the web app.** The app exported only the event log, although the plan says an export is the notes plus the log.
+    - *Meanwhile:* an "Export everything" zip is being added.
 
