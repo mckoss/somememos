@@ -68,7 +68,7 @@ import { TransactionPool } from './tx-pool.js';
 export const BRAIN_ID = /^[a-z0-9][a-z0-9-]{0,62}$/;
 
 /** A client id, as `BrainConfig.clientId` allows. */
-export const CLIENT_ID = /^[A-Za-z0-9._:-]{1,100}$/;
+export const CLIENT_ID = storage.CLIENT_ID;
 
 /** The client id the server's engine uses when a request names none. */
 export const SERVER_CLIENT_ID = 'server';

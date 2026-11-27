@@ -26,7 +26,8 @@
   "dependencies": {
     "@somememos/core": "*",
     "@somememos/pg-store": "*",
-    "pg": "^8.23.1"
+    "pg": "^8.23.1",
+    "valibot": "^1.5.0"
   },
   "devDependencies": {
     "@types/pg": "^8.23.1"

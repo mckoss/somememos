@@ -103,7 +103,8 @@ const TOP_KEYS = [
   'changeOps',
 ] as const;
 
-const CLIENT_ID = /^[A-Za-z0-9._:-]{1,100}$/;
+/** A client id: 1 to 100 letters, digits, `.`, `_`, `:` and `-`. */
+export const CLIENT_ID = /^[A-Za-z0-9._:-]{1,100}$/;
 const OP_NAME = /^[a-z][a-z0-9_-]*$/;
 
 /**

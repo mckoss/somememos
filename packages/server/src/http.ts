@@ -44,6 +44,9 @@
 // without the brain's lock on a read-only snapshot (`BrainService.readBrain`);
 // everything else is serialized per brain (`BrainService.withBrain`).
 //
+// Every body, query string and path parameter is checked by a schema
+// (./requests.ts and core's sync schemas) before a route does anything.
+//
 // Errors are `{ error: { code, message, path? } }` with a proper status.
 // Cross-origin browser requests are refused: there are no CORS headers, and
 // a request whose Origin is another host gets 403.
@@ -51,6 +54,7 @@
 import { VERSION, engine as coreEngine, markdown, storage, sync } from '@somememos/core';
 import { ensureMigrated, MIGRATIONS } from '@somememos/pg-store';
 import pg from 'pg';
+import type * as v from 'valibot';
 import { FailureLimiter, tokenAuthorizer, type Authorizer } from './auth.js';
 import { PublicBlogs } from './blog.js';
 import { parseBlogSettings, readBlogSettings, writeBlogSettings } from './blog-settings.js';
@@ -61,6 +65,27 @@ import { loadServerConfig, type ServerConfig } from './config.js';
 import { ENGINE_ERROR_STATUS, HttpError } from './errors.js';
 import { noteHistory, pastVersion } from './history.js';
 import { parseSyncRequest, runSync } from './sync.js';
+import {
+  AddressQuery,
+  CommitIdSchema,
+  CreateBrainBody,
+  DeleteQuery,
+  DiaryBody,
+  DiaryQuery,
+  HistoryQuery,
+  ListQuery,
+  LogQuery,
+  ReadQuery,
+  RenameBody,
+  RestoreBody,
+  SaveNoteBody,
+  SearchQuery,
+  SlugQuery,
+  VersionQuery,
+  fieldCodes,
+  parseQuery,
+  parseRequest,
+} from './requests.js';
 import {
   checkSyncConfigRevision,
   parseConfigPut,
@@ -146,11 +171,11 @@ async function readJson(request: Request, limit: number): Promise<unknown> {
     }
     chunks.push(value);
   }
-  const text = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks));
   try {
+    const text = new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks));
     return JSON.parse(text);
   } catch {
-    throw new HttpError(400, 'invalid-json', 'the request body is not valid JSON');
+    throw new HttpError(400, 'invalid-json', 'the request body is not valid UTF-8 JSON');
   }
 }
 
@@ -165,69 +190,17 @@ function decodeSegments(segments: readonly string[]): string[] {
   }
 }
 
-/** A note path from the URL or a body, checked as sync checks it (no `..`, no dot folders, …). */
-function notePath(value: unknown): string {
-  const problem = sync.syncPathProblem(value);
-  if (problem !== null) throw new HttpError(400, 'invalid-path', problem);
-  return value as string;
+/** A note path from the URL, checked as sync checks it (no `..`, no dot folders, …). */
+function notePath(value: string): string {
+  return parseRequest(sync.NotePathSchema, value, () => [400, 'invalid-path'], 'the note path');
 }
 
-function intParam(params: URLSearchParams, name: string): number | undefined {
-  const v = params.get(name);
-  if (v === null || v === '') return undefined;
-  const n = Number(v);
-  if (!Number.isSafeInteger(n))
-    throw new HttpError(400, 'invalid-argument', `${name} must be an integer`);
-  return n;
-}
-
-function boolParam(params: URLSearchParams, name: string): boolean | undefined {
-  const v = params.get(name);
-  if (v === null || v === '') return undefined;
-  if (v === 'true' || v === '1') return true;
-  if (v === 'false' || v === '0') return false;
-  throw new HttpError(400, 'invalid-argument', `${name} must be true or false`);
-}
-
-function stringParam(params: URLSearchParams, name: string): string | undefined {
-  const v = params.get(name);
-  return v === null ? undefined : v;
-}
-
-function object(body: unknown): Record<string, unknown> {
-  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
-    throw new HttpError(400, 'invalid-request', 'the body must be a JSON object');
-  }
-  return body as Record<string, unknown>;
-}
-
-function optionalString(body: Record<string, unknown>, name: string): string | undefined {
-  const v = body[name];
-  if (v === undefined || v === null) return undefined;
-  if (typeof v !== 'string')
-    throw new HttpError(400, 'invalid-argument', `${name} must be a string`);
-  if (v.length > sync.SYNC_LIMITS.maxMessageLength) {
-    throw new HttpError(400, 'invalid-argument', `${name} is too long`);
-  }
-  return v;
-}
-
-function baseHashOf(body: Record<string, unknown>): { baseHash?: string | null } {
-  if (!('baseHash' in body)) return {};
-  const v = body.baseHash;
-  if (v === null) return { baseHash: null };
-  if (typeof v === 'string' && /^[0-9a-f]{64}$/.test(v)) return { baseHash: v };
-  throw new HttpError(400, 'invalid-argument', 'baseHash must be null or a SHA-256 hex hash');
-}
-
-const MODES = new Set(['hot', 'trending', 'neglected', 'all']);
-function modeParam(params: URLSearchParams): coreEngine.RankMode | undefined {
-  const mode = params.get('mode');
-  if (mode === null || mode === '') return undefined;
-  if (!MODES.has(mode))
-    throw new HttpError(400, 'invalid-argument', 'mode must be hot, trending, neglected or all');
-  return mode as coreEngine.RankMode;
-}
+/** A request body checked by `schema`, with the usual codes (./requests.ts). */
+const body = async <S extends v.GenericSchema>(
+  request: Request,
+  schema: S,
+): Promise<v.InferOutput<S>> =>
+  parseRequest(schema, await readJson(request, SMALL_BODY), fieldCodes());
 
 /** Creates the API from a config (see `createAppFromEnv` for the usual way). */
 export function createApp(options: AppOptions): App {
@@ -320,12 +293,8 @@ export function createApp(options: AppOptions): App {
     if (segments.length === 1) {
       if (method === 'GET') return json(200, { brains: await svc.list(owner) });
       if (method === 'POST') {
-        const body = object(await readJson(request, SMALL_BODY));
-        for (const key of Object.keys(body)) {
-          if (key !== 'id' && key !== 'config')
-            throw new HttpError(400, 'invalid-request', `unknown field "${key}"`);
-        }
-        return json(201, await svc.create(owner, body.id, body.config));
+        const { id, config } = await body(request, CreateBrainBody);
+        return json(201, await svc.create(owner, id, config));
       }
       throw new HttpError(405, 'method-not-allowed', 'use GET or POST');
     }
@@ -391,9 +360,11 @@ export function createApp(options: AppOptions): App {
       allow('GET');
       await svc.get(owner, brainId);
       if (tail[0] === 'slug') {
-        return json(200, await checkBlogSlug(svc.pool, brainId, params.get('slug') ?? ''));
+        const { slug } = parseQuery(SlugQuery, params);
+        return json(200, await checkBlogSlug(svc.pool, brainId, slug));
       }
-      return json(200, await postAddress(svc.pool, brainId, params.get('path') ?? ''));
+      const { path } = parseQuery(AddressQuery, params);
+      return json(200, await postAddress(svc.pool, brainId, path));
     }
 
     if (action === 'blog' && tail.length === 0) {
@@ -413,22 +384,24 @@ export function createApp(options: AppOptions): App {
       if (last === 'history' && decoded.length > 1) {
         allow('GET');
         const path = notePath(decoded.slice(0, -1).join('/'));
-        const limit = intParam(params, 'limit') ?? 200;
-        if (limit < 1 || limit > 1000)
-          throw new HttpError(400, 'invalid-argument', 'limit must be 1 to 1000');
+        const { limit } = parseQuery(HistoryQuery, params);
         return json(200, await readBrain((ctx) => noteHistory(ctx, checkRole(ctx, path), limit)));
       }
       if (decoded.length > 2 && decoded.at(-2) === 'versions') {
         allow('GET');
         const path = notePath(decoded.slice(0, -2).join('/'));
-        return json(200, await readBrain((ctx) => pastVersion(ctx, checkRole(ctx, path), last)));
+        const commit = parseRequest(
+          CommitIdSchema,
+          last,
+          () => [400, 'invalid-argument'],
+          'the commit',
+        );
+        return json(200, await readBrain((ctx) => pastVersion(ctx, checkRole(ctx, path), commit)));
       }
       if (last === 'versions' && decoded.length > 1) {
         allow('GET');
         const path = notePath(decoded.slice(0, -1).join('/'));
-        const hash = params.get('hash') ?? '';
-        if (!/^[0-9a-f]{64}$/.test(hash))
-          throw new HttpError(400, 'invalid-argument', 'hash must be a SHA-256 hex hash');
+        const { hash } = parseQuery(VersionQuery, params);
         return json(
           200,
           await readBrain(async (ctx) => {
@@ -446,14 +419,11 @@ export function createApp(options: AppOptions): App {
       if (last === 'restore' && decoded.length > 1) {
         allow('POST');
         const path = notePath(decoded.slice(0, -1).join('/'));
-        const body = object(await readJson(request, SMALL_BODY));
-        const commit = body.commit;
-        const message = optionalString(body, 'message');
-        const base = baseHashOf(body);
+        const { commit, baseHash, message } = await body(request, RestoreBody);
         const result = await withBrain(async (ctx) => {
-          const past = await pastVersion(ctx, checkRole(ctx, path), String(commit));
+          const past = await pastVersion(ctx, checkRole(ctx, path), commit);
           return ctx.engine.saveNote(path, past.text, {
-            ...base,
+            ...(baseHash !== undefined ? { baseHash } : {}),
             message: message ?? `restore ${path} to its version of ${past.commit.slice(0, 12)}`,
           });
         });
@@ -461,7 +431,7 @@ export function createApp(options: AppOptions): App {
       }
       const path = notePath(decoded.join('/'));
       if (method === 'GET') {
-        const record = boolParam(params, 'record');
+        const { record } = parseQuery(ReadQuery, params);
         // A read that logs nothing needs no lock; one that logs a read event does.
         const run = record === false ? readBrain : withBrain;
         return json(
@@ -470,20 +440,16 @@ export function createApp(options: AppOptions): App {
         );
       }
       if (method === 'PUT') {
-        const body = object(await readJson(request, SMALL_BODY));
-        if (typeof body.text !== 'string')
-          throw new HttpError(400, 'invalid-argument', 'text must be a string');
-        if (Buffer.byteLength(body.text, 'utf8') > sync.SYNC_LIMITS.maxNoteBytes) {
-          throw new HttpError(413, 'too-large', 'the note is too large');
-        }
-        const message = optionalString(body, 'message');
-        const opts = { ...baseHashOf(body), ...(message !== undefined ? { message } : {}) };
-        const text = body.text;
+        const { text, baseHash, message } = await body(request, SaveNoteBody);
+        const opts = {
+          ...(baseHash !== undefined ? { baseHash } : {}),
+          ...(message != null ? { message } : {}),
+        };
         const result = await withBrain((ctx) => ctx.engine.saveNote(path, text, opts));
         return json(result.status === 'conflict' ? 409 : 200, result);
       }
       if (method === 'DELETE') {
-        const message = stringParam(params, 'message');
+        const { message } = parseQuery(DeleteQuery, params);
         return json(
           200,
           await withBrain((ctx) =>
@@ -500,11 +466,7 @@ export function createApp(options: AppOptions): App {
     switch (action) {
       case 'search': {
         allow('GET');
-        const q = params.get('q') ?? '';
-        const mode = modeParam(params);
-        const limit = intParam(params, 'limit');
-        const since = stringParam(params, 'since');
-        const until = stringParam(params, 'until');
+        const { q, mode, limit, since, until } = parseQuery(SearchQuery, params);
         return json(
           200,
           await readBrain((ctx) =>
@@ -519,8 +481,7 @@ export function createApp(options: AppOptions): App {
       }
       case 'list': {
         allow('GET');
-        const mode = modeParam(params);
-        const limit = intParam(params, 'limit');
+        const { mode, limit } = parseQuery(ListQuery, params);
         return json(
           200,
           await readBrain((ctx) =>
@@ -530,29 +491,20 @@ export function createApp(options: AppOptions): App {
       }
       case 'rename': {
         allow('POST');
-        const body = object(await readJson(request, SMALL_BODY));
-        const from = notePath(body.from);
-        const to = notePath(body.to);
-        const message = optionalString(body, 'message');
+        const { from, to, message } = await body(request, RenameBody);
         return json(
           200,
           await withBrain((ctx) =>
-            ctx.engine.renameNote(from, to, message !== undefined ? { message } : {}),
+            ctx.engine.renameNote(from, to, message != null ? { message } : {}),
           ),
         );
       }
       case 'log': {
         allow('GET');
-        const path = stringParam(params, 'path');
-        const op = stringParam(params, 'op');
-        const since = intParam(params, 'since');
-        const until = intParam(params, 'until');
-        const limit = intParam(params, 'limit');
-        const all = boolParam(params, 'all');
-        const query = stringParam(params, 'q');
+        const { path, op, since, until, limit, all, q: query } = parseQuery(LogQuery, params);
         const changes = await readBrain((ctx) =>
           ctx.engine.log({
-            ...(path !== undefined ? { path: notePath(path) } : {}),
+            ...(path !== undefined ? { path } : {}),
             ...(op !== undefined ? { op } : {}),
             ...(query !== undefined ? { query } : {}),
             ...(since !== undefined ? { since } : {}),
@@ -575,8 +527,8 @@ export function createApp(options: AppOptions): App {
       case 'diary': {
         const date =
           method === 'POST'
-            ? optionalString(object(await readJson(request, SMALL_BODY)), 'date')
-            : stringParam(params, 'date');
+            ? ((await body(request, DiaryBody)).date ?? undefined)
+            : parseQuery(DiaryQuery, params).date;
         if (method === 'GET')
           return json(200, await readBrain((ctx) => ctx.engine.diaryPath(date)));
         allow('POST');
