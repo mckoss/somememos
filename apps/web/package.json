@@ -18,11 +18,27 @@
     "test": "vitest run"
   },
   "devDependencies": {
+    "@playwright/test": "1.63.0",
     "@sveltejs/adapter-node": "^6.0.6",
     "@sveltejs/kit": "^3.4.1",
     "@sveltejs/vite-plugin-svelte": "^7.3.2",
+    "@types/markdown-it": "^14.2.0",
     "svelte": "^5.59.2",
     "svelte-check": "^4.7.8",
     "vite": "^8.4.0"
+  },
+  "dependencies": {
+    "@codemirror/autocomplete": "^6.20.4",
+    "@codemirror/commands": "^6.11.2",
+    "@codemirror/lang-markdown": "^6.5.2",
+    "@codemirror/language": "^6.13.1",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.44.2",
+    "@somememos/core": "*",
+    "@somememos/sqlite-store": "*",
+    "@sqlite.org/sqlite-wasm": "^3.54.1-build1",
+    "codemirror": "^6.0.2",
+    "dompurify": "^3.5.0",
+    "markdown-it": "^15.0.3"
   }
 }
