@@ -42,3 +42,11 @@ export {
   sharedConfigKey,
   sharedConfigOf,
 } from './config.js';
+export {
+  MAX_BATCH_OPS,
+  type BatchConflict,
+  type BatchOp,
+  type BatchOpResult,
+  type BatchRequest,
+  type BatchResult,
+} from './batch.js';

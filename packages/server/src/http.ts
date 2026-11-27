@@ -16,6 +16,7 @@
 //   PUT    /api/brains/{b}/notes/{path}  { text, baseHash?, message? } → SaveResult (409 on conflict)
 //   DELETE /api/brains/{b}/notes/{path}?message=                 → DeleteResult
 //   POST   /api/brains/{b}/rename { from, to, message? }         → RenameResult
+//   POST   /api/brains/{b}/changes { message?, ops }             → BatchResult (409: nothing applied, stale files listed)
 //   GET    /api/brains/{b}/notes/{path}/history?limit=           → NoteHistory
 //   GET    /api/brains/{b}/notes/{path}/versions/{commit}        → PastVersion
 //   GET    /api/brains/{b}/notes/{path}/versions?hash=           → PastVersion (the latest with that hash)
@@ -54,6 +55,7 @@ import { FailureLimiter, tokenAuthorizer, type Authorizer } from './auth.js';
 import { PublicBlogs } from './blog.js';
 import { parseBlogSettings, readBlogSettings, writeBlogSettings } from './blog-settings.js';
 import { checkBlogSlug, postAddress } from './blog-owner.js';
+import { applyBatch, parseBatch } from './batch.js';
 import { BrainError, BrainService, CLIENT_ID, type BrainContext } from './brains.js';
 import { loadServerConfig, type ServerConfig } from './config.js';
 import { ENGINE_ERROR_STATUS, HttpError } from './errors.js';
@@ -366,6 +368,14 @@ export function createApp(options: AppOptions): App {
           return runSync(ctx, parsed, pageSize);
         }),
       );
+    }
+
+    if (action === 'changes' && tail.length === 0) {
+      // One change set of writes, deletes and renames, all or none (./batch.ts).
+      allow('POST');
+      const batch = parseBatch(await readJson(request, sync.SYNC_LIMITS.maxRequestBytes));
+      const result = await withBrain((ctx) => applyBatch(ctx, batch));
+      return json(result.status === 'conflict' ? 409 : 200, result);
     }
 
     if (action === 'config' && tail.length === 0) {

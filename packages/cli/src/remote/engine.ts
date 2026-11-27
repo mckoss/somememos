@@ -55,6 +55,11 @@ export interface RemoteEngine extends Engine {
    * `config-changed` becomes a `sync.ConfigChangedError`.
    */
   sync(request: sync.SyncRequest): Promise<sync.SyncResponse>;
+  /**
+   * One change set (`POST …/changes`): every op applied, as one change
+   * record and one commit, or none (status `conflict`, with each stale file).
+   */
+  changes(request: sync.BatchRequest): Promise<sync.BatchResult>;
   /** The brain's shared config and its revision (`GET …/config`). */
   getConfig(): Promise<sync.ConfigView>;
   /** Replaces the shared config (`PUT …/config`); a stale base resolves to status `conflict`. */
@@ -212,6 +217,14 @@ export function createRemoteEngine(client: RemoteClient): RemoteEngine {
         throw error;
       }
     },
+    changes: (request) =>
+      client.brain<sync.BatchResult>('POST', 'changes', {
+        body: request,
+        // Every op carries its base, so a repeated request is all `unchanged`.
+        idempotent: true,
+        resultStatuses: [409],
+        timeoutMs: SYNC_TIMEOUT_MS,
+      }),
     getConfig: () => client.brain<sync.ConfigView>('GET', 'config'),
     putConfig: async (request) => {
       try {

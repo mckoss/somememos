@@ -36,11 +36,13 @@ folders, relative to the working directory) to commit only those; the rest
 stay uncommitted. With nothing to commit it says so and exits 0.
 
 In remote mode (a working folder; see 'somememos help setup') commit sends
-each file you edited, and each new .md file, to the server with the hash it
-had when you read it. If someone else changed a note meanwhile, that file is
-refused: the server's version is saved beside it as <name>.server.md (yours is
-never touched), and commit says to merge, delete the .server.md copy and
-commit again; the other files still go through, and the exit code is 1.
+the files you edited, and each new .md file, to the server as one change: one
+change record with your message and one version in the server's history,
+each file with the hash it had when you read it. If someone else changed any
+of them meanwhile, nothing of the commit lands: the server's version of each
+such file is saved beside it as <name>.server.md (yours is never touched),
+and commit says to merge, delete the .server.md copy and commit again, which
+sends the other files again too. The exit code is then 1.
 Deleting a local file never deletes a note: use 'somememos rm'. New files in
 excluded folders are never sent.
 
@@ -54,7 +56,7 @@ Output: the change and its notes, one per line. With --json: {committed,
 change: {id, time, client, message, op, paths} | null, remaining, index}.
 In remote mode: {committed, saved: [{path, hash, created, change}],
 unchanged, conflicts: [{path, serverCopy, instruction}], failed: [{path,
-code, message}], skipped, remaining}.
+code, message}], skipped, remaining, heldBack}.
 
 Examples:
   somememos commit -m "update clarify the watering schedule"
@@ -148,6 +150,11 @@ function formatRemoteCommit(session: Session, r: CommitOutcome, message: string 
   }
   if (r.skipped.length > 0) {
     lines.push(`not sent: ${plural(r.skipped.length, 'new file')} in excluded folders`);
+  }
+  if (r.heldBack.length > 0) {
+    lines.push(
+      `not committed: ${plural(r.heldBack.length, 'other note')} sent with a conflicting one; nothing of this commit landed, so commit again once the conflict is merged`,
+    );
   }
   if (r.saved.length > 0 && r.remaining.length > 0) {
     lines.push(`${plural(r.remaining.length, 'other changed note')} not committed`);

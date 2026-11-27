@@ -275,7 +275,7 @@ describePg(
       expect(log.stdout).toContain('update  add a line and an idea');
     });
 
-    it('a stale base is refused for that file only and keeps both versions', async () => {
+    it('one commit is one change set; a stale base refuses it all and keeps both versions', async () => {
       const [a, b] = [memos[5] as string, memos[6] as string];
       const mine = newDir('mine');
       const theirs = newDir('theirs');
@@ -296,23 +296,39 @@ describePg(
       expect(again.stdout).toBe(`${files.get(a)}\nMy change.\n`);
       expect(again.stderr).toMatch(/server has a newer version/);
 
+      // One stale file refuses the whole commit: nothing of it lands.
       const refused = await cli(mine, ['commit', '-m', 'update my changes']);
       expect(refused.code).toBe(EXIT_FAILURE);
-      expect(refused.stdout).toBe(`committed 1 note (update): update my changes\n  ${b}\n`);
+      expect(refused.stdout).toBe(
+        'not committed: 1 other note sent with a conflicting one; nothing of this commit landed, so commit again once the conflict is merged\n',
+      );
       const copy = a.replace(/\.md$/, '.server.md');
       expect(refused.stderr.trim().split('\n')).toEqual([
         `somememos commit: ${a}: not committed: the server has a newer version, saved as ${copy}; merge it into ${a}, delete ${copy}, then commit again`,
       ]);
       expect(readFileSync(join(mine, a), 'utf8')).toBe(`${files.get(a)}\nMy change.\n`);
       expect(readFileSync(join(mine, copy), 'utf8')).toBe(`${files.get(a)}\nTheir change.\n`);
-      // Committing again before merging is refused again.
-      const still = await cli(mine, ['commit']);
+      expect((await ok(theirs, ['read', b])).stdout).toBe(files.get(b));
+      // Committing again before merging is refused again for that file.
+      const still = await cli(mine, ['commit', a]);
       expect(still.code).toBe(EXIT_FAILURE);
       expect(still.stderr).toMatch(/merge .* into it, delete/);
 
       writeFileSync(join(mine, a), `${files.get(a)}\nTheir change.\nMy change.\n`);
       rmSync(join(mine, copy));
-      await ok(mine, ['commit', '-m', 'update merge']);
+      const merged = await ok(mine, ['commit', '-m', 'update merge']);
+      // Both files land as one change record.
+      expect(merged.stdout).toBe(`committed 2 notes (update): update merge\n  ${a}\n  ${b}\n`);
+      const log = (
+        await json<{ changes: { message: string; paths: string[] }[] }>(mine, [
+          'log',
+          '--limit',
+          '1',
+        ])
+      ).changes;
+      expect(log[0]?.message).toBe('update merge');
+      expect([...(log[0]?.paths ?? [])].sort()).toEqual([a, b].sort());
+      expect((await ok(theirs, ['read', b])).stdout).toContain('My other change.');
       // The other folder's copy is untouched, so a repeated read fetches the merge.
       expect((await ok(theirs, ['read', a])).stdout).toBe(
         `${files.get(a)}\nTheir change.\nMy change.\n`,
