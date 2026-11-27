@@ -5,6 +5,7 @@
 // the implementation behind this file can change without touching the UI.
 import type { engine, indexing } from '@somememos/core';
 import type {
+  ConfigConflictView,
   ConflictChoice,
   ConnectPlan,
   ConnectRequest,
@@ -119,6 +120,14 @@ export interface SyncHost {
   resolveConflict(path: string, choice: ConflictChoice): Promise<{ kept: string | null }>;
   /** Whether the server has this version (`hash`) of the note at `path`. */
   noteState(path: string, hash: string): Promise<NoteSyncState>;
+  /**
+   * The shared config (folder roles and the other brain settings) changed
+   * here and on another device: both sides, or null when there is no such
+   * conflict. Sync stays stopped until `resolveConfigConflict`.
+   */
+  configConflict(): Promise<ConfigConflictView | null>;
+  /** Keeps this device's settings (they replace the server's) or the server's (they replace this device's), then syncs. */
+  resolveConfigConflict(choice: 'mine' | 'theirs'): Promise<SyncView>;
 }
 
 export interface BrainHost {

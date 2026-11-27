@@ -15,13 +15,25 @@ export {
   pathCovers,
 } from './engine.js';
 export {
+  type ConfigStep,
   type RunSyncResult,
+  type SharedConfigSync,
+  type SyncEngineSource,
   type SyncTransport,
+  adoptServerConfig,
   isExcludedItem,
+  resolveConfigConflict,
   runSync,
+  syncSharedConfig,
   toSyncChange,
   toSyncEvent,
 } from './sync.js';
+export {
+  type ConfigChangeOptions,
+  META_APPLIED_CONFIG,
+  applyConfigChange,
+  reconcileConfig,
+} from './reconfigure.js';
 export {
   EngineError,
   isEngineError,

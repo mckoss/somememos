@@ -30,6 +30,8 @@ export class RemoteError extends CommandError {
     readonly status: number,
     /** The server's error code, or a client-side one (`unreachable`, `timeout`, `bad-response`). */
     readonly code: string,
+    /** The error body's other fields (a 409's current config and revision). */
+    readonly details: Readonly<Record<string, unknown>> = {},
   ) {
     super(message);
   }
@@ -236,8 +238,15 @@ function toError(
   if (code === 'too-many-attempts') {
     return new RemoteError(`the server says: ${message}`, status, code);
   }
-  if (code !== '')
-    return new RemoteError(`the server refused the request: ${message || code}`, status, code);
+  if (code !== '') {
+    const { code: _c, message: _m, path: _p, ...details } = body as Record<string, unknown>;
+    return new RemoteError(
+      `the server refused the request: ${message || code}`,
+      status,
+      code,
+      details,
+    );
+  }
   if (status === 404) {
     return new RemoteError(
       `${origin} has no somememos API at that address (HTTP 404); check the server URL`,

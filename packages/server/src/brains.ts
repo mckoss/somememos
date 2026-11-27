@@ -295,15 +295,19 @@ export class BrainService {
   }
 
   /** One brain `owner` owns, with its config; BrainError 404 otherwise. */
-  async get(owner: string, brainId: unknown): Promise<BrainInfo & { config: StoredConfig }> {
+  async get(
+    owner: string,
+    brainId: unknown,
+  ): Promise<BrainInfo & { config: StoredConfig; configRevision: number }> {
     const id = this.checkId(brainId);
     await ensureMigrated(this.options.pool);
     const { rows } = await this.options.pool.query<{
       created_at: string;
       mutation: string;
       config: string;
+      config_revision: string;
     }>(
-      `SELECT s.created_at, b.mutation_seq AS mutation, s.config
+      `SELECT s.created_at, b.mutation_seq AS mutation, s.config, s.config_revision
        FROM server_brains s JOIN brains b USING (brain_id)
        WHERE s.brain_id = $1 AND s.owner_id = $2`,
       [id, owner],
@@ -315,6 +319,7 @@ export class BrainService {
       createdAt: Number(row.created_at),
       mutation: Number(row.mutation),
       config: parseStoredConfig(JSON.parse(row.config)),
+      configRevision: Number(row.config_revision),
     };
   }
 

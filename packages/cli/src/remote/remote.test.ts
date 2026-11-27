@@ -533,6 +533,80 @@ describePg(
         expect(filesUnder(join(a, 'memos')).some((f) => f.includes('.conflict-'))).toBe(true);
       });
 
+      it('the shared config syncs between clones; a conflict stops sync until pull or push', async () => {
+        await server.createBrain('roles', ROLES);
+        const a = newDir('roles-a');
+        const b = newDir('roles-b');
+        await ok(tmp.dir, ['clone', server.url, 'roles', a]);
+        mkdirSync(join(a, 'memos/hush'), { recursive: true });
+        writeFileSync(join(a, 'memos/hush/pond.md'), '# Pond\n\nheron reeds\n');
+        await ok(a, ['commit', '-m', 'a note']);
+        await ok(a, ['sync']);
+        await ok(tmp.dir, ['clone', server.url, 'roles', b]);
+        expect(readFileSync(join(b, 'memos/hush/pond.md'), 'utf8')).toContain('heron');
+
+        const shown = await json<{ source: string; state: string; revision: number }>(a, [
+          'config',
+        ]);
+        expect(shown).toMatchObject({ source: 'copy', state: 'in-step', revision: 1 });
+
+        // Edit config.json in clone a: the next command re-indexes, sync sends it.
+        const configFile = join(a, '.somememos', 'config.json');
+        const config = JSON.parse(readFileSync(configFile, 'utf8')) as {
+          roles: Record<string, string[]>;
+        };
+        config.roles.excluded = [...(config.roles.excluded ?? []), 'memos/hush/'];
+        writeFileSync(configFile, JSON.stringify(config));
+        expect((await ok(a, ['search', 'heron'])).stdout).toBe('');
+        expect((await json<{ state: string }>(a, ['config'])).state).toBe('changed-here');
+        expect((await ok(a, ['sync'])).stdout).toMatch(/sent this copy’s shared config/);
+        // Nothing deleted, and the working folder of remote mode reads the server's config.
+        expect(existsSync(join(a, 'memos/hush/pond.md'))).toBe(true);
+        const remoteView = await json<{ source: string; revision: number }>(work, ['config']);
+        expect(remoteView.source).toBe('server');
+
+        const pulled = await ok(b, ['sync']);
+        expect(pulled.stdout).toMatch(/took the server’s shared config/);
+        expect(
+          (JSON.parse(readFileSync(join(b, '.somememos', 'config.json'), 'utf8')) as typeof config)
+            .roles.excluded,
+        ).toContain('memos/hush/');
+        expect((await ok(b, ['search', 'heron'])).stdout).toBe('');
+        expect(existsSync(join(b, 'memos/hush/pond.md'))).toBe(true);
+
+        // Both change it: the second sync refuses, and push keeps b's.
+        const edit = (dir: string, blog: string[]) => {
+          const file = join(dir, '.somememos', 'config.json');
+          const c = JSON.parse(readFileSync(file, 'utf8')) as typeof config;
+          c.roles.blog = blog;
+          writeFileSync(file, JSON.stringify(c));
+        };
+        edit(a, ['posts/']);
+        edit(b, ['journal/']);
+        await ok(a, ['sync']);
+        const refused = await cli(b, ['sync']);
+        expect(refused.code).toBe(EXIT_FAILURE);
+        expect(refused.stderr).toMatch(/changed both in this copy and on the server/);
+        expect((await json<{ state: string }>(b, ['config'])).state).toBe('both-changed');
+        await ok(b, ['config', 'push']);
+        await ok(a, ['sync']);
+        const blogOf = (dir: string) =>
+          (
+            JSON.parse(
+              readFileSync(join(dir, '.somememos', 'config.json'), 'utf8'),
+            ) as typeof config
+          ).roles.blog;
+        expect(blogOf(a)).toEqual(['journal/']);
+        // And pull takes the server's.
+        edit(a, ['diary-posts/']);
+        edit(b, ['other/']);
+        await ok(a, ['sync']);
+        expect((await cli(b, ['sync'])).code).toBe(EXIT_FAILURE);
+        await ok(b, ['config', 'pull']);
+        expect(blogOf(b)).toEqual(['diary-posts/']);
+        await ok(b, ['sync']);
+      });
+
       it('sync in a brain with no server says how to set one', async () => {
         const dir = newDir('plain');
         await ok(tmp.dir, ['init', dir]);

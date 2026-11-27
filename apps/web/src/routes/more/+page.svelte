@@ -1,6 +1,8 @@
 <script lang="ts">
   import type { engine } from '@somememos/core';
   import { resolve } from '$app/paths';
+  import type { ConfigConflictView } from '#lib/brain/host.ts';
+  import ConfigConflict from '#lib/components/ConfigConflict.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import Icon from '#lib/components/Icon.svelte';
   import ImportPanel from '#lib/components/ImportPanel.svelte';
@@ -54,9 +56,70 @@
         roles: rolesFromText(rolesText),
       } as typeof h.engine.config);
       await changed();
-      rolesMessage = { ok: true, text: 'Folder roles saved and notes re-indexed.' };
+      if (!syncState.view?.connected) {
+        rolesMessage = { ok: true, text: 'Folder roles saved and notes re-indexed.' };
+        return;
+      }
+      rolesMessage = { ok: true, text: 'Folder roles saved here; sending them to the server…' };
+      const view = await h.sync.syncNow();
+      if (view.problem?.kind === 'config-conflict') {
+        configConflict = await h.sync.configConflict();
+        rolesMessage = {
+          ok: false,
+          text: 'Saved on this device, but another device changed the folder roles too. Choose which to keep above.',
+        };
+      } else if (view.problem) {
+        rolesMessage = {
+          ok: true,
+          text: 'Folder roles saved on this device. They go to the server and your other devices on the next sync.',
+        };
+      } else {
+        rolesMessage = {
+          ok: true,
+          text: 'Folder roles saved and sent to the server. Your other devices take them on their next sync.',
+        };
+      }
     } catch (e) {
       rolesMessage = { ok: false, text: errorMessage(e) };
+    }
+  }
+
+  // A shared-config conflict (the roles changed here and on another device).
+  let configConflict = $state<ConfigConflictView | null>(null);
+  let resolvingConfig = $state(false);
+  $effect(() => {
+    const kind = syncState.view?.problem?.kind;
+    if (kind !== 'config-conflict') {
+      configConflict = null;
+      return;
+    }
+    void host()
+      .then((h) => h.sync.configConflict())
+      .then((c) => (configConflict = c))
+      .catch(() => undefined);
+  });
+
+  async function chooseConfig(choice: 'mine' | 'theirs') {
+    resolvingConfig = true;
+    rolesMessage = null;
+    try {
+      const h = await host();
+      await h.sync.resolveConfigConflict(choice);
+      configConflict = null;
+      await changed();
+      rolesText = rolesToText(h.engine.config.roles);
+      rolesMessage = {
+        ok: true,
+        text:
+          choice === 'mine'
+            ? 'Kept this device’s folder roles; the server and your other devices now use them.'
+            : 'Now using the server’s folder roles on this device.',
+      };
+    } catch (e) {
+      rolesMessage = { ok: false, text: errorMessage(e) };
+      configConflict = await (await host()).sync.configConflict().catch(() => null);
+    } finally {
+      resolvingConfig = false;
     }
   }
 
@@ -164,11 +227,15 @@
 
   <section id="roles" class="card" aria-labelledby="roles-h">
     <h2 id="roles-h">Folder roles</h2>
+    {#if configConflict}
+      <ConfigConflict conflict={configConflict} busy={resolvingConfig} onchoose={chooseConfig} />
+    {/if}
     {#if syncState.view?.connected}
       <p class="hint" data-testid="roles-synced">
-        This device syncs with <strong>{syncState.view.brainId}</strong>, whose folder roles were
-        set on the server when it was created. A change here applies to this device only, so make
-        the same change on your other devices, or they will sort notes differently.
+        Every device that syncs with <strong>{syncState.view.brainId}</strong> shares these folder roles.
+        Saving here changes them on the server too, and your other devices take them on their next sync.
+        Notes in a folder you exclude stay where they are, on every device and on the server, but are
+        no longer searched, scored or synced.
       </p>
     {/if}
     <RolesEditor bind:value={rolesText} />

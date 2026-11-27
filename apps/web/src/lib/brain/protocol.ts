@@ -11,6 +11,7 @@ import type {
   RemoteBrain,
   ServerAvailability,
   SyncConflictView,
+  ConfigConflictView,
   SyncView,
 } from '../sync/types.ts';
 import type { ImportFile } from './host.ts';
@@ -111,6 +112,8 @@ export interface HostCalls {
   syncConflicts(): SyncConflictView[];
   syncResolve(path: string, choice: ConflictChoice): { kept: string | null };
   syncNoteState(path: string, hash: string): NoteSyncState;
+  syncConfigConflict(): ConfigConflictView | null;
+  syncResolveConfig(choice: 'mine' | 'theirs'): SyncView;
 }
 
 export type HostMethod = keyof HostCalls;

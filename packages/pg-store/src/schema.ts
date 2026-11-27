@@ -267,12 +267,21 @@ CREATE TABLE server_blogs (
 );
 `;
 
+// A brain's shared config is one synced thing (packages/server/src/config-sync.ts):
+// it carries a revision, raised by one on every change, so copies can tell
+// whether theirs is current and a change based on an old one is refused.
+// Every existing brain starts at revision 1.
+const CONFIG_REVISION = `
+ALTER TABLE server_brains ADD COLUMN config_revision bigint NOT NULL DEFAULT 1;
+`;
+
 /** Every migration, in order. Append only. */
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'initial', sql: INITIAL },
   { version: 2, name: 'server', sql: SERVER },
   { version: 3, name: 'burst-and-display', sql: BURST_AND_DISPLAY },
   { version: 4, name: 'blog', sql: BLOG },
+  { version: 5, name: 'config-revision', sql: CONFIG_REVISION },
 ];
 
 /** The derived tables of a brain, in an order safe to delete from. */

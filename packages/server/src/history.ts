@@ -66,6 +66,14 @@ export async function noteHistory(
     before = Number(oldest.mutation) + 1;
     current = from[0].path;
   }
+  // A folder accepted again after being excluded re-records its notes'
+  // versions (./config-sync.ts): the same commit and path, shown once.
+  const seenVersion = new Set<string>();
+  for (let i = rows.length - 1; i >= 0; i--) {
+    const key = `${(rows[i] as Row).commit}\0${(rows[i] as Row).path}`;
+    if (seenVersion.has(key)) rows.splice(i, 1);
+    else seenVersion.add(key);
+  }
   const info = await ctx.repo.commitInfo(rows.map((r) => r.commit));
   return {
     path,

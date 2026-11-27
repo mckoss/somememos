@@ -72,6 +72,14 @@ export interface SyncRequest {
   readonly since: number;
   /** The id of the client sending this (`BrainConfig.clientId`): the author of edits no change record names. */
   readonly client?: string;
+  /**
+   * The shared-config revision this copy has (./config.ts). When given and
+   * not the server's, the server applies nothing and answers 409
+   * `config-changed` with its config and revision, so no copy pushes or
+   * applies notes under roles the brain no longer has. Older copies leave it
+   * out and sync as before.
+   */
+  readonly configRevision?: number;
   /** Log entries this copy logged (or received from elsewhere and has not pushed). */
   readonly events: readonly SyncEvent[];
   readonly changes: readonly SyncChange[];

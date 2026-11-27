@@ -248,7 +248,10 @@ interface BlogRow {
 
 /** The public blogs of a server. */
 export class PublicBlogs {
-  private readonly cache = new Map<string, { commit: string; snapshot: Promise<BlogSnapshot> }>();
+  private readonly cache = new Map<
+    string,
+    { commit: string; config: string; snapshot: Promise<BlogSnapshot> }
+  >();
   private readonly gate: Gate;
   private readonly cacheSize: number;
 
@@ -301,13 +304,14 @@ export class PublicBlogs {
     const commit = row.git_head;
     if (commit === null) return Promise.resolve(EMPTY);
     const cached = this.cache.get(row.brain_id);
-    if (cached && cached.commit === commit) {
+    // A config change (a blog folder excluded, say) changes what is public at the same commit.
+    if (cached && cached.commit === commit && cached.config === row.config) {
       this.cache.delete(row.brain_id); // most recently used last
       this.cache.set(row.brain_id, cached);
       return cached.snapshot;
     }
     const snapshot = this.build(row.brain_id, commit, row.config);
-    const entry = { commit, snapshot };
+    const entry = { commit, config: row.config, snapshot };
     this.cache.delete(row.brain_id);
     this.cache.set(row.brain_id, entry);
     snapshot.catch(() => {

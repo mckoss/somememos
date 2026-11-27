@@ -27,6 +27,18 @@ export {
   META_SYNC_STATE,
   type SyncState,
   clearSyncState,
+  recordConfigRevision,
   readSyncState,
   writeSyncState,
 } from './state.js';
+export {
+  ConfigChangedError,
+  ConfigConflictError,
+  type ConfigPutRequest,
+  type ConfigPutResult,
+  type ConfigView,
+  type SharedConfig,
+  configWithClient,
+  sharedConfigKey,
+  sharedConfigOf,
+} from './config.js';

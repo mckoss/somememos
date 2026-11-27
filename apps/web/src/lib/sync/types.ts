@@ -30,6 +30,12 @@ export type SyncProblemKind =
   | 'gone'
   /** The server's copy is older than this device's (restored or recreated). Automatic sync stops. */
   | 'reset'
+  /**
+   * The shared config (folder roles and the other brain settings) was
+   * changed here and on another device. Sync stops until the person chooses
+   * which to keep (`SyncHost.resolveConfigConflict`).
+   */
+  | 'config-conflict'
   | 'other';
 
 export interface SyncProblem {
@@ -58,6 +64,8 @@ export interface SyncRunSummary {
   readonly pushed: { readonly edits: number; readonly events: number; readonly changes: number };
   /** Edits the server refused this run (each kept as a conflict copy). */
   readonly conflicts: number;
+  /** Notes too large to sync: they stay on this device only. */
+  readonly tooLarge: readonly string[];
 }
 
 /** Where this device stands with the server. */
@@ -169,3 +177,12 @@ export type ConflictChoice = 'mine' | 'theirs' | 'both';
 
 /** Whether a note's current version is on the server. */
 export type NoteSyncState = 'off' | 'synced' | 'waiting';
+
+/** The two sides of a shared-config conflict, for the person to choose between. */
+export interface ConfigConflictView {
+  /** This device's shared config (everything but its client id), as plain JSON. */
+  readonly local: Readonly<Record<string, unknown>> & { readonly roles: Record<string, string[]> };
+  /** The server's, and its revision. */
+  readonly server: Readonly<Record<string, unknown>> & { readonly roles: Record<string, string[]> };
+  readonly serverRevision: number;
+}

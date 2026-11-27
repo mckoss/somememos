@@ -196,6 +196,9 @@ export async function withBrain<T>(
   };
 
   try {
+    // A config.json edited since the last command: re-index for it without
+    // taking the change for activity (core's applyConfigChange).
+    await engineApi.reconcileConfig({ stores, content, config, now });
     if (options.autoIndex !== false && !options.noIndex) await brain.reindex();
     const result = await fn(brain);
     if (options.remind !== false && !options.json) await remindUncommitted(ctx, stores);

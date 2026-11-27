@@ -1,6 +1,7 @@
 import { importGitCommand } from '../import-git/index.js';
 import { cloneCommand, syncCommand } from './clone.js';
 import { commitCommand } from './commit.js';
+import { configCommand } from './config.js';
 import { connectCommand } from './connect.js';
 import { diaryCommand } from './diary.js';
 import { evalCommand } from './eval/command.js';
@@ -44,6 +45,7 @@ export const commands: readonly Command[] = [
   connectCommand,
   cloneCommand,
   syncCommand,
+  configCommand,
   indexCommand,
   importGitCommand,
   exportCommand,

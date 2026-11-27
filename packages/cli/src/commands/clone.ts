@@ -8,7 +8,7 @@
 
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { engine, storage } from '@somememos/core';
+import { engine, storage, sync as coreSync } from '@somememos/core';
 import {
   type Brain,
   CommandError,
@@ -33,8 +33,9 @@ import {
   resolveToken,
   writeCloneRemote,
 } from '../remote/config.js';
-import { createRemoteEngine } from '../remote/engine.js';
+import { type RemoteEngine, createRemoteEngine } from '../remote/engine.js';
 import { CONFIG_FILE, SIDECAR_DIR } from '../store/index.js';
+import { configPath } from '../store/config.js';
 import { prepareRemote } from './connect.js';
 import { GITIGNORE_LINE, ensureGitignoreLine, insideGitRepository } from './init.js';
 import type { Command } from './types.js';
@@ -76,6 +77,14 @@ version takes its path, and this copy's is kept beside it as
 <name>.conflict-<client>-<date>.md (nothing is lost). Merge it by hand and
 delete the conflict file.
 
+The brain's shared config (everything in .somememos/config.json but
+clientId: folder roles, half-lives, weights, ...) syncs too. Edit it here and
+sync to send it; a change made on another device arrives on the next sync and
+re-indexes this copy. If both changed it, nothing is synced until you choose
+with 'somememos config pull' or 'somememos config push'. Notes in a folder
+that becomes excluded stay on disk and on the server; they are just no
+longer indexed or synced.
+
 A brain made with 'somememos clone' knows its server. For a brain that began
 on this machine, give --server and --brain-id once: the server's brain must
 exist and declare the same folder roles; this brain's notes and history are
@@ -91,7 +100,7 @@ ${GLOBAL_OPTIONS_HELP}
 Output: one summary line, then one line per conflict. With --json: {server,
 brainId, rounds, mutation, pushed: {edits, applied, duplicates, events,
 changes}, received: {notes, events, changes}, conflicts: [{path, status, code,
-conflictPath}], waiting}.
+conflictPath}], waiting, config: "in-step"|"pushed"|"pulled"}.
 
 Examples:
   somememos sync
@@ -107,6 +116,54 @@ export interface SyncRecord {
   received: { notes: number; events: number; changes: number };
   conflicts: engine.SyncConflict[];
   waiting: string[];
+  /** The shared config: unchanged, this copy's change sent, or the server's taken. */
+  config: engine.ConfigStep;
+}
+
+/**
+ * The shared config's side of sync for an offline copy (core's
+ * `SharedConfigSync`): this copy's config is `.somememos/config.json`, and a
+ * config taken from the server is written there and re-indexed with core's
+ * `applyConfigChange`. `current()` and `engine()` follow every change.
+ */
+export function cloneConfigSync(
+  brain: Brain,
+  server: RemoteEngine,
+): { io: engine.SharedConfigSync; engine: () => engine.Engine; config: () => storage.BrainConfig } {
+  let config = brain.config;
+  let current = brain.engine;
+  const io: engine.SharedConfigSync = {
+    current: () => config,
+    readState: () => coreSync.readSyncState(brain.stores.meta),
+    record: (revision, key) => coreSync.recordConfigRevision(brain.stores.meta, revision, key),
+    async apply(next) {
+      await engine.applyConfigChange({
+        stores: brain.stores,
+        content: brain.content,
+        from: config,
+        to: next,
+        now: brain.now,
+      });
+      writeFileSync(configPath(brain.root), storage.serializeBrainConfig(next));
+      config = next;
+      current = engine.createEngine({
+        stores: brain.stores,
+        content: brain.content,
+        config: next,
+        now: brain.now,
+      });
+    },
+    get: () => server.getConfig(),
+    put: (request) => server.putConfig(request),
+  };
+  return { io, engine: () => current, config: () => config };
+}
+
+/** What to do about a shared-config conflict, as a command error. */
+export function configConflictError(error: coreSync.ConfigConflictError): CommandError {
+  return new CommandError(
+    `the brain's shared config (folder roles and settings) was changed both in this copy and on the server (now revision ${error.server.revision}), so nothing was synced; run 'somememos config' to compare, then 'somememos config pull' to take the server's or 'somememos config push' to replace it with this copy's`,
+  );
 }
 
 /** Runs core's sync loop against the server and adds up the rounds. */
@@ -123,7 +180,16 @@ export async function syncWithServer(
     clientId: brain.config.clientId,
   });
   const server = createRemoteEngine(client);
-  const result = await engine.runSync(brain.engine, (request) => server.sync(request));
+  const shared = cloneConfigSync(brain, server);
+  let result: engine.RunSyncResult;
+  try {
+    result = await engine.runSync(shared.engine, (request) => server.sync(request), {
+      config: shared.io,
+    });
+  } catch (error) {
+    if (error instanceof coreSync.ConfigConflictError) throw configConflictError(error);
+    throw error;
+  }
   const sum = (pick: (o: engine.SyncOutcome) => number) =>
     result.outcomes.reduce((n, o) => n + pick(o), 0);
   return {
@@ -145,6 +211,7 @@ export async function syncWithServer(
     },
     conflicts: result.conflicts,
     waiting: result.waiting,
+    config: result.config ?? 'in-step',
   };
 }
 
@@ -157,7 +224,7 @@ function conflictLine(brain: Brain, c: engine.SyncConflict): string {
 }
 
 function formatSync(r: SyncRecord): string {
-  return `synced with brain ${r.brainId} on ${r.server}: pushed ${plural(r.pushed.edits, 'edit')} (${r.pushed.applied} applied), ${plural(r.pushed.events, 'event')}, ${plural(r.pushed.changes, 'change record')}; received ${plural(r.received.notes, 'note')}, ${plural(r.received.events, 'event')}, ${plural(r.received.changes, 'change record')}${r.conflicts.length > 0 ? `; ${plural(r.conflicts.length, 'conflict')}` : ''}`;
+  return `synced with brain ${r.brainId} on ${r.server}: pushed ${plural(r.pushed.edits, 'edit')} (${r.pushed.applied} applied), ${plural(r.pushed.events, 'event')}, ${plural(r.pushed.changes, 'change record')}; received ${plural(r.received.notes, 'note')}, ${plural(r.received.events, 'event')}, ${plural(r.received.changes, 'change record')}${r.conflicts.length > 0 ? `; ${plural(r.conflicts.length, 'conflict')}` : ''}${r.config === 'pushed' ? '; sent this copy’s shared config' : r.config === 'pulled' ? '; took the server’s shared config' : ''}`;
 }
 
 export const cloneCommand: Command = {

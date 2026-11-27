@@ -34,6 +34,7 @@ import {
   type Timers,
 } from '../sync/schedule.ts';
 import type {
+  ConfigConflictView,
   ConnectPlan,
   ConnectRequest,
   NoteSyncState,
@@ -94,9 +95,18 @@ export class SyncHttpError extends Error {
     readonly code: string,
     message: string,
     readonly retryAfterMs: number | null = null,
+    /** The error body's other fields (a 409's current config and revision). */
+    readonly details: Readonly<Record<string, unknown>> = {},
   ) {
     super(message);
   }
+}
+
+/** The current config a 409 `config-changed` or `config-conflict` carries. */
+function viewFromError(error: SyncHttpError): coreSync.ConfigView | null {
+  const { config, revision } = error.details as { config?: unknown; revision?: unknown };
+  if (typeof revision !== 'number' || !config || typeof config !== 'object') return null;
+  return { revision, config: config as coreSync.SharedConfig };
 }
 
 const nowSeconds = (): number => Math.floor(Date.now() / 1000);
@@ -145,6 +155,8 @@ export class SyncController {
   private lastSyncAt: number | null = null;
   private lastAttemptAt: number | null = null;
   private lastRun: SyncRunSummary | null = null;
+  /** A shared-config conflict waiting for the person's choice. */
+  private configConflict: coreSync.ConfigConflictError | null = null;
   private refreshTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly scheduler: SyncScheduler;
   private readonly fetchFn: typeof fetch;
@@ -192,6 +204,7 @@ export class SyncController {
     this.problem = null;
     this.lastRun = null;
     this.lastSyncAt = null;
+    this.configConflict = null;
     await this.start();
   }
 
@@ -279,7 +292,7 @@ export class SyncController {
 
   private async api(
     token: string | null,
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'PUT',
     path: string,
     body?: unknown,
   ): Promise<unknown> {
@@ -312,13 +325,17 @@ export class SyncController {
       }
     }
     if (!response.ok) {
-      const error = (json as { error?: { code?: unknown; message?: unknown } } | null)?.error;
+      const error = (
+        json as { error?: { code?: unknown; message?: unknown } & Record<string, unknown> } | null
+      )?.error;
       const retry = Number(response.headers.get('retry-after'));
+      const { code: _c, message: _m, ...details } = error ?? {};
       throw new SyncHttpError(
         response.status,
         typeof error?.code === 'string' ? error.code : type.includes('json') ? 'error' : 'not-api',
         scrub(typeof error?.message === 'string' ? error.message : response.statusText, token),
         Number.isFinite(retry) && retry > 0 ? retry * 1000 : null,
+        details,
       );
     }
     if (json === null) throw new SyncHttpError(response.status, 'not-api', 'not a JSON answer');
@@ -538,6 +555,7 @@ export class SyncController {
     this.conn = null;
     this.problem = null;
     this.progress = null;
+    this.configConflict = null;
     await this.deps.queue(() => Promise.resolve(this.deps.meta().delete(META_CONNECTION)));
     await this.refresh();
     return this.view();
@@ -604,8 +622,19 @@ export class SyncController {
       pushed: { edits: 0, events: 0, changes: 0 },
       conflicts: 0,
     };
+    const tooLarge = new Set<string>();
     let dataChanged = false;
+    let configChanged = false;
+    const io = this.configIo(conn, () => {
+      configChanged = true;
+      dataChanged = true;
+    });
     try {
+      // The shared config first: push this device's change, or stop on a conflict.
+      await core.syncSharedConfig(io);
+      if (generation !== this.generation) return { ok: true };
+      this.configConflict = null;
+      let adopted = 0;
       const start = await this.deps.queue(() => this.deps.engine().syncStatus());
       this.pending = { ...start.pending };
       let progress: SyncProgress = {
@@ -619,12 +648,26 @@ export class SyncController {
       for (;;) {
         const prepared = await this.deps.queue(() => this.deps.engine().prepareSync());
         if (generation !== this.generation) return { ok: true };
-        const response = (await this.api(
-          conn.token,
-          'POST',
-          `/brains/${enc(conn.brainId)}/sync`,
-          prepared.request,
-        )) as coreSync.SyncResponse;
+        for (const p of prepared.tooLarge) tooLarge.add(p);
+        let response: coreSync.SyncResponse;
+        try {
+          response = (await this.api(
+            conn.token,
+            'POST',
+            `/brains/${enc(conn.brainId)}/sync`,
+            prepared.request,
+          )) as coreSync.SyncResponse;
+        } catch (error) {
+          const view =
+            error instanceof SyncHttpError && error.code === 'config-changed'
+              ? viewFromError(error)
+              : null;
+          if (!view || adopted >= 5) throw error;
+          // The brain's config changed on the server: take it, then send again.
+          adopted++;
+          await core.adoptServerConfig(io, view);
+          continue;
+        }
         if (generation !== this.generation) return { ok: true };
         const outcome = await this.deps.queue(() =>
           this.deps.engine().applySync(prepared, response),
@@ -670,9 +713,10 @@ export class SyncController {
       }
       this.problem = null;
       this.lastSyncAt = nowSeconds();
-      this.lastRun = { at: this.lastSyncAt, ...totals };
+      this.lastRun = { at: this.lastSyncAt, ...totals, tooLarge: [...tooLarge].sort() };
       return { ok: true };
     } catch (error) {
+      if (error instanceof coreSync.ConfigConflictError) this.configConflict = error;
       const { problem, result } = this.classify(error, conn);
       this.problem = problem;
       return result;
@@ -682,9 +726,86 @@ export class SyncController {
         await this.refresh(false).catch(() => undefined);
         // The scheduler's own state change emits right after; this one says
         // whether the data changed, so pages refresh what they show.
-        this.emitStatus(dataChanged ? 'sync' : 'syncStatus');
+        this.emitStatus(dataChanged ? 'sync' : 'syncStatus', configChanged);
       }
     }
+  }
+
+  /** The shared config's side of sync (core's `SharedConfigSync`) over this connection. */
+  private configIo(conn: Connection, onApply: () => void): core.SharedConfigSync {
+    const path = `/brains/${enc(conn.brainId)}/config`;
+    return {
+      current: () => this.deps.config(),
+      readState: () => this.deps.queue(() => coreSync.readSyncState(this.deps.meta())),
+      record: (revision, key) =>
+        this.deps.queue(() => coreSync.recordConfigRevision(this.deps.meta(), revision, key)),
+      apply: async (next) => {
+        await this.deps.updateConfig(next);
+        onApply();
+      },
+      get: async () => (await this.api(conn.token, 'GET', path)) as coreSync.ConfigView,
+      put: async (request) => {
+        try {
+          return (await this.api(conn.token, 'PUT', path, request)) as coreSync.ConfigPutResult;
+        } catch (error) {
+          const view =
+            error instanceof SyncHttpError && error.code === 'config-conflict'
+              ? viewFromError(error)
+              : null;
+          if (!view) throw error;
+          return { status: 'conflict', ...view };
+        }
+      },
+    };
+  }
+
+  /** The shared-config conflict waiting for a choice, or null. */
+  configConflictView(): ConfigConflictView | null {
+    const c = this.configConflict;
+    if (!c || !this.conn) return null;
+    return {
+      local: c.local as unknown as ConfigConflictView['local'],
+      server: c.server.config as unknown as ConfigConflictView['server'],
+      serverRevision: c.server.revision,
+    };
+  }
+
+  /**
+   * Settles a shared-config conflict: 'mine' replaces the server's config
+   * with this device's, 'theirs' takes the server's here. Then syncs.
+   */
+  async resolveConfigConflict(choice: unknown): Promise<SyncView> {
+    const conn = this.conn;
+    const conflict = this.configConflict;
+    if (!conn) throw new ConnectPlanError('This device isn’t connected to a server.');
+    if (!conflict) throw new ConnectPlanError('There is no settings conflict to resolve.');
+    if (choice !== 'mine' && choice !== 'theirs') {
+      throw new ConnectPlanError('Choose this device’s settings or the server’s.');
+    }
+    let applied = false;
+    try {
+      await core.resolveConfigConflict(
+        this.configIo(conn, () => (applied = true)),
+        choice,
+        conflict.server,
+      );
+    } catch (error) {
+      if (error instanceof coreSync.ConfigConflictError) {
+        // The server changed again meanwhile: show the newer one.
+        this.configConflict = error;
+        this.emitStatus('syncStatus');
+        throw new ConnectPlanError(
+          'The settings changed on the server again in the meantime. Look at them once more, then choose.',
+        );
+      }
+      throw this.connectError(error);
+    }
+    this.configConflict = null;
+    this.problem = null;
+    if (applied) this.emitStatus('sync', true);
+    this.scheduler.trigger('connect');
+    await this.scheduler.idle();
+    return this.view();
   }
 
   private classify(error: unknown, conn: Connection): { problem: SyncProblem; result: RunResult } {
@@ -749,6 +870,15 @@ export class SyncController {
           `The server answered with an error (${error.status}${error.message ? `: ${error.message}` : ''}). It will try again shortly.`,
         ),
         result: { ok: false, kind: 'server' },
+      };
+    }
+    if (error instanceof coreSync.ConfigConflictError) {
+      return {
+        problem: problem(
+          'config-conflict',
+          'The folder roles or other brain settings were changed both here and on another device. Sync is stopped until you choose which to keep (in More, under Folder roles).',
+        ),
+        result: { ok: false, kind: 'fatal' },
       };
     }
     if (core.isEngineError(error) && /behind this copy/.test(error.message)) {

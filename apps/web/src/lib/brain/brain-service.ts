@@ -106,6 +106,8 @@ export async function openBrainService(
     } else {
       config = storage.parseBrainConfig(JSON.parse(saved), 'the saved brain config');
     }
+    // A config change interrupted before its re-index finished is finished now.
+    await engine.reconcileConfig({ stores, content, config });
     current = engine.createEngine({ stores, content, config });
   };
 
@@ -224,14 +226,15 @@ export async function openBrainService(
   // --- Config and reset.
   const updateConfig = async (next: unknown): Promise<storage.BrainConfig> => {
     const parsed = storage.parseBrainConfig(next, 'the new config');
+    // Core's one way to change a config (engine.applyConfigChange): edits made
+    // before are logged under the old roles, then the derived data is rebuilt
+    // under the new ones, logging nothing. Notes whose role is now `excluded`
+    // (or none) leave the index but stay in the content table; links into
+    // them are dropped; role, half-life and analyzer changes take effect.
     await stores.meta.set(META_CONFIG, storage.serializeBrainConfig(parsed));
+    await engine.applyConfigChange({ stores, content, from: config, to: parsed });
     config = parsed;
     current = engine.createEngine({ stores, content, config });
-    // Rebuild the derived data from the content and the log: notes whose
-    // role is now `excluded` (or none) are not listed, so they leave the
-    // index, links into them are dropped, and role, half-life and analyzer
-    // changes all take effect.
-    await current.index({ rebuild: true });
     return config;
   };
 
@@ -287,6 +290,10 @@ export async function openBrainService(
         return sync.resolve(args[0], args[1]);
       case 'syncNoteState':
         return sync.noteState(args[0], args[1]);
+      case 'syncConfigConflict':
+        return Promise.resolve(sync.configConflictView());
+      case 'syncResolveConfig':
+        return sync.resolveConfigConflict(args[0]);
       default:
         return invalid(`no such method: ${method}`);
     }
@@ -339,8 +346,12 @@ export async function openBrainService(
           return config;
         case 'storageKind':
           return provider.storage;
-        case 'updateConfig':
-          return queue(() => updateConfig(args[0]));
+        case 'updateConfig': {
+          const next = await queue(() => updateConfig(args[0]));
+          // A connected device sends the change to the server soon (the shared config).
+          if (options.origin) sync.noteChange('change');
+          return next;
+        }
         case 'reset': {
           const next = await queue(() => reset());
           if (options.origin) await sync.reload();

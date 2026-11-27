@@ -6,8 +6,10 @@
 //   GET    /api/health
 //   GET    /api/brains                         → { brains: BrainInfo[] }
 //   POST   /api/brains        { id, config? }  → 201 BrainInfo
-//   GET    /api/brains/{b}                     → BrainInfo & { config }
-//   POST   /api/brains/{b}/sync   SyncRequest  → SyncResponse
+//   GET    /api/brains/{b}                     → BrainInfo & { config, configRevision }
+//   GET    /api/brains/{b}/config              → { revision, config }
+//   PUT    /api/brains/{b}/config { baseRevision, config } → { status, revision, config } (409 config-conflict)
+//   POST   /api/brains/{b}/sync   SyncRequest  → SyncResponse (409 config-changed when its configRevision is stale)
 //   GET    /api/brains/{b}/search?q=&mode=&limit=&since=&until=  → SearchResponse
 //   GET    /api/brains/{b}/list?mode=&limit=                     → SearchResponse
 //   GET    /api/brains/{b}/notes/{path}?record=false             → NoteView (logs a read)
@@ -54,6 +56,12 @@ import { loadServerConfig, type ServerConfig } from './config.js';
 import { ENGINE_ERROR_STATUS, HttpError } from './errors.js';
 import { noteHistory, pastVersion } from './history.js';
 import { parseSyncRequest, runSync } from './sync.js';
+import {
+  checkSyncConfigRevision,
+  parseConfigPut,
+  putSharedConfig,
+  readSharedConfig,
+} from './config-sync.js';
 
 export interface RequestInfo {
   /** The client's address, for rate limiting failed attempts. */
@@ -348,11 +356,21 @@ export function createApp(options: AppOptions): App {
       const body = await readJson(request, sync.SYNC_LIMITS.maxRequestBytes);
       return json(
         200,
-        await withBrain((ctx) => {
+        await withBrain(async (ctx) => {
           const classifier = markdown.createRoleClassifier(ctx.config.roles);
-          return runSync(ctx, parseSyncRequest(body, classifier, ctx.now), pageSize);
+          const parsed = parseSyncRequest(body, classifier, ctx.now);
+          await checkSyncConfigRevision(ctx, parsed.configRevision);
+          return runSync(ctx, parsed, pageSize);
         }),
       );
+    }
+
+    if (action === 'config' && tail.length === 0) {
+      // The brain's shared config (./config-sync.ts).
+      allow('GET', 'PUT');
+      if (method === 'GET') return json(200, await readBrain((ctx) => readSharedConfig(ctx)));
+      const put = parseConfigPut(await readJson(request, SMALL_BODY));
+      return json(200, await withBrain((ctx) => putSharedConfig(ctx, put)));
     }
 
     if (action === 'blog' && tail.length === 0) {
@@ -606,7 +624,7 @@ export function createApp(options: AppOptions): App {
       );
     } catch (error) {
       if (error instanceof HttpError) {
-        return errorResponse(error.status, error.code, error.message, {}, error.headers);
+        return errorResponse(error.status, error.code, error.message, error.extra, error.headers);
       }
       if (error instanceof BrainError)
         return errorResponse(error.status, error.code, error.message);

@@ -27,6 +27,7 @@ import { combineAll, eventScore } from '../timescore/timescore.js';
 import { readPendingRemote } from '../indexing/state.js';
 import { SYNC_LIMITS, truncateChangeMessage } from '../sync/protocol.js';
 import { createEngine, localDate } from './engine.js';
+import { applyConfigChange, reconcileConfig } from './reconfigure.js';
 import { toSyncChange, toSyncEvent } from './sync.js';
 import { EngineError, type ResultView } from './types.js';
 
@@ -847,6 +848,75 @@ export function describeEngineConformance(
 
     describe('sync', () => {
       const hashOf = (text: string) => contentHash(text);
+
+      it(
+        'a config change re-indexes without logging; a newly excluded note stays but is not synced',
+        { timeout },
+        async () => {
+          const a = await brain();
+          await a.engine.index();
+          a.tick();
+          await a.engine.saveNote('memos/open.md', '# Open\n\nheron, see [[quiet]]\n');
+          await a.engine.saveNote('memos/hidden/quiet.md', '# Quiet\n\nheron marsh\n');
+          // Pretend the server took everything: every note has its base.
+          const first = await a.engine.prepareSync();
+          await a.engine.applySync(first, {
+            mutation: 5,
+            more: false,
+            results: first.request.edits.map((e) => ({
+              id: e.id,
+              status: 'applied' as const,
+              hash: null,
+            })),
+            notes: [],
+            events: [],
+            changes: [],
+          });
+          await a.engine.readNote('memos/hidden/quiet.md');
+          const before = await a.entries();
+
+          const hidden = configWith({ ...ROLES, excluded: ['private/', 'memos/hidden/'] });
+          expect(await reconcileConfig({ ...a, config: a.config })).toBeNull();
+          await applyConfigChange({
+            stores: a.stores,
+            content: a.content,
+            from: a.config,
+            to: hidden,
+          });
+          const b = createEngine({
+            stores: a.stores,
+            content: a.content,
+            config: hidden,
+            now: () => T,
+          });
+          expect(await a.entries()).toEqual(before);
+          expect((await b.search('heron')).results.map((r) => r.path)).toEqual(['memos/open.md']);
+          expect(await a.content.read('memos/hidden/quiet.md')).toContain('heron marsh');
+          expect((await b.status()).uncommitted).toEqual([]);
+          // Not a delete, and entries naming it are not sent.
+          const next = await b.prepareSync();
+          expect(next.request.edits).toEqual([]);
+          expect(JSON.stringify(next.request)).not.toContain('memos/hidden/');
+          expect((await b.syncStatus()).pending.notes).toBe(0);
+          // Already applied: reconciling again does nothing.
+          expect(await reconcileConfig({ ...a, config: hidden })).toBeNull();
+
+          // Back again: indexed, and nothing logged for its return.
+          expect(await reconcileConfig({ ...a, config: a.config })).not.toBeNull();
+          const c = createEngine({
+            stores: a.stores,
+            content: a.content,
+            config: a.config,
+            now: () => T,
+          });
+          expect(await a.entries()).toEqual(before);
+          expect((await c.search('marsh')).results.map((r) => r.path)).toEqual([
+            'memos/hidden/quiet.md',
+          ]);
+          expect((await c.prepareSync()).request.edits).toEqual([]);
+          expect((await c.status()).uncommitted).toEqual([]);
+        },
+      );
 
       it(
         'applies remote notes and entries without logging events, relinking and resolving',

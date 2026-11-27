@@ -109,7 +109,8 @@ function changeOperation(target: Target, method: string): string | null {
   if (method === 'importEnd') return 'importFiles';
   if (method === 'updateConfig' || method === 'reset') return method;
   // Sync's own status changes arrive as worker events; these change notes.
-  if (method === 'syncResolve' || method === 'syncStartOver') return 'sync';
+  if (method === 'syncResolve' || method === 'syncStartOver' || method === 'syncResolveConfig')
+    return 'sync';
   return null;
 }
 
@@ -510,6 +511,12 @@ function createHost(conn: BrainConnection): BrainHost {
         conn.call('host', 'syncConflicts', []) as ReturnType<BrainHost['sync']['conflicts']>,
       resolveConflict: (path, choice) =>
         conn.call('host', 'syncResolve', [path, choice]) as Promise<{ kept: string | null }>,
+      configConflict: () =>
+        conn.call('host', 'syncConfigConflict', []) as ReturnType<
+          BrainHost['sync']['configConflict']
+        >,
+      resolveConfigConflict: (choice) =>
+        conn.call('host', 'syncResolveConfig', [choice]) as Promise<SyncView>,
       noteState: (path, hash) =>
         conn.call('host', 'syncNoteState', [path, hash]) as ReturnType<
           BrainHost['sync']['noteState']
