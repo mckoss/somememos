@@ -15,7 +15,7 @@
   "scripts": {
     "postinstall": "node packages/core/scripts/gen-version.mjs",
     "gen:version": "node packages/core/scripts/gen-version.mjs",
-    "build": "npm run build -w @somememos/core && npm run build -w @somememos/sqlite-store && npm run build -w @somememos/pg-store && npm run build -w @somememos/cli && npm run build -w @somememos/web",
+    "build": "npm run build -w @somememos/core && npm run build -w @somememos/sqlite-store && npm run build -w @somememos/pg-store && npm run build -w @somememos/server && npm run build -w @somememos/cli && npm run build -w @somememos/web",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write . && eslint --fix .",
     "pretypecheck": "npm run gen:version",
