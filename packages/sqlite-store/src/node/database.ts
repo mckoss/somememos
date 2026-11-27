@@ -1,12 +1,15 @@
-// A thin, typed wrapper over Node's built-in `node:sqlite` module, for the CLI's
-// local (offline) store. It opens databases with WAL journaling and a busy
-// timeout, and adds a `transaction(fn)` helper. The storage interfaces that core
-// talks to are defined on top of this later; keep this module small.
+// The `node:sqlite` driver for `@somememos/sqlite-store` (the CLI's local
+// store): a thin, typed wrapper over Node's built-in module that implements
+// `SqlDriver` (../driver.ts). It opens databases with WAL journaling and a
+// busy timeout, and adds `run`/`get`/`all` shortcuts and a `transaction(fn)`
+// helper. Keep this module small.
 //
-// This file must not use relative imports or non-erasable TypeScript syntax: a
-// test loads it directly with Node's type stripping in a child process.
+// This file must not use relative imports (other than `import type`, which is
+// erased) or non-erasable TypeScript syntax: a test loads it directly with
+// Node's type stripping in a child process.
 
 import type { DatabaseSync, SQLInputValue, SQLOutputValue, StatementSync } from 'node:sqlite';
+import type { SqlDriver } from '../driver.js';
 
 export type SqlValue = SQLInputValue;
 export type SqlOutput = SQLOutputValue;
@@ -36,9 +39,11 @@ export interface Statement {
   all<T = Row>(params?: Params): T[];
 }
 
-export interface Database {
+export interface Database extends SqlDriver {
   /** The file path, or `:memory:`. */
   readonly location: string;
+  /** True while the connection is inside a transaction (`BEGIN` or a savepoint). */
+  readonly inTransaction: boolean;
   /** The underlying `node:sqlite` connection, for anything this wrapper doesn't cover. */
   readonly raw: DatabaseSync;
   /** Run one or more statements that take no parameters. */
@@ -50,9 +55,10 @@ export interface Database {
   all<T = Row>(sql: string, params?: Params): T[];
   /**
    * Run `fn` in a transaction: commit if it returns, roll back if it throws.
-   * The outermost level uses `BEGIN IMMEDIATE`, so the write lock is taken up
-   * front (waiting up to the busy timeout); nested calls use savepoints.
-   * `fn` must be synchronous.
+   * Outside a transaction it uses `BEGIN IMMEDIATE`, so the write lock is
+   * taken up front (waiting up to the busy timeout); inside one (nested, or
+   * one opened with `exec('BEGIN …')`) it uses a savepoint. `fn` must be
+   * synchronous.
    */
   transaction<T>(fn: (db: Database) => T): T;
   close(): void;
@@ -112,11 +118,14 @@ export function open(location: string, options: OpenOptions = {}): Database {
   }
 
   const cache = new Map<string, Statement>();
-  let depth = 0;
+  let savepoints = 0;
 
   const db: Database = {
     location,
     raw,
+    get inTransaction() {
+      return raw.isOpen && raw.isTransaction;
+    },
     exec(sql) {
       raw.exec(sql);
     },
@@ -138,25 +147,22 @@ export function open(location: string, options: OpenOptions = {}): Database {
       return db.prepare(sql).all<T>(params);
     },
     transaction<T>(fn: (db: Database) => T): T {
-      const level = depth;
-      const savepoint = `sp_${level}`;
-      raw.exec(level === 0 ? 'BEGIN IMMEDIATE' : `SAVEPOINT ${savepoint}`);
-      depth = level + 1;
+      const outer = !raw.isTransaction;
+      const savepoint = `sp_${++savepoints}`;
+      raw.exec(outer ? 'BEGIN IMMEDIATE' : `SAVEPOINT ${savepoint}`);
       try {
         const result = fn(db);
         if (result instanceof Promise) {
           throw new TypeError('transaction(fn): fn must be synchronous');
         }
-        raw.exec(level === 0 ? 'COMMIT' : `RELEASE ${savepoint}`);
+        raw.exec(outer ? 'COMMIT' : `RELEASE ${savepoint}`);
         return result;
       } catch (error) {
         if (raw.isOpen && raw.isTransaction) {
-          if (level === 0) raw.exec('ROLLBACK');
+          if (outer) raw.exec('ROLLBACK');
           else raw.exec(`ROLLBACK TO ${savepoint}; RELEASE ${savepoint}`);
         }
         throw error;
-      } finally {
-        depth = level;
       }
     },
     close() {

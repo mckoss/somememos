@@ -57,21 +57,28 @@ export default ts.config(
       globals: { ...globals['shared-node-browser'] },
     },
     rules: {
-      'no-restricted-imports': [
-        'error',
-        {
-          paths: nodeBuiltins.map((name) => ({
-            name,
-            message: 'packages/core must stay isomorphic: no Node built-in modules.',
-          })),
-          patterns: [
-            {
-              group: ['node:*'],
-              message: 'packages/core must stay isomorphic: no Node built-in modules.',
-            },
-          ],
-        },
-      ],
+      'no-restricted-imports': ['error', isomorphic('packages/core')],
+    },
+  },
+  {
+    // The SQL store's main entry runs in the browser too. Only the node:sqlite
+    // driver (src/node/) and tests may use Node.
+    files: ['packages/sqlite-store/src/**/*.ts'],
+    ignores: ['packages/sqlite-store/src/node/**', 'packages/sqlite-store/src/**/*.test.ts'],
+    languageOptions: {
+      globals: { ...globals['shared-node-browser'] },
+    },
+    rules: {
+      'no-restricted-imports': ['error', isomorphic('@somememos/sqlite-store (outside src/node/)')],
     },
   },
 );
+
+/** The `no-restricted-imports` options that forbid Node built-ins in isomorphic code. */
+function isomorphic(what) {
+  const message = `${what} must stay isomorphic: no Node built-in modules.`;
+  return {
+    paths: nodeBuiltins.map((name) => ({ name, message })),
+    patterns: [{ group: ['node:*'], message }],
+  };
+}

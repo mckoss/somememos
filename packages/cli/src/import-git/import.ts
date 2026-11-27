@@ -15,13 +15,14 @@
 // its first parent. A change made on a side branch is therefore counted once,
 // at the merge's time, and the path set stays linear.
 //
-// Events follow the live index pass (packages/cli/src/indexer/pass.ts), dated
+// Events follow the live index pass (packages/core/src/indexing/pass.ts), dated
 // at each commit's author time (at most now):
 // - `edit` for a memo a commit added or changed (also a renamed one, R<100);
 // - `mention` for each link item (memo path or dangling key) that a changed
 //   memo or dated note's new version links and its old version did not, both
 //   resolved against the note paths as of that commit; links into excluded
-//   territory are dropped;
+//   territory and links to attachments (`![[photo.png]]`) are dropped, by the
+//   same rules as the live pass (core's `indexing` link helpers);
 // - rename records for a rename between two memos, and from a dangling key
 //   (one that has mentions) to the memo created for it;
 // - a move between a memo and another role is a delete plus a new note;
@@ -29,7 +30,7 @@
 // Ignored commits log only their rename records. Change records: one per
 // commit that touched a note.
 
-import { markdown, storage } from '@somememos/core';
+import { indexing, markdown, storage } from '@somememos/core';
 import { BlobReader, GitError, runGit, streamLog, type LogCommit } from './git.js';
 import { importId } from './ids.js';
 
@@ -39,10 +40,10 @@ export const IMPORT_CLIENT = 'import-git';
 /**
  * The durable meta key (`Stores.meta`) holding the Unix time, in seconds, at
  * which the brain was first indexed. Live indexing records events from then
- * on, so the import takes only commits before it. The same key as the index
- * pass's `META_FIRST_INDEXED` (packages/cli/src/indexer/state.ts).
+ * on, so the import takes only commits before it. The index pass's key
+ * (`indexing.META_FIRST_INDEXED`).
  */
-export const META_FIRST_INDEXED_AT = 'indexer.firstIndexedAt';
+export const META_FIRST_INDEXED_AT = indexing.META_FIRST_INDEXED;
 
 /** Notes larger than this are not read: they still get edit events, but no mentions. */
 export const DEFAULT_MAX_FILE_BYTES = 8 * 1024 * 1024;
@@ -276,26 +277,7 @@ export async function importGitHistory(options: ImportGitOptions): Promise<Impor
   // Excluded files' paths, held in memory only (never read or logged), so a
   // link into excluded territory is dropped instead of becoming a dangling
   // key that would name it. The same rule as the live index pass.
-  const excludedPaths = new Set<string>();
-  let excludedResolver: markdown.LinkResolver | null = null;
-  let excludedStale = false;
-  const isExcludedLink = (target: string, source: string): boolean => {
-    if (excludedStale) {
-      excludedResolver = excludedPaths.size > 0 ? markdown.createLinkResolver(excludedPaths) : null;
-      excludedStale = false;
-    }
-    if (excludedResolver?.resolve(target, source).kind === 'resolved') return true;
-    const candidates: (string | null)[] = [markdown.normalizePath(target)];
-    if (!target.startsWith('/')) {
-      const folder = markdown.dirName(source);
-      candidates.push(markdown.normalizePath(folder === '' ? target : `${folder}/${target}`));
-    }
-    for (const c of candidates) {
-      if (c === null) continue;
-      if (configuredRole(markdown.isMarkdownPath(c) ? c : `${c}.md`) === 'excluded') return true;
-    }
-    return false;
-  };
+  const excludedLinks = new indexing.ExcludedLinks(configuredRole);
 
   // Dangling keys that have mentions, indexed by their last segment, so a
   // newly created note can find the keys it now resolves.
@@ -377,14 +359,12 @@ export async function importGitHistory(options: ImportGitOptions): Promise<Impor
       isFile(mode) && configuredRole(path) === 'excluded';
     for (const c of commit.changes) {
       if (c.status !== 'A' && c.status !== 'C' && isExcludedFile(c.oldPath, c.oldMode)) {
-        excludedPaths.delete(c.oldPath);
-        excludedStale = true;
+        excludedLinks.delete(c.oldPath);
       }
     }
     for (const c of commit.changes) {
       if (c.status !== 'D' && isExcludedFile(c.newPath, c.newMode)) {
-        excludedPaths.add(c.newPath);
-        excludedStale = true;
+        excludedLinks.add(c.newPath);
       }
     }
 
@@ -508,13 +488,14 @@ export async function importGitHistory(options: ImportGitOptions): Promise<Impor
         // An unreadable version (too large, binary): no mentions rather than wrong ones.
         if (!oldLinks || !newLinks) continue;
         if (newLinks.length === 0) continue;
+        const resolver = currentResolver();
         const visible = (links: Links): Links =>
-          links.filter((l) => !isExcludedLink(l.target, s.path));
+          links.filter((l) => indexing.countsAsLink(l.target, s.path, resolver, excludedLinks));
         const added = markdown.addedLinkItems(
           visible(oldLinks),
           visible(newLinks),
           s.path,
-          currentResolver(),
+          resolver,
         );
         for (const item of added) {
           const isPath = paths.has(item);

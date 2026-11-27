@@ -2,8 +2,7 @@
 // and links, and the term index. Synchronous, like the event log.
 
 import { keyword, storage, timescore } from '@somememos/core';
-import type { Database } from '../sqlite/database.js';
-import { atomic } from './schema.js';
+import { atomic, type Db } from './db.js';
 
 const { compareStrings } = storage;
 
@@ -12,11 +11,11 @@ export const META_FOLD_CURSOR = 'fold_cursor';
 export const META_FOLD_HALF_LIVES = 'fold_half_lives';
 export const META_ANALYZER = 'analyzer';
 
-function getMeta(db: Database, key: string): string | undefined {
+function getMeta(db: Db, key: string): string | undefined {
   return db.get<{ value: string }>(`SELECT value FROM meta WHERE key = :key`, { key })?.value;
 }
 
-function setMeta(db: Database, key: string, value: string): void {
+function setMeta(db: Db, key: string, value: string): void {
   db.run(
     `INSERT INTO meta (key, value) VALUES (:key, :value)
      ON CONFLICT (key) DO UPDATE SET value = excluded.value`,
@@ -24,7 +23,7 @@ function setMeta(db: Database, key: string, value: string): void {
   );
 }
 
-function deleteMeta(db: Database, key: string): void {
+function deleteMeta(db: Db, key: string): void {
   db.run(`DELETE FROM meta WHERE key = :key`, { key });
 }
 
@@ -55,7 +54,7 @@ function ordered(scores: timescore.ItemScores<string>): timescore.ItemScores<str
 }
 
 export class SqliteScoreStore implements storage.ScoreStore {
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: Db) {}
 
   foldState(): storage.FoldState {
     const cursor = Number(getMeta(this.db, META_FOLD_CURSOR) ?? 0);
@@ -174,7 +173,7 @@ function toNote(row: NoteRow): storage.NoteRecord {
 }
 
 export class SqliteNoteStore implements storage.NoteStore {
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: Db) {}
 
   upsertNote(note: storage.NoteRecord): void {
     storage.assertValidNote(note);
@@ -296,7 +295,7 @@ const SECTION_COLUMNS =
 
 export class SqliteTermIndex implements storage.TermIndex {
   constructor(
-    private readonly db: Database,
+    private readonly db: Db,
     /** The analyzer recorded in the file; changed only by `setAnalyzer` (on reset). */
     private current: keyword.AnalyzerOptions,
   ) {}

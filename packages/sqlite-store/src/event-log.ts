@@ -3,8 +3,7 @@
 // promises, so callers always `await`).
 
 import { storage, type timescore } from '@somememos/core';
-import type { Database } from '../sqlite/database.js';
-import { atomic } from './schema.js';
+import { atomic, type Db } from './db.js';
 
 type LogEntry = storage.LogEntry;
 
@@ -43,7 +42,7 @@ const COLUMNS = 'seq, id, kind, item, time, client, target';
 
 export class SqliteEventLog implements storage.EventLog {
   constructor(
-    private readonly db: Database,
+    private readonly db: Db,
     private readonly clock: () => number,
   ) {}
 
@@ -193,7 +192,7 @@ export class SqliteEventLog implements storage.EventLog {
 
 /** A `user_meta` table as a `MetaStore`. */
 export class SqliteMeta implements storage.MetaStore {
-  constructor(private readonly db: Database) {}
+  constructor(private readonly db: Db) {}
 
   get(key: string): string | undefined {
     return this.db.get<{ value: string }>(`SELECT value FROM user_meta WHERE key = :key`, { key })

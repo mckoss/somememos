@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { markdown, storage } from '@somememos/core';
@@ -71,6 +71,48 @@ describe('somememos import-git', () => {
     expect(json.appended).toEqual({ log: 0, changes: 0 });
     expect(json.duplicates.log).toBeGreaterThan(0);
     expect(json.folded.events).toBe(0);
+  });
+
+  it('finds the brain like other commands: --brain, SOMEMEMOS_BRAIN, or a folder above', async () => {
+    const dir = brain();
+    const sub = fakeContext(join(dir, 'memos'));
+    expect(await importGitCommand.run(['--dry-run', '--json'], sub.ctx)).toBe(0);
+    expect(JSON.parse(sub.stdout()).dryRun).toBe(true);
+
+    const env = fakeContext(tmpdir());
+    const withEnv = { ...env.ctx, env: { SOMEMEMOS_BRAIN: dir } };
+    expect(await importGitCommand.run(['--dry-run', '--json'], withEnv)).toBe(0);
+    expect(JSON.parse(env.stdout()).commits.read).toBeGreaterThan(0);
+
+    const nowhere = fakeContext(tmpdir());
+    await expect(importGitCommand.run(['--dry-run'], nowhere.ctx)).rejects.toThrow(/no brain/);
+  });
+
+  it('a dry run writes nothing: no index pass, no database files', async () => {
+    const dir = brain();
+    const io = fakeContext(dir);
+    expect(await importGitCommand.run(['--dry-run'], io.ctx)).toBe(0);
+    expect(io.stdout()).toMatch(/^Dry run: would import 60 commits/);
+    expect(existsSync(brainPaths(dir).eventsPath)).toBe(false);
+    expect(existsSync(brainPaths(dir).indexPath)).toBe(false);
+  });
+
+  it('runs the index pass first (the baseline, where the import stops) unless --no-index', async () => {
+    const indexed = brain();
+    const a = fakeContext(indexed);
+    expect(await importGitCommand.run(['--json'], a.ctx)).toBe(0);
+    expect(JSON.parse(a.stdout()).cutoff.source).toBe('first-indexed');
+
+    const skipped = brain();
+    const b = fakeContext(skipped);
+    expect(await importGitCommand.run(['--json', '--no-index'], b.ctx)).toBe(0);
+    expect(JSON.parse(b.stdout()).cutoff.source).toBe('now');
+    // Same history either way.
+    const counts = (out: string) => {
+      const r = JSON.parse(out) as { events: unknown; renames: unknown; changeRecords: number };
+      return [r.events, r.renames, r.changeRecords];
+    };
+    expect(counts(a.stdout())).toEqual(counts(b.stdout()));
   });
 
   it('rejects stray arguments and an empty --until', async () => {

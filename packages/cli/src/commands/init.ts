@@ -13,8 +13,7 @@ import {
   withBrain,
 } from '../brain/index.js';
 import { EXIT_OK, UsageError } from '../context.js';
-import { walkBrain } from '../indexer/index.js';
-import { type IndexSummary } from '../indexer/index.js';
+import { type IndexSummary, walkMarkdown } from '../indexer/index.js';
 import { CONFIG_FILE, SIDECAR_DIR } from '../store/index.js';
 import { formatIndexSummary } from './format.js';
 import type { Command } from './types.js';
@@ -138,7 +137,7 @@ export const initCommand: Command = {
     }
     mkdirSync(root, { recursive: true });
 
-    const hasMarkdown = walkBrain(root, markdown.createRoleClassifier({})).files.size > 0;
+    const hasMarkdown = walkMarkdown(root).length > 0;
     const clientId = randomUUID();
     const config = hasMarkdown
       ? storage.parseBrainConfig({ clientId })
@@ -175,7 +174,7 @@ export const initCommand: Command = {
 
     let index: IndexSummary | null = null;
     if (!hasMarkdown && !globals.noIndex) {
-      index = await withBrain(ctx, { brain: root }, (brain) => brain.index);
+      index = await withBrain(ctx, { brain: root, remind: false }, (brain) => brain.index);
     }
 
     const record: InitRecord = {

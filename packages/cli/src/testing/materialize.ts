@@ -1,11 +1,11 @@
-// Write a synthetic brain (see brain.ts) to disk: its files, or a git repository
+// Write a synthetic brain (`@somememos/core/testing/brain`) to disk: its files, or a git repository
 // with one commit per step.
 
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { filesAfter } from './brain.js';
-import type { Step, SyntheticBrain } from './brain.js';
+import { filesAfter } from '@somememos/core/testing/brain';
+import type { Step, SyntheticBrain } from '@somememos/core/testing/brain';
 
 export const TEST_AUTHOR = { name: 'Test Author', email: 'test@example.invalid' };
 

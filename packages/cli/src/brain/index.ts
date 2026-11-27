@@ -16,6 +16,7 @@ export {
   findBrainRoot,
   isBrainRoot,
   isDirectory,
+  remindUncommitted,
   withBrain,
 } from './brain.js';
 export { CommandError, emit, oneLine, plural, printJson, printLines, warn } from './output.js';

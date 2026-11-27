@@ -1,22 +1,23 @@
 // `somememos commit [-m message] [paths…]`: record why the brain changed.
 //
-// Local mode (PLAN.md section 6): run the index pass, which logs the edits it
-// finds, then write one change record covering every changed path that no
-// change record covers yet. The index pass keeps that list (durable meta,
-// `indexer.uncommitted`), so a change already picked up by an earlier
-// command's automatic pass still gets its message here.
+// Local mode (PLAN.md section 6): `engine.commit` runs the index pass, which
+// logs the edits it finds, then writes one change record covering every
+// changed path that no change record covers yet. The index pass keeps that
+// list (durable meta, `indexer.uncommitted`), so a change already picked up
+// by an earlier command's automatic pass still gets its message here.
 
-import { storage } from '@somememos/core';
+import type { engine, storage } from '@somememos/core';
 import {
   GLOBAL_OPTIONS_HELP,
   brainOptions,
   emit,
   parseCommandArgs,
   plural,
+  warn,
   withBrain,
 } from '../brain/index.js';
 import { EXIT_OK, UsageError } from '../context.js';
-import { type IndexSummary, readUncommitted, writeUncommitted } from '../indexer/index.js';
+import type { IndexSummary } from '../indexer/index.js';
 import type { Command } from './types.js';
 
 const usage = `Usage: somememos commit [-m <message>] [paths…]
@@ -72,11 +73,6 @@ function formatCommit(r: CommitRecord): string[] {
   return lines;
 }
 
-/** Whether `path` is `filter` or lies inside the folder `filter` ('' is the whole brain). */
-function covers(filter: string, path: string): boolean {
-  return filter === '' || path === filter || path.startsWith(`${filter.replace(/\/+$/, '')}/`);
-}
-
 export const commitCommand: Command = {
   name: 'commit',
   summary: 'Record a change with a message (runs the index pass)',
@@ -93,33 +89,19 @@ export const commitCommand: Command = {
     }
     const message = (values.message ?? []).join('\n\n').trim() || null;
 
-    return withBrain(ctx, brainOptions(globals, { noIndex: false }), async (brain) => {
+    // The engine's commit runs the index pass itself, under the same lock.
+    const options = brainOptions(globals, { noIndex: false, autoIndex: false, remind: false });
+    return withBrain(ctx, options, async (brain) => {
       const filters = positionals.map((p) => {
         const path = brain.brainPath(p);
         if (path === null) throw new UsageError(`${p} is outside the brain`);
         return path;
       });
-      const { stores, config } = brain;
-      const record = await stores.indexTransaction(async (): Promise<CommitRecord> => {
-        const pending = await readUncommitted(stores.meta);
-        const selected =
-          filters.length === 0 ? pending : pending.filter((p) => filters.some((f) => covers(f, p)));
-        const remaining = pending.filter((p) => !selected.includes(p));
-        if (selected.length === 0) {
-          return { committed: false, change: null, remaining, index: brain.index };
-        }
-        const change: storage.ChangeInput = {
-          id: storage.newId(),
-          time: brain.now(),
-          client: config.clientId,
-          message,
-          op: storage.changeOp(message, config.changeOps),
-          paths: storage.normalizeChangePaths(selected),
-        };
-        await stores.events.appendChanges([change]);
-        await writeUncommitted(stores.meta, remaining);
-        return { committed: true, change, remaining, index: brain.index };
-      });
+      const result: engine.CommitResult = await brain.engine.commit({ message, paths: filters });
+      for (const w of result.index.warnings) warn(ctx, w);
+      // The record as before the engine: the change without its local seq.
+      const change = result.change ? (({ seq: _seq, ...input }) => input)(result.change) : null;
+      const record: CommitRecord = { ...result, change };
       emit(ctx, globals.json, record, formatCommit);
       return EXIT_OK;
     });

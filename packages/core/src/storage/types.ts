@@ -1,7 +1,7 @@
 // Storage interfaces (PLAN.md sections 4 and 9; IMPLEMENTATION.md task 0.8).
 //
 // Storage is defined as operations, never SQL, so that each database can
-// implement it: SQLite in offline clients (packages/cli/src/store), Postgres on
+// implement it: SQLite in offline clients (packages/sqlite-store), Postgres on
 // the server (M3), and the in-memory reference here (./memory.ts). Every
 // implementation must pass the same conformance suite (./conformance.testing.ts).
 //

@@ -97,7 +97,7 @@ Done when: `somememos index` and `import-git` run cleanly on the vault with the 
 
 Goal: the installable PWA of PLAN.md section 6, working entirely on data in the browser, on phone and desktop.
 
-- [ ] **2.0 Shared packages.** Move the SQLite store out of the CLI into a package with a small driver interface (one driver for `node:sqlite`, one for SQLite in the browser), and move the "a note changed: update the index and log events" logic into core, so the CLI, the browser and the server use one copy.
+- [x] **2.0 Shared packages.** Move the SQLite store out of the CLI into a package with a small driver interface (one driver for `node:sqlite`, one for SQLite in the browser), and move the "a note changed: update the index and log events" logic into core, so the CLI, the browser and the server use one copy.
 - [ ] **2.1 In-browser storage.** The storage interfaces on SQLite compiled for the browser, in a background worker with persistent storage, passing the shared conformance suite in a real browser. Note bodies are stored locally too.
 - [ ] **2.2 Brain engine in the worker.** Indexing, folding, ranking and search run in the worker behind a small request interface the pages call.
 - [ ] **2.3 Editor.** CodeMirror 6 source editor that stores exactly what was typed, with a live preview, `[[link]]` autocomplete, and create, save and rename. Side by side on desktop, one pane with a toggle on a phone.

@@ -194,6 +194,17 @@ Implemented in `packages/core/src/storage` (interfaces, folding, an in-memory re
 - Folding is safe when several processes run at once: a fold that loses the race is recomputed, never double-counted.
 - Every implementation must pass one shared conformance test suite, which the Postgres implementation will also run.
 
+### One engine for every host
+
+The CLI, the web app and the server all run the same code (restructured 2026-11-27):
+
+- **`packages/core/src/engine`** is the single interface a host calls: index, search, list, read a note, save, rename, delete, commit, show the change log, status, and export or import the log. Calls are serialized. Results are plain data that can cross a worker or network boundary, and a refused request raises a typed error that never names an excluded path.
+- **`packages/core/src/indexing`** holds every rule about how a changed note becomes index entries and events.
+- **A content store** is where note text lives: files on disk for the CLI, a table beside the event log for the browser. A note's content hash is the SHA-256 of its UTF-8 text.
+- **`packages/sqlite-store`** is the one SQLite implementation of storage, written against a small synchronous driver interface. `node:sqlite` is one driver; SQLite compiled for the browser is another.
+- **Saving through the engine carries the hash the edit was based on.** If the stored note has changed since, the save is refused and the current text is returned to merge against. This is the same check sync will use.
+- A link or embed of a file that isn't markdown (for example `![[photo.png]]`) is ignored unless it resolves to a note.
+
 ### One-time import from git
 
 An existing vault that has lived in git (Mike's has) carries years of history. `somememos import-git` reads that history once and writes it into the event log: an `edit` event for each commit that changed a note, and a `mention` event for each `[[link]]` a commit added, both at the commit's time, following renames. Imported events get ids derived from the commit, so running the import twice adds nothing. After the import, clients have no further use for git. When the vault moves to the server, its repository becomes the brain's version store (section 7).

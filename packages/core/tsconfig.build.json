@@ -5,7 +5,7 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  // Tests, and test-only helpers (`*.testing.ts`, which import vitest), stay
-  // out of the build.
-  "exclude": ["src/**/*.test.ts", "src/**/*.testing.ts"]
+  // Tests, and test-only helpers (`*.testing.ts`, which import vitest, and
+  // the synthetic brain generator in `src/testing/`), stay out of the build.
+  "exclude": ["src/**/*.test.ts", "src/**/*.testing.ts", "src/testing/**"]
 }

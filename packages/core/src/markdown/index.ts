@@ -23,7 +23,14 @@ export { maskCodeSpans, splitWikiLink, stripInlineMarkdown, type WikiLinkParts }
 export { addedLinkItems, linkItems } from './link-diff.js';
 export { linksFromScan, parseLinks, type WikiLink } from './links.js';
 export { parseNote, type ParsedNote } from './note.js';
-export { baseName, dirName, isMarkdownPath, normalizePath, stripMd } from './paths.js';
+export {
+  baseName,
+  dirName,
+  hasNonMarkdownExtension,
+  isMarkdownPath,
+  normalizePath,
+  stripMd,
+} from './paths.js';
 export {
   createLinkResolver,
   normalizeDanglingKey,

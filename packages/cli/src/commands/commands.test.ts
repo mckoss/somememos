@@ -204,7 +204,8 @@ describe('index', () => {
     const r = await cli(['index']);
     expect(r.code).toBe(EXIT_OK);
     expect(r.stderr).toBe(
-      'somememos: warning: source changed: sources/manual.md (re-indexed; sources are immutable, no event logged)\n',
+      'somememos: warning: source changed: sources/manual.md (re-indexed; sources are immutable, no event logged)\n' +
+        'somememos: 1 changed note not committed; run somememos commit -m "<why>"\n',
     );
   });
 });
@@ -469,6 +470,23 @@ describe('global behaviour', () => {
     const debug = await cli(['status'], { env: { SOMEMEMOS_DEBUG: '1' } });
     expect(debug.stderr.split('\n').length).toBeGreaterThan(3);
     expect(debug.stderr).toContain('    at ');
+  });
+
+  it('reminds about uncommitted changes on stderr, except after commit, status and with --json', async () => {
+    await seededBrain();
+    const reminder = 'somememos: 1 changed note not committed; run somememos commit -m "<why>"\n';
+    expect((await cli(['index'])).stderr).toBe('');
+    writeNote(dir, 'memos/pear.md', '# Pear\n\nRipe.\n', NOW - 20);
+    const indexed = await cli(['index']);
+    expect(indexed.stderr).toBe(reminder);
+    expect((await cli(['diary'])).stderr).toBe(
+      reminder.replace('1 changed note', '2 changed notes'),
+    );
+    expect((await cli(['index', '--json'])).stderr).toBe('');
+    expect((await cli(['status'])).stderr).toBe('');
+    const committed = await cli(['commit', '-m', 'update ripe']);
+    expect(committed.stderr).toBe('');
+    expect((await cli(['index'])).stderr).toBe('');
   });
 
   it('unknown options exit 2', async () => {

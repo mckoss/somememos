@@ -1,8 +1,8 @@
 {
   "name": "@somememos/core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "private": true,
-  "description": "Isomorphic somememos logic: TimeScore, chunking, links, ranking, evaluation.",
+  "description": "Isomorphic somememos logic: TimeScore, chunking, links, indexing, ranking, the engine, evaluation.",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -13,6 +13,12 @@
     },
     "./testing/storage": {
       "source": "./src/storage/conformance.testing.ts"
+    },
+    "./testing/engine": {
+      "source": "./src/engine/conformance.testing.ts"
+    },
+    "./testing/brain": {
+      "source": "./src/testing/index.ts"
     }
   },
   "files": [

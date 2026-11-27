@@ -14,7 +14,7 @@
 // - `indexer.uncommitted`: paths the index pass saw change that no change
 //   record covers yet. `commit` writes a change record for them and clears them.
 
-import type { storage } from '@somememos/core';
+import type { MetaStore } from '../storage/types.js';
 
 export const META_BASELINE = 'indexer.baseline';
 export const META_FILES = 'indexer.files';
@@ -22,7 +22,7 @@ export const META_LINKS_PREFIX = 'indexer.links:';
 export const META_FIRST_INDEXED = 'indexer.firstIndexedAt';
 export const META_UNCOMMITTED = 'indexer.uncommitted';
 
-type Meta = storage.MetaStore;
+type Meta = MetaStore;
 
 function parseJson<T>(text: string | undefined, fallback: T): T {
   if (text === undefined) return fallback;
