@@ -1,8 +1,7 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    // The main entry is isomorphic (ESLint forbids Node built-ins outside
-    // src/node/); the Node driver and the tests need Node's types.
+    // Node-only: the server's storage, over `pg`.
     "types": ["node"],
     "noEmit": true,
     // Resolve @somememos/core to its TypeScript source, so type-checking works
