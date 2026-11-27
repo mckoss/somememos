@@ -16,3 +16,9 @@ Collected while Mike was away overnight (from 2026-11-27). None of these blocked
 
 5. **Git import and side branches.** The import follows the main line of history, so work on a branch merged without squashing is dated at the merge.
    - *Meanwhile:* left as is.
+
+6. **Docker image.** The `Dockerfile` for Railway was written but never built, because this environment has no Docker daemon. Expect to fix small things on the first real build.
+   - *Meanwhile:* the server was run and tested directly with Node and a local Postgres.
+
+7. **Safari on iOS and Firefox.** Only Chromium is available here, so the web app's on-device storage is untested in other browsers. It should work on Safari 16.4 or later and Firefox 114 or later.
+   - *Meanwhile:* the app falls back to in-memory storage, with a visible warning, wherever on-device storage is unavailable.

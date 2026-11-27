@@ -20,21 +20,21 @@ Status key: `[x]` merged to `main` with CI green, `[~]` in progress, `[ ]` not s
 
 - [~] (built, committed to the branch) `search`, `hot`, `trending`, `neglected`, `read`, `log`, `export`, `import-log`, `eval`
 - [~] (built, committed to the branch) `blog` folder role in core
-- [~] First experiments on the vault: run, results in PLAN.md section 5. Applying the chosen defaults in code is still to do
+- [~] First experiments on the vault: run, results in PLAN.md section 5. Applying the chosen defaults and the burst rule in code (agent running)
 
 ## Server and sync (milestone 3)
 
 - [~] Sync design written into PLAN.md section 7 (request shapes, mutation counter, conflict handling): written, merges with the next PR
 - [~] (built, committed to the branch) Postgres implementation of the storage interfaces, passing the shared conformance suite in CI
-- [~] Server: one git repository per brain, sync API (agent running)
+- [~] (built, committed to the branch) Server: one git repository per brain, sync API, engine over HTTP, note history and restore
 - [ ] Sync in the web app
-- [~] Single-user access token (part of the server agent's work)
-- [!] Deploy to Railway (needs Mike: see QUESTIONS.md)
+- [~] (built, committed to the branch) Single-user access token, with a seam for real sign-in
+- [!] Deploy to Railway (needs Mike: see QUESTIONS.md). Dockerfile, railway.json and docs/deploy.md are written; the image has not been built, because this environment has no Docker daemon
 
 ## Agents (milestone 4)
 
-- [ ] One-file CLI build
-- [ ] CLI remote mode against the server
+- [~] One-file CLI build (agent running)
+- [~] CLI remote mode against the server, plus `clone` and `sync` (agent running)
 - [ ] `AGENTS.md` snippet and skill for brains
 
 ## Blog publishing (milestone 5, pulled forward if time allows)
