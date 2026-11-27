@@ -19,7 +19,13 @@ export {
   type Section,
 } from './chunker.js';
 export { detectFrontMatter, type FrontMatter } from './front-matter.js';
-export { maskCodeSpans, splitWikiLink, stripInlineMarkdown, type WikiLinkParts } from './inline.js';
+export {
+  maskCodeSpans,
+  splitWikiLink,
+  stripHtmlComments,
+  stripInlineMarkdown,
+  type WikiLinkParts,
+} from './inline.js';
 export { addedLinkItems, linkItems } from './link-diff.js';
 export { linksFromScan, parseLinks, type WikiLink } from './links.js';
 export { parseNote, type ParsedNote } from './note.js';

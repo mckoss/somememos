@@ -11,7 +11,13 @@
 // HTML from the post that it did not build itself.
 
 import MarkdownIt from 'markdown-it';
-import type { MarkdownIt as Renderer, StateCore, StateInline, Token } from 'markdown-it';
+import type {
+  MarkdownIt as Renderer,
+  StateBlock,
+  StateCore,
+  StateInline,
+  Token,
+} from 'markdown-it';
 import { markdown as md } from '@somememos/core';
 import type { BlogSnapshot, PublicPost } from '@somememos/server';
 
@@ -116,6 +122,81 @@ function wikiLinkRule(ctx: RenderContext) {
 }
 
 /**
+ * HTML comments are dropped from a public post (security review 2026-11-27,
+ * finding 8): authors keep private notes to self in them, and with raw HTML
+ * off they would otherwise show as text. Read as CommonMark does, so code
+ * spans and code blocks keep comment-like text: a block comment starts a
+ * line (up to three spaces in) and runs to the end of the line holding
+ * `-->` (or the end of the container); an inline comment is `<!-->`,
+ * `<!--->`, or `<!--` to the next `-->` within the paragraph. Text after a
+ * block comment's `-->` on its last line stays, as plain text, as in the app.
+ */
+function commentBlockRule(state: StateBlock, startLine: number, endLine: number, silent: boolean) {
+  const start = (state.bMarks[startLine] as number) + (state.tShift[startLine] as number);
+  if (state.sCount[startLine]! - state.blkIndent >= 4) return false;
+  if (!state.src.startsWith('<!--', start)) return false;
+  if (silent) return true;
+  let line = startLine;
+  let rest = '';
+  for (; line < endLine; line++) {
+    // CommonMark ends the block at the first line containing `-->`, the
+    // first line included (so `<!-->` is a whole comment).
+    const lineStart = line === startLine ? start : (state.bMarks[line] as number);
+    const lineEnd = state.eMarks[line] as number;
+    if (line > startLine && state.sCount[line]! < state.blkIndent) break;
+    const close = state.src.slice(lineStart, lineEnd).indexOf('-->');
+    if (close >= 0) {
+      // The rest of the line is raw HTML in CommonMark: a browser would drop its comments too.
+      rest = md.stripHtmlComments(state.src.slice(lineStart + close + 3, lineEnd)).text.trim();
+      line++;
+      break;
+    }
+  }
+  state.line = line;
+  if (rest !== '') {
+    const t = state.push('html_block', '', 0);
+    t.content = rest;
+    t.map = [startLine, line];
+  }
+  return true;
+}
+
+function commentInlineRule() {
+  // The last search for `-->`: a later `<!--` before that close finds the
+  // same one, and one after a failed search fails too, so a paragraph of
+  // many `<!--` costs linear time, not quadratic.
+  let cache: { src: string; from: number; close: number } | null = null;
+  return (state: StateInline, silent: boolean): boolean => {
+    const src = state.src;
+    const pos = state.pos;
+    if (src.charCodeAt(pos) !== 0x3c /* < */ || !src.startsWith('<!--', pos)) return false;
+    let end: number;
+    if (src.startsWith('>', pos + 4)) end = pos + 5;
+    else if (src.startsWith('->', pos + 4)) end = pos + 6;
+    else {
+      let close: number;
+      if (
+        cache &&
+        cache.src === src &&
+        pos + 4 >= cache.from &&
+        (cache.close < 0 || pos + 4 <= cache.close)
+      ) {
+        close = cache.close;
+      } else {
+        close = src.indexOf('-->', pos + 4);
+        cache = { src, from: pos + 4, close };
+      }
+      if (close < 0) return false;
+      end = close + 3;
+    }
+    // Nothing is shown for it, whether `silent` or not.
+    void silent;
+    state.pos = end;
+    return true;
+  };
+}
+
+/**
  * Keeps a markdown link only when it goes to an http(s) or mailto address or
  * an anchor in the page: a relative address could name a private note. A
  * dropped link leaves its text. `[[links]]` were already decided above.
@@ -198,6 +279,10 @@ function alignRule(state: StateCore): void {
 
 function createRenderer(ctx: RenderContext): Renderer {
   const it = new MarkdownIt({ html: false, linkify: true, typographer: false, breaks: false });
+  it.block.ruler.before('html_block', 'html_comment', commentBlockRule, {
+    alt: ['paragraph', 'reference', 'blockquote'],
+  });
+  it.inline.ruler.before('html_inline', 'html_comment', commentInlineRule());
   it.inline.ruler.before('link', 'wikilink', wikiLinkRule(ctx));
   it.core.ruler.after('inline', 'safe-links', safeLinksRule);
   it.core.ruler.after('inline', 'task-list', taskListRule);

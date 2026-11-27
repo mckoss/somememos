@@ -102,3 +102,17 @@ describe('hostile input', () => {
     expect(render('[[a]b]] and [[x\ny]]')).not.toContain('wikilink');
   });
 });
+
+describe('HTML comments', () => {
+  // The public blog drops them (lib/server/blog/render.ts); the app passes
+  // them on as comments, which the browser does not show: the same visible text.
+  it('passes comments through as comment markup, and keeps code text', () => {
+    const html = render(
+      'Text <!-- aside --> on.\n\n<!--\nmulti\nline\n-->\n\nUse `<!-- code -->` here.',
+    );
+    const visible = html.replace(/<!--[\s\S]*?-->/g, '');
+    expect(visible).not.toMatch(/aside|multi/);
+    expect(visible).toContain('<p>Text  on.</p>');
+    expect(visible).toContain('<code>&lt;!-- code --&gt;</code>');
+  });
+});

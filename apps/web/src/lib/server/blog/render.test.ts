@@ -188,6 +188,82 @@ describe('the public renderer', () => {
   });
 });
 
+describe('HTML comments', () => {
+  it('drops block, multi-line and inline comments, showing nothing of them', () => {
+    const html = render(
+      [
+        'Before.',
+        '',
+        '<!-- a private remark -->',
+        '',
+        '<!--',
+        'a longer note to self',
+        '',
+        'over several lines and a blank one',
+        '-->',
+        '',
+        'Text <!-- inline aside --> continues <!-- across',
+        'a line break --> here.',
+        '',
+        '<!--> empty <!---> also empty',
+        '',
+        '- item <!-- in a list -->',
+        '',
+        '> quoted <!-- in a quote -->',
+        '>',
+        '> <!-- a quoted block',
+        '> comment -->',
+        '',
+        '<!-- ends --> with trailing text',
+        '',
+        'After.',
+      ].join('\n'),
+    );
+    expectSafe(html);
+    expect(html).not.toMatch(
+      /private|note to self|several lines|aside|across|in a list|quote -|quoted block|ends/,
+    );
+    expect(html).not.toContain('&lt;!--');
+    expect(html).toContain('<p>Before.</p>');
+    expect(html).toContain('<p>Text  continues  here.</p>');
+    expect(html).toContain('empty  also empty');
+    expect(html).toContain('<li>item </li>');
+    expect(html).toContain('with trailing text');
+    expect(html).toContain('<p>After.</p>');
+  });
+
+  it('keeps comment-like text in code spans and code blocks', () => {
+    const html = render(
+      [
+        'Use `<!-- not a comment -->` in HTML.',
+        '',
+        '```html',
+        '<!-- kept in a fence -->',
+        '```',
+        '',
+        '    <!-- kept, indented code -->',
+        '',
+        '<!-- a comment holding `code` -->',
+      ].join('\n'),
+    );
+    expect(html).toContain('<code>&lt;!-- not a comment --&gt;</code>');
+    expect(html).toContain('&lt;!-- kept in a fence --&gt;');
+    expect(html).toContain('&lt;!-- kept, indented code --&gt;');
+    expect(html).not.toContain('holding');
+  });
+
+  it('shows an unclosed inline comment as text, as the app does', () => {
+    expect(render('A <!-- never closed.')).toContain('A &lt;!-- never closed.');
+  });
+
+  it('drops many comment openers in linear time', () => {
+    const started = performance.now();
+    render(`x ${'<!-- '.repeat(100_000)}`);
+    render(`x ${'<!-- a --> '.repeat(50_000)}`);
+    expect(performance.now() - started).toBeLessThan(3000);
+  });
+});
+
 describe('hostile posts', () => {
   it('renders many unclosed [[ in linear time', () => {
     // An unclosed `[[` used to search the rest of the post for `]]`.

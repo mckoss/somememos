@@ -21,7 +21,7 @@ Method: the route table was enumerated and every route was called without a toke
 | 5 | The container ran the server as root | Low | Fixed (`60b4fa9`) |
 | 6 | A file or folder name over 255 bytes failed with a 500, logged the note's path, and jammed a device's sync | Low | Fixed (`7919aac`) |
 | 7 | A note sharing its name with a folder failed with a 500 and logged the note's path | Low | Fixed for save and rename (`55f7884`) and for sync (`name-clash` refusal) |
-| 8 | HTML comments in a published post appear as visible text on the public blog | Low | Left for the owner |
+| 8 | HTML comments in a published post appear as visible text on the public blog | Low | Fixed: dropped from the page, title and summary |
 | 9 | Notes can load images from any https address | Low | Left for the owner |
 | 10 | The CLI sends its token to an `http://` server | Low | Fixed: refused unless local or `--allow-insecure` |
 | 11 | Brain ids and blog slugs are one namespace across users | Low | Accepted (single-user server) |
@@ -68,9 +68,11 @@ Saving `memos/a.md/b.md` next to an existing `memos/a.md` (or `memos/a.md` where
 
 **Fixed afterwards.** The server judges such an edit (a new note, or a rename's target, that clashes with a file or folder on the server or with another new path in the same request) as `refused` with code `name-clash`, so the rest of the sync goes through. A client that gets that code makes no conflict copy: it keeps the note where it is, records the path in its sync state, leaves it out of later requests while a note is at that path, and reports it like a note too large to sync (`runSync`'s `nameClash`, the CLI's `sync` warning and JSON, the app's sync details). Renaming the note clears it. A server note that would land inside such a kept note's name is skipped on that copy (a copy that keeps files could not store it); it arrives with a sync from the start once the clash is renamed. Tested over several syncs in `packages/server/src/sync.test.ts` and through the CLI in `packages/cli/src/remote/remote.test.ts`.
 
-### 8. HTML comments in published posts (low, left for the owner)
+### 8. HTML comments in published posts (low, fixed)
 
 The public renderer runs with raw HTML off, so `<!-- remark -->` in a published post is shown as the literal text `<!-- remark -->`, while the app (which allows sanitized HTML) shows nothing. An author who keeps private remarks in comments, a common markdown habit, would publish them. Options: drop HTML comments (and Obsidian-style `%% … %%` comments, if supported) from blog bodies before rendering, or document that everything in a published post is public.
+
+**Fixed afterwards.** The public renderer now reads HTML comments as CommonMark does and drops them: a block comment (a line starting `<!--`, through the line holding `-->`, blank lines included) and inline comments within a paragraph; text in code spans and code blocks is untouched, and an unclosed inline `<!--` stays visible text, as in the app. The post's title and summary (page title, feed, meta description) leave comments out too, including a heading inside a multi-line comment. The app's preview already showed nothing for comments (it passes them to the browser as comments), so both now show the same visible text. Obsidian-style `%% … %%` comments are not handled. Tests: `apps/web/src/lib/server/blog/render.test.ts`, `packages/server/src/blog.test.ts`, `packages/core/src/markdown/inline.test.ts`.
 
 ### 9. Images from any https address (low, left for the owner)
 
@@ -110,7 +112,7 @@ On a future multi-user server, `POST /api/brains` answers `brain-exists` for ano
 
 1. ~~The lockout trade-off in finding 3.~~ Settled: throttle failures, never refuse a valid token.
 2. ~~How sync should treat a note and folder with the same name (finding 7).~~ Settled: a `name-clash` refusal the client does not copy.
-3. Whether HTML comments in published posts should be dropped (finding 8).
+3. ~~Whether HTML comments in published posts should be dropped (finding 8).~~ Settled: dropped.
 4. Whether remote images in notes are worth the tracking risk (finding 9).
 5. ~~Whether the CLI should refuse plain `http://` servers (finding 10).~~ Settled: refused, with an explicit override.
 6. A contact line in `SECURITY.md`, and HSTS once the domain is settled.
