@@ -154,7 +154,7 @@ export interface BrainHost {
     options?: ImportOptions,
   ): Promise<ImportResult>;
   /** Every note stored on this device at its path (excluded folders
-   *  included), plus `events.jsonl`, as one store-only `.zip`, built in the
+   *  included), plus `events.jsonl`, as one deflated `.zip`, built in the
    *  worker. */
   exportArchive(): Promise<{ archive: Blob; notes: number; records: number }>;
   /** Replace the brain's folder roles (and other config), then re-index.

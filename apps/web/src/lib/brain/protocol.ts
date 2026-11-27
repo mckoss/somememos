@@ -97,7 +97,7 @@ export interface HostCalls {
   open(request: OpenRequest): { storage: WorkerStorage; config: engine.Engine['config'] };
   config(): engine.Engine['config'];
   storageKind(): WorkerStorage;
-  /** Every stored note at its path, plus `events.jsonl`, as a store-only zip. */
+  /** Every stored note at its path, plus `events.jsonl`, as a deflated zip. */
   exportArchive(): ExportArchive;
   /** Starts an import: returns its id. */
   importBegin(): number;
