@@ -4,9 +4,12 @@
 import type { SqlDriver, SqlParams, SqlRow, SqlRunResult, SqlStatement } from './driver.js';
 
 export class Db {
+  readonly driver: SqlDriver;
   private readonly cache = new Map<string, SqlStatement>();
 
-  constructor(readonly driver: SqlDriver) {}
+  constructor(driver: SqlDriver) {
+    this.driver = driver;
+  }
 
   get location(): string {
     return this.driver.location;

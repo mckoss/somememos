@@ -15,6 +15,9 @@
       "source": "./src/node/index.ts",
       "types": "./dist/node/index.d.ts",
       "default": "./dist/node/index.js"
+    },
+    "./testing/node": {
+      "source": "./src/node/child.testing.ts"
     }
   },
   "files": [

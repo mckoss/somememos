@@ -256,9 +256,12 @@ const EMPTY: BlogSnapshot = snapshotOf(new Map(), new Map());
 
 /** A counting semaphore: anonymous traffic never holds more than a few database connections. */
 class Gate {
+  private readonly limit: number;
   private active = 0;
   private readonly waiting: (() => void)[] = [];
-  constructor(private readonly limit: number) {}
+  constructor(limit: number) {
+    this.limit = limit;
+  }
   async run<T>(fn: () => Promise<T>): Promise<T> {
     if (this.active >= this.limit) await new Promise<void>((r) => this.waiting.push(r));
     this.active++;
@@ -284,6 +287,7 @@ interface BlogRow {
 
 /** The public blogs of a server. */
 export class PublicBlogs {
+  private readonly options: PublicBlogsOptions;
   private readonly cache = new Map<
     string,
     { commit: string; config: string; snapshot: Promise<BlogSnapshot> }
@@ -291,7 +295,8 @@ export class PublicBlogs {
   private readonly gate: Gate;
   private readonly cacheSize: number;
 
-  constructor(private readonly options: PublicBlogsOptions) {
+  constructor(options: PublicBlogsOptions) {
+    this.options = options;
     this.gate = new Gate(options.maxConcurrent ?? 4);
     this.cacheSize = options.cacheSize ?? 64;
   }

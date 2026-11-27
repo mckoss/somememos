@@ -107,6 +107,10 @@ export interface SchedulerState {
 type Pending = 'change' | 'read' | 'retry' | 'soon';
 
 export class SyncScheduler {
+  private readonly run: () => Promise<RunResult>;
+  private readonly timers: Timers;
+  private readonly onState: (state: SchedulerState) => void;
+  private readonly random: () => number;
   private enabled = false;
   private running = false;
   private rerun: 'now' | 'change' | null = null;
@@ -123,12 +127,16 @@ export class SyncScheduler {
   private readonly options: ScheduleOptions;
 
   constructor(
-    private readonly run: () => Promise<RunResult>,
-    private readonly timers: Timers = realTimers,
+    run: () => Promise<RunResult>,
+    timers: Timers = realTimers,
     options: Partial<ScheduleOptions> = {},
-    private readonly onState: (state: SchedulerState) => void = () => undefined,
-    private readonly random: () => number = Math.random,
+    onState: (state: SchedulerState) => void = () => undefined,
+    random: () => number = Math.random,
   ) {
+    this.run = run;
+    this.timers = timers;
+    this.onState = onState;
+    this.random = random;
     this.options = { ...DEFAULT_SCHEDULE, ...options };
   }
 

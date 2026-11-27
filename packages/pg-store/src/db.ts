@@ -80,13 +80,15 @@ interface TxContext {
  * pending index transaction's connection when there is one.
  */
 export class BrainDb {
+  readonly pool: pg.Pool;
+  readonly brainId: string;
   private readonly tx = new AsyncLocalStorage<TxContext>();
   private closed = false;
 
-  constructor(
-    readonly pool: pg.Pool,
-    readonly brainId: string,
-  ) {}
+  constructor(pool: pg.Pool, brainId: string) {
+    this.pool = pool;
+    this.brainId = brainId;
+  }
 
   close(): void {
     this.closed = true;

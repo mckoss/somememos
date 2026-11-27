@@ -35,14 +35,13 @@ export type RoleOf = (path: string) => FolderRole | null | undefined;
  * rebuilt lazily.
  */
 export class ExcludedLinks {
+  private readonly roleOf: RoleOf;
   private readonly paths: Set<string>;
   private resolver: LinkResolver | null = null;
   private stale = true;
 
-  constructor(
-    private readonly roleOf: RoleOf,
-    paths: Iterable<string> = [],
-  ) {
+  constructor(roleOf: RoleOf, paths: Iterable<string> = []) {
+    this.roleOf = roleOf;
     this.paths = new Set(paths);
   }
 

@@ -96,7 +96,7 @@ The design and its decisions are in [PLAN.md](PLAN.md), the task list in [IMPLEM
 
 ## Development
 
-Requires Node 22.13 or later (`.nvmrc` pins 22) and npm.
+Requires Node 26, the current LTS line (`.nvmrc` pins 26), and the npm that ships with it. The server and the web app need Node 26; the CLI, and the two packages it bundles (`packages/core` and `packages/sqlite-store`), still run on Node 22.13 or later. CI checks both: the full check on Node 26, and the unit tests of those three packages plus the bundle on Node 22.
 
 ```sh
 npm ci                     # install all workspaces

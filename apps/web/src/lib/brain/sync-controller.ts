@@ -92,16 +92,24 @@ export interface SyncControllerDeps {
 
 /** An HTTP failure: `status` 0 when no answer came. Its message never holds the token. */
 export class SyncHttpError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly retryAfterMs: number | null;
+  /** The error body's other fields (a 409's current config and revision). */
+  readonly details: Readonly<Record<string, unknown>>;
   override name = 'SyncHttpError';
   constructor(
-    readonly status: number,
-    readonly code: string,
+    status: number,
+    code: string,
     message: string,
-    readonly retryAfterMs: number | null = null,
-    /** The error body's other fields (a 409's current config and revision). */
-    readonly details: Readonly<Record<string, unknown>> = {},
+    retryAfterMs: number | null = null,
+    details: Readonly<Record<string, unknown>> = {},
   ) {
     super(message);
+    this.status = status;
+    this.code = code;
+    this.retryAfterMs = retryAfterMs;
+    this.details = details;
   }
 }
 
@@ -152,6 +160,7 @@ function storedConfig(config: storage.BrainConfig): Record<string, unknown> {
 }
 
 export class SyncController {
+  private readonly deps: SyncControllerDeps;
   private conn: Connection | null = null;
   private previous: { brainId: string; origin: string } | null = null;
   /** Bumped whenever the connection changes, so a run in flight stops applying. */
@@ -169,7 +178,8 @@ export class SyncController {
   private readonly scheduler: SyncScheduler;
   private readonly fetchFn: typeof fetch;
 
-  constructor(private readonly deps: SyncControllerDeps) {
+  constructor(deps: SyncControllerDeps) {
+    this.deps = deps;
     this.fetchFn = deps.fetch ?? ((input, init) => fetch(input, init));
     this.scheduler = new SyncScheduler(
       () => this.runSync(),

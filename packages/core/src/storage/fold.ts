@@ -159,13 +159,15 @@ interface BatchPlan {
 
 /** Collects `add` contributions per (item, kind, half-life) until flushed. */
 class Contributions {
+  private readonly halfLives: HalfLives;
+  private readonly names: readonly string[];
   // item -> "kind\0halfLife" -> contributions
   private pending = new Map<string, Map<string, number[]>>();
 
-  constructor(
-    private readonly halfLives: HalfLives,
-    private readonly names: readonly string[],
-  ) {}
+  constructor(halfLives: HalfLives, names: readonly string[]) {
+    this.halfLives = halfLives;
+    this.names = names;
+  }
 
   add(item: string, kind: EventKind, time: number): void {
     let byKey = this.pending.get(item);

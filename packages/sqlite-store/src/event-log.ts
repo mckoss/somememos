@@ -41,10 +41,12 @@ function toEntry(row: EventRow): LogEntry {
 const COLUMNS = 'seq, id, kind, item, time, client, target';
 
 export class SqliteEventLog implements storage.EventLog {
-  constructor(
-    private readonly db: Db,
-    private readonly clock: () => number,
-  ) {}
+  private readonly db: Db;
+  private readonly clock: () => number;
+  constructor(db: Db, clock: () => number) {
+    this.db = db;
+    this.clock = clock;
+  }
 
   append(
     entries: readonly storage.LogInput[],
@@ -192,7 +194,10 @@ export class SqliteEventLog implements storage.EventLog {
 
 /** A `user_meta` table as a `MetaStore`. */
 export class SqliteMeta implements storage.MetaStore {
-  constructor(private readonly db: Db) {}
+  private readonly db: Db;
+  constructor(db: Db) {
+    this.db = db;
+  }
 
   get(key: string): string | undefined {
     return this.db.get<{ value: string }>(`SELECT value FROM user_meta WHERE key = :key`, { key })

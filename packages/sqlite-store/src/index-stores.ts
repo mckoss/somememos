@@ -56,7 +56,10 @@ function ordered(scores: timescore.ItemScores<string>): timescore.ItemScores<str
 }
 
 export class SqliteScoreStore implements storage.ScoreStore {
-  constructor(private readonly db: Db) {}
+  private readonly db: Db;
+  constructor(db: Db) {
+    this.db = db;
+  }
 
   foldState(): storage.FoldState {
     const cursor = Number(getMeta(this.db, META_FOLD_CURSOR) ?? 0);
@@ -216,7 +219,10 @@ function toNote(row: NoteRow): storage.NoteRecord {
 }
 
 export class SqliteNoteStore implements storage.NoteStore {
-  constructor(private readonly db: Db) {}
+  private readonly db: Db;
+  constructor(db: Db) {
+    this.db = db;
+  }
 
   upsertNote(note: storage.NoteRecord): void {
     storage.assertValidNote(note);
@@ -344,11 +350,13 @@ const SECTION_COLUMNS =
   'path, idx, title, heading, body, start_line, end_line, title_len, heading_len, body_len';
 
 export class SqliteTermIndex implements storage.TermIndex {
-  constructor(
-    private readonly db: Db,
-    /** The analyzer recorded in the file; changed only by `setAnalyzer` (on reset). */
-    private current: keyword.AnalyzerOptions,
-  ) {}
+  private readonly db: Db;
+  /** The analyzer recorded in the file; changed only by `setAnalyzer` (on reset). */
+  private current: keyword.AnalyzerOptions;
+  constructor(db: Db, current: keyword.AnalyzerOptions) {
+    this.db = db;
+    this.current = current;
+  }
 
   get analyzer(): keyword.AnalyzerOptions {
     return this.current;

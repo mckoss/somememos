@@ -24,17 +24,23 @@ const ENGINE_CODES: ReadonlySet<string> = new Set<engine.EngineErrorCode>([
 
 /** A failure talking to the server: unreachable, refused, or an error it answered with. */
 export class RemoteError extends CommandError {
+  /** The HTTP status, or 0 when no response arrived. */
+  readonly status: number;
+  /** The server's error code, or a client-side one (`unreachable`, `timeout`, `bad-response`). */
+  readonly code: string;
+  /** The error body's other fields (a 409's current config and revision). */
+  readonly details: Readonly<Record<string, unknown>>;
   override name = 'RemoteError';
   constructor(
     message: string,
-    /** The HTTP status, or 0 when no response arrived. */
-    readonly status: number,
-    /** The server's error code, or a client-side one (`unreachable`, `timeout`, `bad-response`). */
-    readonly code: string,
-    /** The error body's other fields (a 409's current config and revision). */
-    readonly details: Readonly<Record<string, unknown>> = {},
+    status: number,
+    code: string,
+    details: Readonly<Record<string, unknown>> = {},
   ) {
     super(message);
+    this.status = status;
+    this.code = code;
+    this.details = details;
   }
 }
 
