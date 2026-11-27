@@ -461,6 +461,37 @@ A client that must work offline holds a full local copy: the markdown, the event
 - **Edits** made offline are sent like a commit, each with its base hash.
 - A change that arrives from the server is not a new event on the receiving client.
 
+### Sync protocol (first version)
+
+Written 2026-11-27 so the server and the app can be built against one description. It follows the rules above and adds the concrete shapes.
+
+**One request does a whole sync.** An offline copy sends `POST /api/brains/{brain}/sync` with what it has to push and the last mutation number it has seen, and gets back everything newer.
+
+```
+request:  { since,                       // last mutation number this client has applied
+            events:  [...],              // event log entries logged locally (with their ids)
+            changes: [...],              // change records written locally (with their ids)
+            edits:   [ { id, op: "write" | "delete" | "rename", path, to?, baseHash, text? } ] }
+
+response: { mutation,                    // the server's counter after this request
+            results: [ { id, status: "applied" | "duplicate" | "conflict", hash?, currentHash?, currentText? } ],
+            notes:   [ { path, hash, text } | { path, deleted: true } | { path, renamedTo } ],
+            events:  [...], changes: [...] }      // everything after `since`, from any client
+```
+
+- **Order on the server:** edits first, then events and change records, all for one brain inside one lock, so the counter and the git history agree.
+- **An edit is applied only if `baseHash` matches** the note's current hash (`null` means "create; the note must not exist"). An applied edit becomes one git commit, whose message is the change record that names it, and takes the next mutation number.
+- **Events and change records are deduplicated by id.** The client that made an edit logged its own `edit` and `mention` events and its change record, and pushes them. The server does not log events for edits that arrive through sync, or they would be counted twice.
+- **Applying what comes back:** the client writes the returned notes into its content store and indexes them *without logging events*, appends the returned events and change records (ignoring ids it has), folds, and stores `mutation` as its new `since`.
+- **A conflict never loses text.** For an edit refused as stale, the client keeps its own version as `name.conflict-<client>-<date>.md`, takes the server's version at the original path, and tells the person. A later version can offer a three-way merge using the base version from the server's git history.
+- **Retries are safe.** Repeating a request whose response was lost re-sends the same ids: events and changes are duplicates, and an edit whose text already matches the stored note is reported as `duplicate`, not as a conflict.
+- **A first sync** is the same request with `since: 0` from an empty copy, or, for a brain that started on the device, a push of everything it has.
+- **Large brains:** the response is paged. It carries `more: true` and the client repeats with the new `since` until it is false.
+
+**Remote clients use the engine over HTTP.** An agent's CLI in remote mode holds no copy. It calls routes that map one-to-one onto the engine (`search`, `list`, `readNote`, `saveNote`, `log`, `status`), and for those calls the *server's* engine logs the read, edit and mention events, since no client has.
+
+**Access.** Every request carries a bearer token. The first version is a single-user server with one token set in its environment; real sign-in replaces how a token is obtained, not the protocol.
+
 ### Edits and conflicts
 
 - Every file version is identified by its content hash. An edit arrives with the **base hash** it was made against.

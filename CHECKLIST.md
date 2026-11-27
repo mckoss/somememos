@@ -24,8 +24,8 @@ Status key: `[x]` merged to `main` with CI green, `[~]` in progress, `[ ]` not s
 
 ## Server and sync (milestone 3)
 
-- [ ] Sync design written into PLAN.md section 7 (request shapes, mutation counter, conflict handling)
-- [ ] Postgres implementation of the storage interfaces, passing the shared conformance suite in CI
+- [~] Sync design written into PLAN.md section 7 (request shapes, mutation counter, conflict handling): written, merges with the next PR
+- [~] Postgres implementation of the storage interfaces, passing the shared conformance suite in CI
 - [ ] Server: one git repository per brain, sync API
 - [ ] Sync in the web app
 - [ ] Single-user sign-in
