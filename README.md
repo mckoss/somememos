@@ -6,9 +6,9 @@ somememos ranks your notes by what you're working on now, what's heating up, and
 
 - **Your notes stay plain markdown.** The sidecar can always be exported alongside them.
 - **Offline first.** The CLI and web clients work on a local copy and sync to the server.
-- **Built for agents.** An MCP server lets any AI agent search, read and write your brain.
+- **Built for agents.** A command-line tool lets any AI agent with a shell search and read your brain. An MCP server follows for agents without one.
 
-Status: planning. See [PLAN.md](PLAN.md).
+Status: planning. See [PLAN.md](PLAN.md) and [IMPLEMENTATION.md](IMPLEMENTATION.md).
 
 The name is a palindrome: *somememos* reads the same forwards and backwards, like a memory that looks both back at what you've done and ahead at what's coming.
 
