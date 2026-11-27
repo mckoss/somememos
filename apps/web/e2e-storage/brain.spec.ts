@@ -268,10 +268,19 @@ test('two tabs share one brain; the second takes over when the first closes', as
   ]);
   expect([ra.status, rb.status].sort()).toEqual(['conflict', 'saved']);
 
+  await b.evaluate(() => {
+    const w = window as unknown as { __host: HostLike; __changes: unknown[] };
+    w.__changes = [];
+    w.__host.subscribe((c) => w.__changes.push(c));
+  });
   await a.close();
   await expect
     .poll(async () => (await withHost(b, (h) => h.storageInfo())).runsIn)
     .toBe('this-tab');
+  // The tab that took over says so, so its UI can refresh what it shows.
+  await expect
+    .poll(() => b.evaluate(() => (window as unknown as { __changes: unknown[] }).__changes))
+    .toContainEqual({ source: 'this-tab', operation: 'reopen' });
   const kept = await withHost(b, async (h) => ({
     shared: (await h.engine.readNote('memos/shared.md', { record: false })).text,
     total: (await h.engine.status()).notes.total,

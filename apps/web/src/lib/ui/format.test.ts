@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { timescore } from '@somememos/core';
 import {
+  describeCount,
   describePace,
   formatBytes,
   formatNumber,
@@ -73,6 +74,16 @@ describe('weekly pace', () => {
     expect(describePace(0.5)).toBe('about 2.1 a month');
     expect(describePace(0.1)).toBe('less than one a month');
     expect(describePace(0.01)).toBe('almost none');
+  });
+
+  it('counts the activity a window held, in that window', () => {
+    expect(describeCount(0, 7)).toBe('none');
+    expect(describeCount(7, 1)).toBe('about once');
+    expect(describeCount(3.2, 7)).toBe('about 3 times');
+    expect(describeCount(0.5, 30)).toBe('about 2 times');
+    expect(describeCount(0.5, 1)).toBe('less than once');
+    expect(describeCount(0.001, 7)).toBe('almost none');
+    expect(describeCount(14, 365)).toBe('about 730 times');
   });
 
   it('gives one bar per half-life, scaled to the fastest', () => {

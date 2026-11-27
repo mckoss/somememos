@@ -1,5 +1,4 @@
 import { expect, test } from '@playwright/test';
-import { markdown } from '../../../packages/core/src/index.ts';
 import {
   clientGo,
   engineCall,
@@ -52,7 +51,13 @@ test('import a folder, search, and explain a rank', async ({ page }) => {
   await first.getByText('Why this rank').click();
   await expect(first.getByRole('region', { name: 'Keyword match' })).toBeVisible();
   await expect(first.getByText('1.0 means its usual pace', { exact: false })).toBeVisible();
-  await expect(first.getByRole('region', { name: 'Activity' })).toContainText('This week');
+  // Each activity row counts over the window its label names.
+  const activity = first.getByRole('region', { name: 'Activity' });
+  await expect(activity).toContainText('Last week');
+  await expect(activity).toContainText(
+    /Last week\s*(about once|about \d[\d,]* times|less than once|almost none|none)/,
+  );
+  await expect(activity).not.toContainText(/a month|a week/);
 
   // Modes re-rank; keyword-only says activity isn't used.
   await page.getByText('Keyword only', { exact: true }).click();
@@ -208,10 +213,6 @@ test('a conflicting save shows both versions and keeps typed text', async ({ pag
 });
 
 test('publishing a blog post only toggles its front matter', async ({ page }) => {
-  test.skip(
-    !(markdown.ROLE_PRECEDENCE as readonly string[]).includes('blog'),
-    'core does not know the blog role yet',
-  );
   await importBrain(page, { blog: true });
   await nav(page, 'New');
   await page.getByLabel(/Blog post/).check();

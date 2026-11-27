@@ -7,7 +7,8 @@
   import { page } from '$app/state';
   import { APP_VERSION } from '#lib/version.ts';
   import Icon, { type IconName } from '#lib/components/Icon.svelte';
-  import { brain, host } from '#lib/ui/brain.svelte.ts';
+  import { applyUpdate, updateAvailable } from '#lib/brain/updates.ts';
+  import { brain, host, retry } from '#lib/ui/brain.svelte.ts';
   import { shownScheme, startTheme, toggleTheme } from '#lib/ui/theme.svelte.ts';
   import { startViewportTracking } from '#lib/ui/viewport.ts';
 
@@ -33,6 +34,16 @@
 
   const editing = $derived(page.route.id?.startsWith('/edit/') ?? false);
   const memoryOnly = $derived(brain.storage?.kind === 'memory');
+
+  // A new version of the app installed in the background and waiting.
+  let updateReady = $state(false);
+  let updating = $state(false);
+
+  async function reloadForUpdate() {
+    updating = true;
+    // The page reloads once the new version takes over (see updates.ts).
+    await applyUpdate();
+  }
 
   function isCurrent(href: string): boolean {
     const path = page.url.pathname;
@@ -70,9 +81,11 @@
     const stopTheme = startTheme();
     const stopViewport = startViewportTracking();
     void host().catch(() => {});
+    const stopUpdates = updateAvailable.subscribe((ready) => (updateReady = ready));
     return () => {
       stopTheme();
       stopViewport();
+      stopUpdates();
     };
   });
 </script>
@@ -118,16 +131,36 @@
   </nav>
 
   <main id="main" tabindex="-1">
+    {#if updateReady}
+      <div class="notice update" role="status" data-testid="update-prompt">
+        <span>A new version is ready.</span>
+        <button type="button" class="primary" onclick={reloadForUpdate} disabled={updating}>
+          {updating ? 'Reloading…' : 'Reload'}
+        </button>
+      </div>
+    {/if}
     {#if memoryOnly}
-      <p class="notice memory-warning" role="status">
-        Notes are kept in this tab’s memory only and are lost when you reload or close it.
-        {brain.storage?.reason ?? ''}
-      </p>
+      <div class="notice memory-warning" role="status" data-testid="memory-warning">
+        <strong>Your notes are not being saved on this device.</strong>
+        <p>
+          They are kept only while this tab is open, and are lost when you reload or close it.
+          {#if brain.storage?.reason}{brain.storage.reason}{/if}
+        </p>
+      </div>
     {/if}
     {#if brain.error}
-      <div class="notice error" role="alert">
-        <strong>The brain could not be opened.</strong>
-        <p>{brain.error}</p>
+      <div class="notice error open-error" role="alert">
+        {#if brain.busy}
+          <strong>Your notes are open in another window.</strong>
+          <p>
+            Another tab or window of somememos is holding your notes and couldn’t share them. Close
+            the other one (or switch to it), then try again.
+          </p>
+        {:else}
+          <strong>Your notes could not be opened.</strong>
+          <p>{brain.error}</p>
+        {/if}
+        <button type="button" onclick={() => void retry()}>Try again</button>
       </div>
     {:else}
       {@render children()}
@@ -206,9 +239,30 @@
     outline: none;
   }
 
-  .memory-warning {
+  .memory-warning,
+  .open-error,
+  .update {
     margin: 0 0 var(--space-4);
     font-size: 0.9rem;
+  }
+
+  .memory-warning p,
+  .open-error p {
+    margin: var(--space-1) 0 0;
+  }
+
+  .open-error button {
+    margin-top: var(--space-3);
+  }
+
+  .update {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2) var(--space-3);
+    background: var(--accent-soft);
+    color: var(--text);
   }
 
   /* Phone: navigation is a bar at the bottom. */

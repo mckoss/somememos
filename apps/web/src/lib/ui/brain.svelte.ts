@@ -13,6 +13,8 @@ export const brain = $state({
   ready: false,
   /** Set when the brain could not be opened. */
   error: null as string | null,
+  /** True when it failed because another tab or window holds the data. */
+  busy: false,
   /** Bumped after every change, so lists and views refresh. */
   revision: 0,
   storage: null as StorageInfo | null,
@@ -52,12 +54,29 @@ async function open(): Promise<BrainHost> {
     // Changes made in another tab refresh what this one shows. (This tab's
     // own changes call `changed()` where they happen.)
     h.subscribe((change) => {
-      if (change.source === 'other-tab') void changed();
+      if (change.source === 'other-tab' || change.operation === 'reopen') void changed();
     });
     return h;
   } catch (error) {
     brain.error = error instanceof Error ? error.message : String(error);
+    // The data is held by another tab (or window) of the app that can't hand
+    // it over: worth retrying once that one is closed.
+    brain.busy = error instanceof Error && error.name === 'StorageBusyError';
+    // Let `retry()` (or the next `host()` call) open it again.
+    started = null;
     throw error;
+  }
+}
+
+/** Tries to open the brain again after it failed. */
+export async function retry(): Promise<void> {
+  brain.error = null;
+  brain.busy = false;
+  try {
+    await host();
+    await changed();
+  } catch {
+    // `brain.error` says why.
   }
 }
 

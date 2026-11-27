@@ -11,6 +11,7 @@
     filesFromDirectoryPicker,
     filesFromDrop,
     filesFromInput,
+    normalizePicked,
     roleProblems,
     rolesFromText,
     type ImportRole,
@@ -64,8 +65,10 @@
       error = 'That folder has no files in it.';
       return;
     }
-    picked = files;
     rolesText = rolesToText(brain.roles);
+    // Every way of picking a folder ends here, so a leftover top folder
+    // (`vault/memos/a.md`) is dropped the same way for all of them.
+    picked = normalizePicked(files, rolesFromText(rolesText));
     phase = 'review';
   }
 

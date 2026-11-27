@@ -29,6 +29,38 @@ export function stripTopFolder(paths: readonly string[]): string[] {
   return shared ? paths.map((p) => p.slice(first.length + 1)) : [...paths];
 }
 
+/**
+ * Brain-relative paths for any way of picking a folder (input, drag and
+ * drop, File System Access API). If every file still sits inside one common
+ * folder (`vault/memos/a.md`: the picked folder's own name, or a wrapper
+ * folder such as an unzipped download) and that leaves the folder roles
+ * matching nothing, that one folder is dropped so the roles apply
+ * (`memos/a.md`). A brain whose files really all live in one role folder
+ * (`memos/a.md`, `memos/b.md`) is left alone, because its roles already match.
+ */
+export function stripCommonFolder(paths: readonly string[], roles: RolePatterns): string[] {
+  const stripped = stripTopFolder(paths);
+  if (paths.length === 0 || stripped.every((p, i) => p === paths[i])) return [...paths];
+  const declared = Object.values(roles).some((list) => (list?.length ?? 0) > 0);
+  if (!declared) return stripped;
+  const matches = (list: readonly string[]) => {
+    for (const role of classifyForImport(list, roles).values()) {
+      if (role !== 'none' && role !== 'excluded') return true;
+    }
+    return false;
+  };
+  return !matches(paths) && matches(stripped) ? stripped : [...paths];
+}
+
+/** `stripCommonFolder` applied to picked files. */
+export function normalizePicked(files: readonly PickedFile[], roles: RolePatterns): PickedFile[] {
+  const paths = stripCommonFolder(
+    files.map((f) => f.path),
+    roles,
+  );
+  return files.map((f, i) => ({ path: paths[i] as string, file: f.file }));
+}
+
 export type ImportRole = 'memo' | 'dated' | 'source' | 'blog' | 'excluded' | 'none';
 
 /**

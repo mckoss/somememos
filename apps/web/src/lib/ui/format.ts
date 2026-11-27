@@ -10,11 +10,17 @@ type RankMode = engine.RankMode;
 const DAY = 86_400;
 
 /** The half-lives the UI explains, shortest first, with plain names. */
-export const HALF_LIFE_LABELS: ReadonlyArray<{ name: string; label: string; window: string }> = [
-  { name: 'day', label: 'Today', window: 'about the last day' },
-  { name: 'week', label: 'This week', window: 'about the last week' },
-  { name: 'month', label: 'This month', window: 'about the last month' },
-  { name: 'year', label: 'This year', window: 'about the last year' },
+export const HALF_LIFE_LABELS: ReadonlyArray<{
+  name: string;
+  label: string;
+  window: string;
+  /** The window's length in days, for "about N times in the last …". */
+  days: number;
+}> = [
+  { name: 'day', label: 'Last day', window: 'about the last day', days: 1 },
+  { name: 'week', label: 'Last week', window: 'about the last week', days: 7 },
+  { name: 'month', label: 'Last month', window: 'about the last month', days: 30 },
+  { name: 'year', label: 'Last year', window: 'about the last year', days: 365 },
 ];
 
 export const KIND_LABELS = { read: 'Reads', edit: 'Edits', mention: 'Mentions' } as const;
@@ -71,10 +77,26 @@ export function describePace(perWeek: number): string {
   return `about ${formatNumber(perWeek)} a week`;
 }
 
+/**
+ * About how many reads, edits and mentions a window held, from the average
+ * pace over it: "about 4 times", "less than once", "none". Each row of the
+ * activity breakdown uses its own window, so a row labelled "Last week"
+ * always reads as a count over a week.
+ */
+export function describeCount(perWeek: number, days: number): string {
+  if (!(perWeek > 0) || !(days > 0)) return 'none';
+  const count = (perWeek / 7) * days;
+  if (count < 0.05) return 'almost none';
+  if (count < 0.75) return 'less than once';
+  const n = Math.max(1, count >= 100 ? Math.round(count / 10) * 10 : Math.round(count));
+  return n === 1 ? 'about once' : `about ${n.toLocaleString('en-US')} times`;
+}
+
 export interface PaceRow {
   readonly name: string;
   readonly label: string;
   readonly window: string;
+  readonly days: number;
   /** Interactions a week, averaged over the window. */
   readonly perWeek: number;
   /** The raw weighted score now, for the detail line. */
