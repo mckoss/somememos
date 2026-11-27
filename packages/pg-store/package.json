@@ -24,7 +24,8 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "@somememos/core": "*"
+    "@somememos/core": "*",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/pg": "^8.23.1"
