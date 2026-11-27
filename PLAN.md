@@ -335,6 +335,7 @@ The weighted total per item is computed in application code when a query runs. A
   | `neglected` | relevance, then high `L_year`, low `L_month`   |
   | `all`       | keyword relevance only                         |
 
+- **Search covers everything that is indexed**: memos, dated entries and sources. Only excluded folders are left out. The activation lists show only memos and dangling links, since those are the only scored items.
 - With no keywords, each mode ranks by activation alone. That's the "what's on my mind" view an agent reads at session start.
 - Results return note path, section heading, a snippet, and the score components, so a ranking can always be explained.
 
@@ -412,9 +413,17 @@ somememos eval [--cases file]        run the ranking experiments (section 5)
 
 Deferred to milestone 5, where it arrives as a remote endpoint with authentication, plus local stdio (`somememos mcp`) for clients without a shell. It is a thin adapter over the same `packages/core` functions the CLI calls: `search`, `hot`/`trending`/`neglected` and `read` (which records a read event, as in the CLI). How MCP clients write notes is settled with the edit sync design.
 
-### Web client
+### Web app
 
-An offline-first PWA (milestone 4), built in the same SvelteKit app as the server: a markdown editor with `[[wiki-links]]`, backlinks and quick search, plus hot, trending and neglected views. It installs to the home screen, works with no network, and syncs when it can. It replaces Obsidian for Mike.
+**The web app is the main product for people** (decided 2026-11-27): an installable, offline-first progressive web app that works on a phone and on a desktop browser.
+
+- **It runs on local data.** The browser holds a full copy of the brain in SQLite (compiled for the browser, running in a background worker, stored in the browser's private storage for the app). Search, ranking, the activation views, editing and saving all run on the device with no network. The server is where it syncs (section 7).
+- **Editor:** a markdown *source* editor (CodeMirror 6). What the person types is stored byte for byte; the editor highlights markdown but never rewrites it. A live preview updates as they type, with `[[links]]` rendered as links and links to notes that don't exist yet shown differently.
+- **Layout:** on a desktop, editor and preview sit side by side. On a phone there is one pane at a time with a toggle. Every screen is designed for a phone width first.
+- **Features:** create, open, edit and save notes; keyword search in the hot, trending, neglected and keyword-only modes, with each result showing why it ranked where it did (relevance, activity at each half-life, and the split between reads, edits and mentions); the hot, trending and neglected lists and dangling links worth writing; backlinks; each note's change history.
+- **Events:** opening a note logs a read, and saving logs an edit, with an optional reason for the change log. Both are recorded locally and synced later.
+- **Getting notes in before a server exists:** import a folder of markdown files from the device.
+- **Installable:** a web app manifest and a service worker cache the app, so it opens offline from the home screen.
 
 ## 7. Clients, sync and offline use
 
@@ -501,13 +510,13 @@ apps/web          SvelteKit app: server routes (sync API, remote MCP, accounts) 
 
 ## 10. Milestones
 
-Each milestone should leave something usable. [IMPLEMENTATION.md](IMPLEMENTATION.md) breaks each one into tasks.
+Each milestone should leave something usable. [IMPLEMENTATION.md](IMPLEMENTATION.md) breaks each one into tasks. The order was revised on 2026-11-27 to put the web app ahead of the server, because the app works on local data and needs no server to be useful.
 
-- **M0 — Foundations.** npm workspace scaffold (`packages/core`, `packages/cli`, and a skeleton SvelteKit `apps/web` that shows the version), CI (lint, type-check, tests), `packages/core` with the TimeScore functions and property tests checked against the blog post. Confirm the details in section 9.
-- **M1 — Local CLI and evaluation.** `init`, `index` (keyword index, edit detection, folding), `search`, `hot`/`trending`/`neglected`, `read`, `status`, `import-git`, `export`, and `eval`. Done when Mike can index his second-brain vault on one machine, import its git history, get useful hot, trending and neglected lists, and the first experiments have set the default weights.
-- **M2 — Agent use on one machine.** A one-file CLI build, the `AGENTS.md` snippet and skill, and the vault's instructions amended. Done when Mike's agents on his main machine (Claude Code and Hermes, both of which have a shell) use `somememos hot`, `search`, `read` and `log` in place of grep and `cat`, replacing the vault's `rg "^## " logs | tail -40` step, and record their reasons with `somememos commit -m` in place of writing changelog files.
-- **M3 — Server and remote CLI.** Single-user SvelteKit server on Railway that holds each brain as a git repository on its filesystem, with a mutation counter and the event log. The CLI gains remote mode: `search`, `read` and `commit` as requests to the server over somememos's own protocol, with a working folder for fetched notes. Done when agents on any machine, including disposable cloud sessions, use the brain with only the CLI and a credential.
-- **M4 — PWA client and offline sync.** Offline-first SvelteKit PWA with an editor, `[[wiki-links]]`, backlinks, search, and activation views. It holds a full local copy and syncs by the mutation counter, as does an optional `somememos clone` for local model use. Version shown in the header. Done when Mike can stop using Obsidian entirely.
+- **M0 — Foundations.** Done. Workspace, CI, the TimeScore math, and the checks in section 9.
+- **M1 — Local CLI and evaluation.** `init`, `index`, `search`, `hot`/`trending`/`neglected`, `read`, `commit`, `log`, `status`, `diary`, `import-git`, `export` and `eval` on a brain in a local folder. Done when Mike can index his second-brain vault on one machine, import its git history, get useful hot, trending and neglected lists, and the first experiments have set the default weights.
+- **M2 — Web app, local first.** The installable PWA of section 6, working entirely on data in the browser: editor with live preview, search with score breakdowns, activation views, backlinks and folder import, on phone and desktop. Done when Mike can import his vault into the app and use it offline in place of Obsidian for reading, searching and editing.
+- **M3 — Server and sync.** A SvelteKit server on Railway with Postgres and one git repository per brain; the app and an optional `somememos clone` sync with it by mutation counter; single-user sign-in. Done when the same brain stays in step across a phone and a desktop.
+- **M4 — Agents everywhere.** A one-file CLI build with remote mode (`search`, `read` and `commit` as requests to the server, with a working folder), the `AGENTS.md` snippet and skill, and the vault's instructions amended. Done when Mike's agents on any machine, including disposable cloud sessions, use the brain with only the CLI and a credential, and record their reasons with `somememos commit -m`.
 - **M5 — Hosted multi-user and MCP.** Accounts, per-user storage, remote MCP with authentication plus local stdio MCP, privacy policy, event log retention, and export. Launch at the somememos domain.
 
 ## 11. Dogfooding on Mike's vault
@@ -528,6 +537,7 @@ Each milestone should leave something usable. [IMPLEMENTATION.md](IMPLEMENTATION
 
 Settled on 2026-11-27, and removed from this list: the primary purpose (agent memory), dangling links (in from M1), the look-ahead channel (events are dated by interaction, so calendar dates are just content), how scoring choices get made (by experiment), raw activity (an event log is kept), git (the server's version store, one repository per brain, with no git interface exposed), and the change log (kept by somememos from commit messages, not written by agents).
 
+0. **Image and file embeds.** `![[photo.png]]` is not treated as a link to a note, so attachments don't appear as dangling items. Settled as a default on 2026-11-27; revisit if attachments need their own handling.
 1. **Evaluation queries.** Changelog entries and commit messages give some usable search cases, but not all of them describe their task well enough, so a hand-written case file is also needed. How many cases are enough for a stable comparison?
 2. **Ranking parameters, all to be answered by experiment:** per-kind weights, `α`, half-lives per mode, how bursts of edits count, heading vs body weight, link spreading (whether, which direction, how strong), and section-level vs note-level scoring.
 3. **The read feedback loop.** Does counting agent reads make the hot list reinforce itself, and does the read weight need a guard?
