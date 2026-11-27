@@ -583,14 +583,28 @@ describePg('the HTTP API', () => {
       message: string;
       client: string;
       time: number;
+      renamedFrom: string | null;
     }[];
-    expect(versions.map((v) => [v.path, v.message, v.client])).toEqual([
-      ['memos/kilns/electric.md', 'update move', 'agent-7'],
-      ['memos/kiln.md', 'update move', 'agent-7'],
-      ['memos/kiln.md', 'update firing', 'agent-7'],
-      ['memos/kiln.md', 'ingest kiln', 'agent-7'],
+    // The rename is one version, at the new path, naming the old one.
+    expect(versions.map((v) => [v.path, v.message, v.client, v.renamedFrom])).toEqual([
+      ['memos/kilns/electric.md', 'update move', 'agent-7', 'memos/kiln.md'],
+      ['memos/kiln.md', 'update firing', 'agent-7', null],
+      ['memos/kiln.md', 'ingest kiln', 'agent-7', null],
     ]);
-    const first = versions[3] as (typeof versions)[number];
+    expect(new Set(versions.map((v) => v.commit)).size).toBe(versions.length);
+    // The old path's own history still shows the move away, once.
+    const old = await server.request('GET', `${b}/notes/memos/kiln.md/history`);
+    expect(
+      (old.body.versions as { message: string; renamedTo: string | null }[]).map((v) => [
+        v.message,
+        v.renamedTo,
+      ]),
+    ).toEqual([
+      ['update move', 'memos/kilns/electric.md'],
+      ['update firing', null],
+      ['ingest kiln', null],
+    ]);
+    const first = versions[2] as (typeof versions)[number];
     expect(first.hash).toBe(v1.body.hash);
     const past = await server.request('GET', `${b}/notes/memos/kiln.md/versions/${first.commit}`);
     expect(past.body).toEqual({

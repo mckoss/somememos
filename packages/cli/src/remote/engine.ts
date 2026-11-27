@@ -27,6 +27,8 @@ export interface RemoteNoteVersion {
   readonly commit: string;
   readonly hash: string | null;
   readonly renamedTo: string | null;
+  /** The older path, on the version that renamed the note to this one (listed once). */
+  readonly renamedFrom?: string | null;
   readonly time: number;
   readonly client: string;
   readonly message: string;

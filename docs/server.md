@@ -135,14 +135,14 @@ $ curl -X DELETE "localhost:3000/api/brains/garden/notes/memos/aeration-pump.md?
 
 | Route | Does |
 |---|---|
-| `GET /api/brains/{brain}/notes/{path}/history?limit=` | The note's versions, newest first, following renames |
+| `GET /api/brains/{brain}/notes/{path}/history?limit=` | The note's versions, newest first, following renames (a rename is one version, at its new path, with `renamedFrom`) |
 | `GET /api/brains/{brain}/notes/{path}/versions/{commit}` | The note's text at a commit |
 | `GET /api/brains/{brain}/notes/{path}/versions?hash=` | The latest version with that content hash |
 | `POST /api/brains/{brain}/notes/{path}/restore` `{commit, baseHash?, message?}` | Make that version current, as a new version |
 
 ```
 $ curl localhost:3000/api/brains/garden/notes/memos/compost-tea.md/history -H "Authorization: Bearer $T"
-{"path":"memos/compost-tea.md","versions":[{"path":"memos/compost-tea.md","mutation":1,"commit":"dd2aab2e0014cb882a422d2e4748271d6a0bc953","hash":"8deb6363…","renamedTo":null,"time":1795773654,"client":"server","message":"ingest first notes"}]}
+{"path":"memos/compost-tea.md","versions":[{"path":"memos/compost-tea.md","mutation":1,"commit":"dd2aab2e0014cb882a422d2e4748271d6a0bc953","hash":"8deb6363…","renamedTo":null,"renamedFrom":null,"time":1795773654,"client":"server","message":"ingest first notes"}]}
 ```
 
 ### Blog settings
