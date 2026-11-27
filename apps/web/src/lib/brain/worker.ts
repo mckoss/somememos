@@ -11,6 +11,7 @@ import {
   toWireError,
   type OpenRequest,
   type RequestMessage,
+  type WorkerEventMessage,
   type WorkerMessage,
 } from './protocol.ts';
 
@@ -22,11 +23,18 @@ const scope = self as unknown as WorkerScope;
 
 let service: Promise<BrainService> | undefined;
 
+/** Sync runs here, against the origin the app came from (see ./sync-controller.ts). */
+const serviceOptions = {
+  origin: (self as unknown as { location?: { origin?: string } }).location?.origin ?? '',
+  emit: (event: Omit<WorkerEventMessage, 'type'>) => scope.postMessage({ type: 'event', ...event }),
+};
+
 async function open(request: OpenRequest): Promise<BrainService> {
   const sqlite3 = await sqlite3InitModule();
   if (request.storage === 'memory') {
     return openBrainService(
       memoryProvider(sqlite3, request.reason ?? memoryReason('the page found no OPFS')),
+      serviceOptions,
     );
   }
   let provider;
@@ -37,7 +45,7 @@ async function open(request: OpenRequest): Promise<BrainService> {
     if (error instanceof StorageBusyError) throw error;
     provider = memoryProvider(sqlite3, memoryReason(error));
   }
-  return openBrainService(provider);
+  return openBrainService(provider, serviceOptions);
 }
 
 async function respond(message: RequestMessage): Promise<void> {

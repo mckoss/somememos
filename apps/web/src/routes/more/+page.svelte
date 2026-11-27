@@ -5,10 +5,12 @@
   import Icon from '#lib/components/Icon.svelte';
   import ImportPanel from '#lib/components/ImportPanel.svelte';
   import RolesEditor, { rolesToText, type RolesText } from '#lib/components/RolesEditor.svelte';
+  import SyncPanel from '#lib/components/SyncPanel.svelte';
   import { brain, changed, host } from '#lib/ui/brain.svelte.ts';
   import { errorMessage } from '#lib/ui/errors.ts';
   import { formatBytes, plural, relativeTime } from '#lib/ui/format.ts';
   import { roleProblems, rolesFromText } from '#lib/ui/import.ts';
+  import { syncState } from '#lib/ui/sync.svelte.ts';
   import { setTheme, theme, type ThemeChoice } from '#lib/ui/theme.svelte.ts';
   import { APP_VERSION } from '#lib/version.ts';
 
@@ -140,6 +142,7 @@
 
 <nav class="jump" aria-label="On this page">
   <a href="#import">Import</a>
+  <a href="#sync">Sync</a>
   <a href="#roles">Folder roles</a>
   <a href="#storage">Storage</a>
   <a href="#log">Event log</a>
@@ -154,8 +157,20 @@
     <ImportPanel />
   </section>
 
+  <section id="sync" class="card" aria-labelledby="sync-h">
+    <h2 id="sync-h">Sync</h2>
+    <SyncPanel />
+  </section>
+
   <section id="roles" class="card" aria-labelledby="roles-h">
     <h2 id="roles-h">Folder roles</h2>
+    {#if syncState.view?.connected}
+      <p class="hint" data-testid="roles-synced">
+        This device syncs with <strong>{syncState.view.brainId}</strong>, whose folder roles were
+        set on the server when it was created. A change here applies to this device only, so make
+        the same change on your other devices, or they will sort notes differently.
+      </p>
+    {/if}
     <RolesEditor bind:value={rolesText} />
     <div class="row actions">
       <button
@@ -361,6 +376,12 @@
     This removes all {status ? plural(status.notes.total, 'note') : 'notes'} and their activity from this
     browser. It can’t be undone.
   </p>
+  {#if syncState.view?.connected}
+    <p>
+      It also disconnects this device from the server and forgets its access token. Nothing is
+      deleted from the server.
+    </p>
+  {/if}
   <div class="field">
     <label for="reset-confirm">Type <strong>{RESET_PHRASE}</strong> to confirm</label>
     <input

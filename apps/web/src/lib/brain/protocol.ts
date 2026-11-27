@@ -3,6 +3,16 @@
 // strings and numbers. No library; one request gets exactly one response.
 
 import { engine, type indexing } from '@somememos/core';
+import type {
+  ConflictChoice,
+  ConnectPlan,
+  ConnectRequest,
+  NoteSyncState,
+  RemoteBrain,
+  ServerAvailability,
+  SyncConflictView,
+  SyncView,
+} from '../sync/types.ts';
 import type { ImportFile } from './host.ts';
 
 /** The engine's methods, by name (everything but `config`). */
@@ -25,6 +35,7 @@ export const ENGINE_METHODS = [
   'ensureDiary',
   'exportLog',
   'importLog',
+  'syncStatus',
 ] as const satisfies readonly EngineMethod[];
 
 /**
@@ -40,8 +51,16 @@ export const READ_ONLY_METHODS: ReadonlySet<string> = new Set([
   'danglingLinks',
   'diaryPath',
   'exportLog',
+  'syncStatus',
   'config',
   'storageKind',
+  'syncProbe',
+  'syncListBrains',
+  'syncPlan',
+  'syncView',
+  'syncHint',
+  'syncConflicts',
+  'syncNoteState',
 ]);
 
 /** Where the open brain keeps its data. */
@@ -78,6 +97,20 @@ export interface HostCalls {
   importAbort(id: number): void;
   updateConfig(config: unknown): engine.Engine['config'];
   reset(): engine.Engine['config'];
+  // Sync (./sync-controller.ts): run by the worker, which holds the token.
+  syncProbe(): ServerAvailability;
+  syncListBrains(token: string): RemoteBrain[];
+  syncPlan(request: ConnectRequest): ConnectPlan;
+  syncConnect(request: ConnectRequest, confirmed: boolean): SyncView;
+  syncDisconnect(): SyncView;
+  syncSetToken(token: string): SyncView;
+  syncView(): SyncView;
+  syncNow(): SyncView;
+  syncStartOver(): SyncView;
+  syncHint(kind: 'online' | 'visible'): void;
+  syncConflicts(): SyncConflictView[];
+  syncResolve(path: string, choice: ConflictChoice): { kept: string | null };
+  syncNoteState(path: string, hash: string): NoteSyncState;
 }
 
 export type HostMethod = keyof HostCalls;
@@ -118,7 +151,15 @@ export type ResponseMessage =
       readonly error: WireError;
     };
 
-export type WorkerMessage = ResponseMessage;
+/** Sent by the worker unprompted: sync status changed (and, with it, maybe the data or the config). */
+export interface WorkerEventMessage {
+  readonly type: 'event';
+  readonly operation: 'sync' | 'syncStatus';
+  readonly sync: SyncView;
+  readonly config?: engine.Engine['config'];
+}
+
+export type WorkerMessage = ResponseMessage | WorkerEventMessage;
 
 /** Words for the person when the brain can't be kept on the device. */
 export function memoryReason(problem: unknown): string {

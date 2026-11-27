@@ -11,5 +11,5 @@
     "declaration": false,
     "declarationMap": false
   },
-  "include": ["**/*.ts", "../playwright.config.ts"]
+  "include": ["**/*.ts", "../playwright.config.ts", "../playwright.sync.config.ts"]
 }

@@ -7,7 +7,9 @@
   import Icon from '#lib/components/Icon.svelte';
   import MarkdownView from '#lib/components/MarkdownView.svelte';
   import PublishControl from '#lib/components/PublishControl.svelte';
+  import type { NoteSyncState } from '#lib/brain/host.ts';
   import { brain, changed, host, skipNextRead } from '#lib/ui/brain.svelte.ts';
+  import { syncState } from '#lib/ui/sync.svelte.ts';
   import { errorCode, errorMessage } from '#lib/ui/errors.ts';
   import { relativeTime } from '#lib/ui/format.ts';
   import { isPublished, setPublished } from '#lib/ui/frontmatter.ts';
@@ -61,6 +63,22 @@
   const titleOf = (p: string) => brain.titles.find((t) => t.path === p)?.title ?? p;
   const isBlog = $derived((note?.role as string | undefined) === 'blog');
   const published = $derived(note ? isPublished(note.text) : false);
+
+  // Whether this version is on the server (a blog post's badge says so).
+  let noteSynced = $state<NoteSyncState>('off');
+  $effect(() => {
+    const n = note;
+    void syncState.revision;
+    if (!n || n.role !== 'blog') return;
+    const { path: p, hash } = n;
+    void (async () => {
+      try {
+        noteSynced = await (await host()).sync.noteState(p, hash);
+      } catch {
+        noteSynced = 'off';
+      }
+    })();
+  });
 
   // Rename
   let renameOpen = $state(false);
@@ -177,7 +195,7 @@
     {#if actionError}<p class="notice error" role="alert">{actionError}</p>{/if}
 
     {#if isBlog}
-      <PublishControl {published} onchange={setPublishedAndSave} />
+      <PublishControl {published} onchange={setPublishedAndSave} synced={noteSynced} />
     {/if}
 
     <div class="layout">
