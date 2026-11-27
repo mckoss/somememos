@@ -1,6 +1,6 @@
 {
   "name": "somememos",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "private": true,
   "description": "A second brain made of plain markdown files, with time-aware working memory.",
   "license": "Apache-2.0",
