@@ -1,6 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { chunkNote } from './chunker.js';
-import { splitWikiLink, stripInlineMarkdown } from './inline.js';
+import { splitWikiLink, stripHtmlComments, stripInlineMarkdown } from './inline.js';
+
+describe('stripHtmlComments', () => {
+  it('removes comments outside code spans, across lines too', () => {
+    expect(stripHtmlComments('a <!-- x --> b <!--> c <!---> d')).toEqual({
+      text: 'a  b  c  d',
+      open: false,
+    });
+    expect(stripHtmlComments('keep `<!-- code -->` here')).toEqual({
+      text: 'keep `<!-- code -->` here',
+      open: false,
+    });
+    expect(stripHtmlComments('start <!-- open')).toEqual({ text: 'start ', open: true });
+    expect(stripHtmlComments('still inside', true)).toEqual({ text: '', open: true });
+    expect(stripHtmlComments('ends --> after', true)).toEqual({ text: ' after', open: false });
+  });
+
+  it('is linear on many openers', () => {
+    const started = performance.now();
+    stripHtmlComments('<!-- '.repeat(100_000));
+    stripHtmlComments('<!-- a -->'.repeat(100_000));
+    expect(performance.now() - started).toBeLessThan(2000);
+  });
+});
 
 /** The regular-expression version of the link, autolink and tag rules, for comparison. */
 function stripByRegex(s: string): string {

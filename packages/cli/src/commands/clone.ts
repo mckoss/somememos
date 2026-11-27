@@ -27,7 +27,9 @@ import {
   type CloneRemote,
   ENV,
   checkBrainId,
+  checkDeviceName,
   checkTokenFile,
+  insecureAllowed,
   normalizeServerUrl,
   readCloneRemote,
   resolveToken,
@@ -54,6 +56,11 @@ the folder roles. <dir> must be empty or not exist yet.
 
 Options:
   --token-file <path>  Read the token from this file (outside <dir>)
+  --allow-insecure     Allow a plain http:// server on another host (trusted
+                       networks only: the token travels unencrypted)
+  --name <device-name> This copy's client id, shown in history and as the
+                       commit author (1-40 letters, digits, '.', '_' or '-';
+                       default: a random id). Give each device its own.
 
 ${GLOBAL_OPTIONS_HELP}
 
@@ -94,14 +101,18 @@ Options:
   --server <url>       The server, for a brain with none recorded
   --brain-id <id>      The brain on that server
   --token-file <path>  Read the token from this file (recorded)
+  --allow-insecure     Allow a plain http:// server on another host (trusted
+                       networks only: the token travels unencrypted)
 
 ${GLOBAL_OPTIONS_HELP}
 
 Output: one summary line, then one line per conflict. With --json: {server,
 brainId, rounds, mutation, pushed: {edits, applied, duplicates, events,
 changes}, received: {notes, events, changes}, conflicts: [{path, status, code,
-conflictPath}], waiting, config: "in-step"|"pushed"|"pulled", tooLarge}.
+conflictPath}], waiting, config: "in-step"|"pushed"|"pulled", tooLarge, nameClash}.
 A note too large to sync (over 2 MB) stays in this copy, and sync names it.
+So does a note the server cannot store because a folder has the same name
+(a.md beside a.md/b.md): rename it to sync it.
 
 Examples:
   somememos sync
@@ -121,6 +132,8 @@ export interface SyncRecord {
   config: engine.ConfigStep;
   /** Notes too large to sync: they stay in this copy only. */
   tooLarge: string[];
+  /** Notes the server cannot store beside a folder of the same name: in this copy only. */
+  nameClash: string[];
 }
 
 const SYNC_MAX_MB = coreSync.SYNC_LIMITS.maxNoteBytes / (1024 * 1024);
@@ -176,6 +189,7 @@ export async function syncWithServer(
   ctx: Context,
   brain: Brain,
   remote: CloneRemote,
+  allowInsecure = false,
 ): Promise<SyncRecord> {
   const token = resolveToken(ctx.env, remote.tokenFile, ctx.cwd);
   const client = createRemoteClient({
@@ -183,6 +197,7 @@ export async function syncWithServer(
     brainId: remote.brainId,
     token,
     clientId: brain.config.clientId,
+    allowInsecure: insecureAllowed(ctx.env, allowInsecure),
   });
   const server = createRemoteEngine(client);
   const shared = cloneConfigSync(brain, server);
@@ -218,6 +233,7 @@ export async function syncWithServer(
     waiting: result.waiting,
     config: result.config ?? 'in-step',
     tooLarge: result.tooLarge,
+    nameClash: result.nameClash,
   };
 }
 
@@ -240,14 +256,23 @@ export const cloneCommand: Command = {
   async run(args, ctx) {
     const { values, positionals, globals } = parseCommandArgs(
       args,
-      { 'token-file': { type: 'string' } },
+      {
+        'token-file': { type: 'string' },
+        'allow-insecure': { type: 'boolean' },
+        name: { type: 'string' },
+      },
       { allowPositionals: true },
     );
     if (globals.help) {
       ctx.stdout(cloneUsage);
       return EXIT_OK;
     }
-    const prepared = await prepareRemote(ctx, positionals, values['token-file'], (id) => id);
+    if (values.name !== undefined) checkDeviceName(values.name);
+    const allowInsecure = values['allow-insecure'] === true;
+    const prepared = await prepareRemote(ctx, positionals, values['token-file'], (id) => id, {
+      allowInsecure,
+      name: values.name,
+    });
     const root = prepared.root;
     let entries: string[] = [];
     try {
@@ -275,7 +300,7 @@ export const cloneCommand: Command = {
     if (insideGitRepository(root)) ensureGitignoreLine(root, GITIGNORE_LINE);
 
     return withBrain(ctx, { brain: root, remind: false }, async (brain) => {
-      const synced = await syncWithServer(ctx, brain, remote);
+      const synced = await syncWithServer(ctx, brain, remote, allowInsecure);
       const status = await brain.engine.status();
       const record = {
         root,
@@ -305,6 +330,7 @@ export const syncCommand: Command = {
       server: { type: 'string' },
       'brain-id': { type: 'string' },
       'token-file': { type: 'string' },
+      'allow-insecure': { type: 'boolean' },
     });
     if (globals.help) {
       ctx.stdout(syncUsage);
@@ -331,7 +357,7 @@ export const syncCommand: Command = {
           );
         }
         if (!remote) {
-          await checkSameRoles(ctx, brain, given);
+          await checkSameRoles(ctx, brain, given, values['allow-insecure'] === true);
           writeCloneRemote(brain.root, given);
         }
         remote = given;
@@ -347,7 +373,7 @@ export const syncCommand: Command = {
           `this brain has no server to sync with: make an offline copy with 'somememos clone <server-url> <brain-id>', or give this brain a server once with 'somememos sync --server <url> --brain-id <id>'`,
         );
       }
-      const record = await syncWithServer(ctx, brain, remote);
+      const record = await syncWithServer(ctx, brain, remote, values['allow-insecure'] === true);
       emit(ctx, globals.json, record, formatSync);
       if (!globals.json) {
         for (const c of record.conflicts) warn(ctx, conflictLine(brain, c));
@@ -364,6 +390,13 @@ export const syncCommand: Command = {
             `${plural(record.tooLarge.length, 'note')} too large to sync (over ${SYNC_MAX_MB} MB) ${one ? 'stays' : 'stay'} in this copy only: ${record.tooLarge.map((p) => brain.displayPath(p)).join(', ')}; split ${one ? 'it' : 'them'} to sync`,
           );
         }
+        if (record.nameClash.length > 0) {
+          const one = record.nameClash.length === 1;
+          warn(
+            ctx,
+            `${plural(record.nameClash.length, 'note')} ${one ? 'shares its' : 'share their'} name with a folder on the server, so ${one ? 'it stays' : 'they stay'} in this copy only: ${record.nameClash.map((p) => brain.displayPath(p)).join(', ')}; rename ${one ? 'it' : 'them'} to sync`,
+          );
+        }
       }
       return EXIT_OK;
     });
@@ -371,13 +404,19 @@ export const syncCommand: Command = {
 };
 
 /** A brain that began here may join a server brain only with the same folder roles. */
-async function checkSameRoles(ctx: Context, brain: Brain, remote: CloneRemote): Promise<void> {
+async function checkSameRoles(
+  ctx: Context,
+  brain: Brain,
+  remote: CloneRemote,
+  allowInsecure: boolean,
+): Promise<void> {
   const token = resolveToken(ctx.env, remote.tokenFile, ctx.cwd);
   const client = createRemoteClient({
     server: remote.server,
     brainId: remote.brainId,
     token,
     clientId: brain.config.clientId,
+    allowInsecure: insecureAllowed(ctx.env, allowInsecure),
   });
   const info = await createRemoteEngine(client).brainInfo();
   const canonical = (roles: object) => JSON.stringify(sortDeep(roles));

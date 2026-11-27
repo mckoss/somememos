@@ -18,6 +18,7 @@
 import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MemoryKeywordIndex } from '../keyword/memory-index.js';
+import { MAX_TERM_LENGTH } from '../keyword/tokenize.js';
 import { searchSource } from '../keyword/search.js';
 import { HALF_LIVES } from '../timescore/halfLives.js';
 import { FutureEventError, InvalidEventError, type ItemScores } from '../timescore/events.js';
@@ -129,13 +130,24 @@ type Draft =
   | { kind: EventKind; item: string; time: number }
   | { kind: 'rename'; item: string; to: string; time: number };
 
+/**
+ * Times from a handful of seconds half the time, so equal times (an event at
+ * a rename's second, several renames in one second, chains and cycles within
+ * one second) are common; otherwise anywhere in the range.
+ */
+const timeArb = (min: number, max: number): fc.Arbitrary<number> =>
+  fc.oneof(
+    fc.constantFrom(min, max, max - 3, max - 3600, Math.round((min + max) / 2)),
+    fc.integer({ min, max }),
+  );
+
 const draftArb: fc.Arbitrary<Draft> = fc.oneof(
   {
     weight: 6,
     arbitrary: fc.record({
       kind: fc.constantFrom(...EVENT_KINDS),
       item: fc.constantFrom(...ITEMS),
-      time: fc.integer({ min: T0, max: NOW }),
+      time: timeArb(T0, NOW),
     }),
   },
   {
@@ -145,7 +157,7 @@ const draftArb: fc.Arbitrary<Draft> = fc.oneof(
         kind: fc.constant('rename' as const),
         item: fc.constantFrom(...ITEMS),
         to: fc.constantFrom(...ITEMS),
-        time: fc.integer({ min: T0, max: NOW }),
+        time: timeArb(T0, NOW),
       })
       .filter((r) => r.item !== r.to),
   },
@@ -160,11 +172,13 @@ function toInputs(drafts: readonly Draft[], prefix = 'e'): LogInput[] {
 }
 
 /**
- * A deliberately naive model of `foldPending`'s semantics: each event lands
- * on the item that every rename record in the log leads to by time (only
- * renames at or after its time apply, then the next rename of the new name
- * after that one, and so on), whatever order the entries arrived in. Scores
- * are then summed per item with `combineAll`.
+ * A deliberately naive model of `foldPending`'s semantics, written from the
+ * rule (storage/renames.ts), not the code: an event for `a` at `t` follows
+ * the rename of `a` with the earliest time >= t (the smallest id among
+ * renames of `a` at that second), then from the new name the rename with the
+ * earliest time strictly after that one, and so on, whatever order the
+ * entries arrived in. Renames at one second never chain. Scores are then
+ * summed per item with `combineAll`.
  */
 function modelScores(
   entries: readonly LogEntry[],
@@ -176,14 +190,15 @@ function modelScores(
   for (const e of entries) {
     if (e.kind === 'rename') continue;
     let item = e.item;
-    let at: [number, number] = [e.time, -Infinity];
+    let after = (r: StoredRename): boolean => r.time >= e.time;
     for (;;) {
       const next = known
-        .filter((r) => r.item === item && (r.time > at[0] || (r.time === at[0] && r.seq > at[1])))
-        .sort((a, b) => a.time - b.time || a.seq - b.seq)[0];
+        .filter((r) => r.item === item && after(r))
+        .sort((a, b) => a.time - b.time || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0))[0];
       if (!next) break;
       item = next.to;
-      at = [next.time, next.seq];
+      const at = next.time;
+      after = (r) => r.time > at;
     }
     lists.set(item, [...(lists.get(item) ?? []), { kind: e.kind, time: e.time }]);
   }
@@ -228,7 +243,7 @@ const burstDraftArb: fc.Arbitrary<Draft> = fc.oneof(
     arbitrary: fc.record({
       kind: fc.constantFrom(...EVENT_KINDS),
       item: fc.constantFrom(...ITEMS),
-      time: fc.integer({ min: NOW - 6 * 3600, max: NOW }),
+      time: timeArb(NOW - 6 * 3600, NOW),
     }),
   },
   {
@@ -238,7 +253,7 @@ const burstDraftArb: fc.Arbitrary<Draft> = fc.oneof(
         kind: fc.constant('rename' as const),
         item: fc.constantFrom(...ITEMS),
         to: fc.constantFrom(...ITEMS),
-        time: fc.integer({ min: NOW - 6 * 3600, max: NOW }),
+        time: timeArb(NOW - 6 * 3600, NOW),
       })
       .filter((r) => r.item !== r.to),
   },
@@ -974,8 +989,14 @@ export function describeStorageConformance(
             fc.asyncProperty(
               fc.array(burstDraftArb, { minLength: 1, maxLength: 30 }),
               fc.integer({ min: 0, max: 1_000_000 }),
-              async (drafts, seed) => {
-                const inputs = toInputs(drafts);
+              fc.constantFrom(0, 3, H),
+              fc.integer({ min: 1, max: 4 }),
+              async (drafts, seed, window, chunk) => {
+                // Ids in no relation to the input order.
+                const inputs = toInputs(drafts).map((e, i) => ({
+                  ...e,
+                  id: `id-${(i * 7919 + seed) % 100_003}`,
+                }));
                 // A seeded shuffle: a second arrival order of the same entries.
                 const shuffled = [...inputs];
                 let x = seed + 1;
@@ -987,15 +1008,18 @@ export function describeStorageConformance(
                 const results: Map<string, ItemScores<string>>[] = [];
                 for (const order of [inputs, shuffled]) {
                   const s = await openStores();
-                  for (let i = 0; i < order.length; i += 3) {
-                    await s.events.append(order.slice(i, i + 3));
-                    await foldPending(s.events, s.scores, { burstWindow: H, batchSize: 2 });
+                  for (let i = 0; i < order.length; i += chunk) {
+                    await s.events.append(order.slice(i, i + chunk));
+                    await foldPending(s.events, s.scores, { burstWindow: window, batchSize: 2 });
                   }
-                  results.push(await s.scores.getAll());
+                  const incremental = await s.scores.getAll();
+                  results.push(incremental);
                   expectScoresClose(
-                    results.at(-1) as Map<string, ItemScores<string>>,
-                    modelScores(await s.events.readAfter(0), HALF_LIVES, H),
+                    incremental,
+                    modelScores(await s.events.readAfter(0), HALF_LIVES, window),
                   );
+                  await rebuildScores(s.events, s.scores, { burstWindow: window });
+                  expectScoresClose(await s.scores.getAll(), incremental);
                   await s.close();
                 }
                 expectScoresClose(
@@ -1207,6 +1231,125 @@ export function describeStorageConformance(
 
     describe('renames', () => {
       const day = HALF_LIVES.day;
+
+      it(
+        'resolves renames at the same second the same way in every arrival order (regression)',
+        { timeout },
+        async () => {
+          // A property test's shrunk counterexample: a chain of two renames in one second.
+          const T = 1_799_978_400;
+          const entries = [
+            ev('r0', 'read', 'memos/delta.md', T),
+            rn('r1', 'memos/delta.md', 'memos/alpha.md', T + 6),
+            rn('r2', 'memos/alpha.md', 'delta topic', T + 6),
+            ev('r3', 'read', 'memos/alpha.md', T),
+          ];
+          const orders = [
+            [0, 1, 2, 3],
+            [3, 2, 1, 0],
+            [2, 0, 3, 1],
+            [1, 3, 0, 2],
+            [0, 2, 1, 3],
+          ];
+          for (const window of [0, 3, 3600]) {
+            for (const order of orders) {
+              for (const batch of [1, 2, 4]) {
+                const s = await openStores();
+                for (let i = 0; i < order.length; i += batch) {
+                  await s.events.append(
+                    order.slice(i, i + batch).map((j) => entries[j] as LogInput),
+                  );
+                  await foldPending(s.events, s.scores, { burstWindow: window });
+                }
+                // Renames in one second are simultaneous: delta's read moves to
+                // alpha (and stops there), alpha's to delta topic.
+                const scores = await s.scores.getAll();
+                expect([...scores.keys()], `${window} ${order} ${batch}`).toEqual([
+                  'delta topic',
+                  'memos/alpha.md',
+                ]);
+                expect(scores.get('memos/alpha.md')?.day?.read).toBe(
+                  eventScore(1, T, day as number),
+                );
+                expect(scores.get('delta topic')?.day?.read).toBe(eventScore(1, T, day as number));
+                await rebuildScores(s.events, s.scores, { burstWindow: window });
+                expectScoresClose(await s.scores.getAll(), scores);
+                await s.close();
+              }
+            }
+          }
+        },
+      );
+
+      it(
+        'settles every tie at one second by the rule, not by arrival order',
+        { timeout },
+        async () => {
+          const T = NOW - 1000;
+          // Each case: entries, and where each event's read must land.
+          const cases: { entries: LogInput[]; expected: Record<string, number[]> }[] = [
+            {
+              // A cycle in one second swaps the two histories.
+              entries: [
+                ev('x1', 'read', 'memos/a.md', T - 10),
+                ev('x2', 'read', 'memos/b.md', T - 20),
+                rn('x3', 'memos/a.md', 'memos/b.md', T),
+                rn('x4', 'memos/b.md', 'memos/a.md', T),
+              ],
+              expected: { 'memos/b.md': [T - 10], 'memos/a.md': [T - 20] },
+            },
+            {
+              // Two renames of one item in one second: the smallest id applies.
+              entries: [
+                ev('y1', 'read', 'memos/a.md', T - 10),
+                rn('y3', 'memos/a.md', 'memos/c.md', T),
+                rn('y2', 'memos/a.md', 'memos/b.md', T),
+              ],
+              expected: { 'memos/b.md': [T - 10] },
+            },
+            {
+              // An event at exactly a rename's second counts toward the new name, and
+              // a chain over later seconds is followed; one into an item with history merges.
+              entries: [
+                ev('z1', 'read', 'memos/a.md', T),
+                ev('z2', 'read', 'memos/c.md', T - 50),
+                rn('z3', 'memos/a.md', 'memos/b.md', T),
+                rn('z4', 'memos/b.md', 'memos/c.md', T + 1),
+                ev('z5', 'read', 'memos/a.md', T + 2),
+              ],
+              expected: { 'memos/c.md': [T, T - 50], 'memos/a.md': [T + 2] },
+            },
+          ];
+          const permutations = (n: number): number[][] =>
+            n === 1
+              ? [[0]]
+              : permutations(n - 1).flatMap((p) =>
+                  Array.from({ length: n }, (_, i) => [...p.slice(0, i), n - 1, ...p.slice(i)]),
+                );
+          for (const { entries, expected } of cases) {
+            for (const order of permutations(entries.length)) {
+              const s = await openStores();
+              for (const i of order) {
+                await s.events.append([entries[i] as LogInput]);
+                await foldPending(s.events, s.scores);
+              }
+              const scores = await s.scores.getAll();
+              const items = Object.keys(expected).sort();
+              expect([...scores.keys()], `${order}`).toEqual(items);
+              for (const item of items) {
+                expect(scores.get(item)?.day?.read, `${order} ${item}`).toBeCloseTo(
+                  combineAll(
+                    (expected[item] as number[]).map((t) => eventScore(1, t, day as number)),
+                  ),
+                  9,
+                );
+              }
+              expectScoresClose(scores, modelScores(await s.events.readAfter(0)));
+              await s.close();
+            }
+          }
+        },
+      );
 
       it('moves history, combining with scores the target already has', { timeout }, async () => {
         const s = await openStores();
@@ -1512,6 +1655,32 @@ export function describeStorageConformance(
         expect(await s.terms.sectionsOf('memos/garden.md')).toEqual([]);
       });
 
+      it('does not index or search for an over-long word', { timeout }, async () => {
+        const s = await openStores();
+        // One 600 KB word: far more than a Postgres index row can hold.
+        const huge = 'w'.repeat(600_000);
+        const long = `${'v'.repeat(MAX_TERM_LENGTH)}x`;
+        await s.terms.replaceSections('memos/blob.md', `Lichen ${long}`, [
+          { heading: null, body: `granite ${huge} lichen moss` },
+        ]);
+        expect(await s.terms.documentFrequency('granit')).toBe(1);
+        expect(await s.terms.documentFrequency(huge)).toBe(0);
+        expect(await s.terms.documentFrequency(long)).toBe(0);
+        const fresh = new MemoryKeywordIndex();
+        for (const sec of await s.terms.sectionsOf('memos/blob.md')) {
+          fresh.add(sec.id, { title: sec.title, heading: sec.heading ?? '', body: sec.body });
+        }
+        for (const q of ['lichen', '"granite lichen"', '"lichen moss"', long, `granite ${huge}`]) {
+          expect(await searchSource(s.terms, q), q.slice(0, 40)).toEqual(fresh.search(q));
+        }
+        // The word is skipped, not removed: a phrase does not match across it.
+        expect(await searchSource(s.terms, '"granite lichen"')).toEqual([]);
+        expect((await searchSource(s.terms, long)).length).toBe(0);
+        expect((await searchSource(s.terms, `granite ${huge}`)).map((h) => h.id)).toEqual([
+          'memos/blob.md#0',
+        ]);
+      });
+
       it(
         'matches a fresh MemoryKeywordIndex after any replaces and removes (property)',
         { timeout },
@@ -1605,15 +1774,15 @@ export function describeStorageConformance(
 
       it('records its analyzer and reports a mismatch until reset', { timeout }, async () => {
         let s = await openStores({ analyzer: { stem: true } });
-        expect(s.terms.analyzer).toEqual({ stem: true });
+        expect(s.terms.analyzer).toMatchObject({ stem: true });
         expect(s.terms.analyzerMismatch({ stem: true })).toBeNull();
         expect(s.terms.analyzerMismatch()).toBeNull();
         await s.terms.replaceSections('memos/one.md', 'Tomatoes', [
           { heading: null, body: 'planting' },
         ]);
         s = await reopen(s, { analyzer: { stem: false } });
-        expect(s.terms.analyzer).toEqual({ stem: true });
-        expect(s.terms.analyzerMismatch({ stem: false })).toEqual({
+        expect(s.terms.analyzer).toMatchObject({ stem: true });
+        expect(s.terms.analyzerMismatch({ stem: false })).toMatchObject({
           stored: { stem: true },
           requested: { stem: false },
         });
@@ -1623,20 +1792,20 @@ export function describeStorageConformance(
         ]);
         expect(await s.terms.documentFrequency('plant')).toBe(2);
         await s.resetIndex({ analyzer: { stem: false } });
-        expect(s.terms.analyzer).toEqual({ stem: false });
+        expect(s.terms.analyzer).toMatchObject({ stem: false });
         expect(s.terms.analyzerMismatch({ stem: false })).toBeNull();
         await s.terms.replaceSections('memos/one.md', 'Tomatoes', [
           { heading: null, body: 'planting' },
         ]);
         expect(await s.terms.documentFrequency('planting')).toBe(1);
         s = await reopen(s, { analyzer: { stem: false } });
-        expect(s.terms.analyzer).toEqual({ stem: false });
+        expect(s.terms.analyzer).toMatchObject({ stem: false });
       });
 
       it('adopts the requested analyzer when the index is empty', { timeout }, async () => {
         let s = await openStores({ analyzer: { stem: true } });
         s = await reopen(s, { analyzer: { stem: false } });
-        expect(s.terms.analyzer).toEqual({ stem: false });
+        expect(s.terms.analyzer).toMatchObject({ stem: false });
         expect(s.terms.analyzerMismatch({ stem: false })).toBeNull();
       });
     });

@@ -78,15 +78,36 @@ describe('tokens', () => {
 
   it('limits failed attempts per address and in total, for a window', () => {
     let t = 0;
-    const limiter = new FailureLimiter({ perAddress: 2, total: 3, windowMs: 1000, now: () => t });
+    const limiter = new FailureLimiter({
+      perAddress: 2,
+      total: 3,
+      windowMs: 10_000,
+      spacingMs: 100,
+      maxQueueMs: 250,
+      now: () => t,
+    });
+    const now = { kind: 'check', delayMs: 0 };
     limiter.fail('a');
-    expect(limiter.blockedFor('a')).toBe(0);
+    expect(limiter.throttled('a')).toBe(false);
+    expect(limiter.admit('a')).toEqual(now);
     limiter.fail('a');
-    expect(limiter.blockedFor('a')).toBe(1);
-    expect(limiter.blockedFor('b')).toBe(0);
+    // Over its own limit: 'a' is spaced out, never refused outright…
+    expect(limiter.throttled('a')).toBe(true);
+    expect(limiter.admit('a')).toEqual(now);
+    expect(limiter.admit('a')).toEqual({ kind: 'check', delayMs: 100 });
+    expect(limiter.admit('a')).toEqual({ kind: 'check', delayMs: 200 });
+    // …unless it floods its own queue.
+    expect(limiter.admit('a')).toEqual({ kind: 'refuse', retryAfter: 1 });
+    // Another address is untouched.
+    expect(limiter.admit('b')).toEqual(now);
     limiter.fail('b');
-    expect(limiter.blockedFor('c')).toBe(1);
-    t = 1000;
-    expect(limiter.blockedFor('a')).toBe(0);
+    // The total is reached: addresses that failed are throttled, a clean one is not.
+    expect(limiter.throttled('b')).toBe(true);
+    expect(limiter.throttled('c')).toBe(false);
+    expect(limiter.admit('c')).toEqual(now);
+    expect(limiter.retryAfter()).toBe(10);
+    t = 10_000;
+    expect(limiter.throttled('a')).toBe(false);
+    expect(limiter.admit('a')).toEqual(now);
   });
 });

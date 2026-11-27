@@ -129,20 +129,37 @@ describePg('the HTTP API', () => {
     const limited = createApp({
       config: serverConfig(tempDir()),
       pool: server.pool,
-      limiter: new FailureLimiter({ perAddress: 3, windowMs: 60_000 }),
+      limiter: new FailureLimiter({ perAddress: 3, total: 5, windowMs: 60_000, spacingMs: 50 }),
       log: quiet,
     });
-    for (let i = 0; i < 3; i++) {
-      expect(
-        (await call(limited, 'GET', '/api/brains', { headers: { authorization: 'Bearer nope' } }))
-          .status,
-      ).toBe(401);
-    }
-    const blocked = await call(limited, 'GET', '/api/brains', {
-      headers: { authorization: `Bearer ${TOKEN}` },
-    });
-    expect(blocked.status).toBe(429);
-    expect(Number(blocked.headers.get('retry-after'))).toBeGreaterThan(0);
+    const from = async (address: string, token: string) => {
+      const r = await limited.handle(
+        new Request('http://somememos.test/api/brains', {
+          headers: { authorization: `Bearer ${token}` },
+        }),
+        { clientAddress: address },
+      );
+      return { status: r.status, retryAfter: r.headers.get('retry-after') };
+    };
+    for (let i = 0; i < 2; i++) expect((await from('10.0.0.1', 'nope')).status).toBe(401);
+    // The third failure reaches the address's limit: from now on its failures answer 429…
+    const third = await from('10.0.0.1', 'nope');
+    expect(third.status).toBe(429);
+    expect(Number(third.retryAfter)).toBeGreaterThan(0);
+    // …and its requests are spaced out before the token is even compared…
+    const started = Date.now();
+    expect((await from('10.0.0.1', 'nope')).status).toBe(429);
+    expect((await from('10.0.0.1', 'nope')).status).toBe(429);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(45);
+    // …but the right token still gets in, from that address too.
+    expect((await from('10.0.0.1', TOKEN)).status).toBe(200);
+    // Others' failures reach the total limit: the owner on a clean address is untouched.
+    expect((await from('10.0.0.9', 'nope')).status).toBe(429);
+    const owner = Date.now();
+    expect((await from('10.0.0.2', TOKEN)).status).toBe(200);
+    expect(Date.now() - owner).toBeLessThan(45);
+    // A fresh address gets one unthrottled guess past the total, then is throttled.
+    expect((await from('10.0.0.3', 'nope')).status).toBe(429);
   });
 
   it('accepts hashed and listed tokens', async () => {
@@ -566,14 +583,28 @@ describePg('the HTTP API', () => {
       message: string;
       client: string;
       time: number;
+      renamedFrom: string | null;
     }[];
-    expect(versions.map((v) => [v.path, v.message, v.client])).toEqual([
-      ['memos/kilns/electric.md', 'update move', 'agent-7'],
-      ['memos/kiln.md', 'update move', 'agent-7'],
-      ['memos/kiln.md', 'update firing', 'agent-7'],
-      ['memos/kiln.md', 'ingest kiln', 'agent-7'],
+    // The rename is one version, at the new path, naming the old one.
+    expect(versions.map((v) => [v.path, v.message, v.client, v.renamedFrom])).toEqual([
+      ['memos/kilns/electric.md', 'update move', 'agent-7', 'memos/kiln.md'],
+      ['memos/kiln.md', 'update firing', 'agent-7', null],
+      ['memos/kiln.md', 'ingest kiln', 'agent-7', null],
     ]);
-    const first = versions[3] as (typeof versions)[number];
+    expect(new Set(versions.map((v) => v.commit)).size).toBe(versions.length);
+    // The old path's own history still shows the move away, once.
+    const old = await server.request('GET', `${b}/notes/memos/kiln.md/history`);
+    expect(
+      (old.body.versions as { message: string; renamedTo: string | null }[]).map((v) => [
+        v.message,
+        v.renamedTo,
+      ]),
+    ).toEqual([
+      ['update move', 'memos/kilns/electric.md'],
+      ['update firing', null],
+      ['ingest kiln', null],
+    ]);
+    const first = versions[2] as (typeof versions)[number];
     expect(first.hash).toBe(v1.body.hash);
     const past = await server.request('GET', `${b}/notes/memos/kiln.md/versions/${first.commit}`);
     expect(past.body).toEqual({

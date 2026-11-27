@@ -1,7 +1,8 @@
 // The public blog in a real browser: pages render with JavaScript off at
 // phone and desktop sizes, the feed and sitemap parse, the service worker
 // never stands in for a blog page, and the app still works beside it.
-// Screenshots (light and dark) go to $BLOG_SCREENSHOT_DIR.
+// Screenshots (light and dark) are taken only when $BLOG_SCREENSHOT_DIR is
+// set; the assertions run either way.
 
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
@@ -13,9 +14,14 @@ test.skip(
   'needs SOMEMEMOS_TEST_DATABASE_URL (a test Postgres)',
 );
 
-const SHOTS =
-  process.env.BLOG_SCREENSHOT_DIR ??
-  new URL('../../../node_modules/.cache/somememos-e2e-blog/screens/', import.meta.url).pathname;
+const SHOTS = process.env.BLOG_SCREENSHOT_DIR || null;
+
+/** A screenshot into $BLOG_SCREENSHOT_DIR, when one was asked for. */
+async function shot(page: Page, name: string, fullPage = false): Promise<void> {
+  if (!SHOTS) return;
+  mkdirSync(SHOTS, { recursive: true });
+  await page.screenshot({ path: join(SHOTS, `${name}.png`), fullPage });
+}
 const INDEX = `/blog/${SLUG}/`;
 const POST = `/blog/${SLUG}/2026/11/20/notes-from-a-week-of-slow-bread`;
 
@@ -30,7 +36,6 @@ test.describe('without JavaScript', () => {
   test.use({ javaScriptEnabled: false });
 
   test('the index and a post render, readable at this size', async ({ page }, info) => {
-    mkdirSync(SHOTS, { recursive: true });
     const response = await page.goto(INDEX);
     expect(response?.status()).toBe(200);
     await expect(page).toHaveTitle('Field Notes');
@@ -46,10 +51,7 @@ test.describe('without JavaScript', () => {
     await expectNoHorizontalScroll(page);
     for (const scheme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme: scheme });
-      await page.screenshot({
-        path: join(SHOTS, `index-${info.project.name}-${scheme}.png`),
-        fullPage: true,
-      });
+      await shot(page, `index-${info.project.name}-${scheme}`, true);
     }
 
     await page.getByRole('link', { name: 'Notes from a week of slow bread' }).click();
@@ -80,15 +82,12 @@ test.describe('without JavaScript', () => {
     }
     for (const scheme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme: scheme });
-      await page.screenshot({
-        path: join(SHOTS, `post-${info.project.name}-${scheme}.png`),
-        fullPage: true,
-      });
+      await shot(page, `post-${info.project.name}-${scheme}`, true);
     }
     const missing = await page.goto(`/blog/${SLUG}/2026/11/25/unfinished`);
     expect(missing?.status()).toBe(404);
     await page.emulateMedia({ colorScheme: 'light' });
-    await page.screenshot({ path: join(SHOTS, `not-found-${info.project.name}.png`) });
+    await shot(page, `not-found-${info.project.name}`);
   });
 });
 

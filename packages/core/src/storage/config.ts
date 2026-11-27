@@ -268,7 +268,9 @@ export function parseBrainConfig(value: unknown, source = 'config'): BrainConfig
   if (value.analyzer !== undefined) {
     if (!isObject(value.analyzer)) problems.push('analyzer: must be an object like {"stem": true}');
     else {
-      unknownKeys(value.analyzer, ['stem'], 'analyzer');
+      // `format` is the index's, never a setting: a config object that went
+      // through JSON as is may carry it, and it is ignored.
+      unknownKeys(value.analyzer, ['stem', 'format'], 'analyzer');
       const stem = value.analyzer.stem;
       if (stem !== undefined && typeof stem !== 'boolean') {
         problems.push('analyzer.stem: must be true or false');
@@ -311,7 +313,8 @@ export function serializeBrainConfig(config: BrainConfig): string {
     weights: config.weights,
     alpha: config.alpha,
     keyword: config.keyword,
-    analyzer: config.analyzer,
+    // The format is not a setting: it belongs to the index, not the config.
+    analyzer: { stem: config.analyzer.stem },
     changeOps: config.changeOps,
   };
   return `${JSON.stringify(out, null, 2)}\n`;

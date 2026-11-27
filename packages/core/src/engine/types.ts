@@ -459,6 +459,12 @@ export interface PreparedSync {
   readonly more: boolean;
   /** Notes too large to sync (over `sync.SYNC_LIMITS.maxNoteBytes`); they stay local. */
   readonly tooLarge: string[];
+  /**
+   * Notes left out because the server refused them earlier: a note and a
+   * folder would share a name (`sync.NAME_CLASH`). They stay local until
+   * their path changes.
+   */
+  readonly nameClash: string[];
 }
 
 export interface SyncConflict {
@@ -495,6 +501,12 @@ export interface SyncOutcome {
   readonly waiting: string[];
   /** Notes and entries from the server left out (excluded, no role, or not syncable). */
   readonly skipped: number;
+  /**
+   * Notes the server refused this round because a note and a folder would
+   * share a name (`sync.NAME_CLASH`): kept on this copy only, not sent again
+   * until their path changes.
+   */
+  readonly nameClash: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -536,8 +548,15 @@ export interface Engine {
   danglingLinks(): Promise<DanglingCount[]>;
   /** The dated entry's path for `date` (default: today, in the host's local time zone). */
   diaryPath(date?: string): Promise<DiaryPath>;
-  /** `diaryPath`, creating the file (and indexing it) if it does not exist. */
-  ensureDiary(date?: string): Promise<DiaryEntry>;
+  /**
+   * `diaryPath`, creating the file (and indexing it) if it does not exist.
+   * The generated file holds only its heading and is not the person's edit,
+   * so it is not uncommitted (no reminder names it) until they write in it.
+   * `uncommitted: true` marks it uncommitted at once, for a host that
+   * records every file it writes (the server, whose git history and change
+   * log must agree).
+   */
+  ensureDiary(date?: string, options?: { readonly uncommitted?: boolean }): Promise<DiaryEntry>;
   /** The event log and change records as JSON lines, in time order. */
   exportLog(): Promise<string>;
   /** Appends exported records (JSON lines, or parsed), skipping ids already stored, then folds. */
@@ -575,4 +594,12 @@ export interface Engine {
   applySync(prepared: PreparedSync, response: SyncResponse): Promise<SyncOutcome>;
   /** Forgets the sync state: the next sync starts from `since: 0` and pushes every note. */
   resetSync(): Promise<void>;
+  /**
+   * The note each of these conflict copies belongs to (copy → original),
+   * as recorded when the copy was made: in the sync state on this copy, or
+   * in the change record that kept it (synced from other devices). A copy
+   * may sit in another folder than its note (`sync.conflictCopyPath`), so
+   * its name alone cannot say. Paths with no record are left out.
+   */
+  conflictOriginals(paths: readonly string[]): Promise<Record<string, string>>;
 }

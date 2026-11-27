@@ -23,7 +23,12 @@ import {
 import type { Context } from '../context.js';
 import { EXIT_OK, UsageError } from '../context.js';
 import { createRemoteClient } from '../remote/client.js';
-import { readCloneRemote, resolveToken, type CloneRemote } from '../remote/config.js';
+import {
+  insecureAllowed,
+  readCloneRemote,
+  resolveToken,
+  type CloneRemote,
+} from '../remote/config.js';
 import { createRemoteEngine, type RemoteEngine } from '../remote/engine.js';
 import type { Brain } from '../brain/index.js';
 import { cloneConfigSync, configConflictError } from './clone.js';
@@ -80,6 +85,7 @@ function serverOf(ctx: Context, brain: Brain, remote: CloneRemote): RemoteEngine
       brainId: remote.brainId,
       token,
       clientId: brain.config.clientId,
+      allowInsecure: insecureAllowed(ctx.env),
     }),
   );
 }

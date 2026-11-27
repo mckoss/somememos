@@ -22,7 +22,9 @@ Print the path of today's dated entry (the local date), creating the file
 with a '# <date>' heading if it does not exist yet. The path comes from the
 first "dated" pattern in the brain's roles, e.g.
 diary/{YYYY}/{MM}/{YYYY}-{MM}-{DD}.md. Write to that file with your usual
-tools; the next command's index pass picks it up. In remote mode the entry is
+tools; the next command's index pass picks it up. A new entry holding only
+its heading is not a change to commit (no reminder names it) until you
+write in it. In remote mode the entry is
 created on the server and placed in the working folder; send what you write
 with 'somememos commit'.
 

@@ -45,6 +45,12 @@ Collected while Mike was away overnight (from 2026-11-27). None of these blocked
     - The contact line in `SECURITY.md` is a placeholder.
     - Whether to add a strict-transport-security header once the domain is settled.
 
-15. **Exporting notes from the web app.** The app exported only the event log, although the plan says an export is the notes plus the log.
-    - *Meanwhile:* an "Export everything" zip is being added.
+15. **Exporting notes from the web app.** Settled overnight: "Export everything" writes a zip of every note plus the event log, and the import screen reads it back.
+
+16. **Smaller choices made in the last pass,** each easy to change:
+    - The CLI refuses plain `http` servers except on this machine. Should `--allow-insecure` be remembered for a working folder, so it needn't be passed every time?
+    - Public blog pages drop HTML comments. Should they also drop Obsidian-style `%% ... %%` comments?
+    - The lockout finding from the security review is fixed by slowing failed attempts and never refusing a valid token.
+
+17. **The sync test that failed once on CI.** Its exact cause was never reproduced. A real bug with the same symptom was fixed (the note page could stay on "No note here yet"), and the tests now explain themselves when they fail. Treat it as probably fixed until CI has stayed green for a while.
 

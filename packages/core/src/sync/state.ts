@@ -31,6 +31,19 @@ export interface SyncState {
   readonly lastSyncAt: number | null;
   readonly configRevision: number;
   readonly configKey: string | null;
+  /**
+   * Notes the server refused with `NAME_CLASH` (a note and a folder would
+   * share a name), sorted. They stay on this copy and are not sent again
+   * while a note is at that path; a note that moves away is forgotten here.
+   */
+  readonly nameClash: readonly string[];
+  /**
+   * The conflict copies this copy made, each with the note it belongs to
+   * (copy path → original path). A copy is not always beside its note
+   * (`conflictCopyPath` may put it in a memo folder), so its name alone
+   * cannot say. Forgotten once the copy is gone.
+   */
+  readonly conflictCopies: Readonly<Record<string, string>>;
 }
 
 export const EMPTY_SYNC_STATE: SyncState = Object.freeze({
@@ -41,6 +54,8 @@ export const EMPTY_SYNC_STATE: SyncState = Object.freeze({
   lastSyncAt: null,
   configRevision: 0,
   configKey: null,
+  nameClash: Object.freeze([]),
+  conflictCopies: Object.freeze({}),
 });
 
 const nonNegativeInteger = (value: unknown): number =>
@@ -62,6 +77,14 @@ export async function readSyncState(meta: MetaStore): Promise<SyncState> {
       if (typeof hash === 'string') bases[path] = hash;
     }
   }
+  const conflictCopies: Record<string, string> = {};
+  if (value.conflictCopies && typeof value.conflictCopies === 'object') {
+    for (const [copy, original] of Object.entries(
+      value.conflictCopies as Record<string, unknown>,
+    )) {
+      if (typeof original === 'string') conflictCopies[copy] = original;
+    }
+  }
   return {
     since: nonNegativeInteger(value.since),
     pushedEventSeq: nonNegativeInteger(value.pushedEventSeq),
@@ -70,13 +93,21 @@ export async function readSyncState(meta: MetaStore): Promise<SyncState> {
     lastSyncAt: typeof value.lastSyncAt === 'number' ? value.lastSyncAt : null,
     configRevision: nonNegativeInteger(value.configRevision),
     configKey: typeof value.configKey === 'string' ? value.configKey : null,
+    nameClash: Array.isArray(value.nameClash)
+      ? [...new Set(value.nameClash.filter((p): p is string => typeof p === 'string'))].sort()
+      : [],
+    conflictCopies,
   };
 }
 
 export async function writeSyncState(meta: MetaStore, state: SyncState): Promise<void> {
   const bases: Record<string, string> = {};
   for (const path of Object.keys(state.bases).sort()) bases[path] = state.bases[path] as string;
-  await meta.set(META_SYNC_STATE, JSON.stringify({ ...state, bases }));
+  const nameClash = [...new Set(state.nameClash ?? [])].sort();
+  const conflictCopies: Record<string, string> = {};
+  const copies = state.conflictCopies ?? {};
+  for (const copy of Object.keys(copies).sort()) conflictCopies[copy] = copies[copy] as string;
+  await meta.set(META_SYNC_STATE, JSON.stringify({ ...state, bases, nameClash, conflictCopies }));
 }
 
 /** Records the shared-config revision (and its config's key) this copy now agrees with. */

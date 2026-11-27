@@ -5,9 +5,10 @@
 // Every scoring parameter is tunable and set by `somememos eval`; see
 // `DEFAULT_BM25F_PARAMS` for which defaults were measured (PLAN.md section 5).
 
-export { type Token, foldText, tokenize } from './tokenize.js';
+export { MAX_TERM_LENGTH, type Token, foldText, tokenize } from './tokenize.js';
 export { isStemmable, porterStem } from './porter.js';
 export {
+  ANALYZER_FORMAT,
   type AnalyzerOptions,
   DEFAULT_ANALYZER_OPTIONS,
   analyze,

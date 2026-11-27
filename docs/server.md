@@ -46,7 +46,7 @@ Common rules:
 
 - **Errors** are `{"error": {"code", "message"}}` with a fitting status, for example 400 `invalid-argument`, 401 `unauthorized`, 404 `not-found`, 409 on a stale save, 503 `no-database`.
 - **Same origin only.** There are no CORS headers, and a request whose `Origin` header names another host gets 403.
-- **Failed tokens are rate-limited:** after 20 failures from one address within 10 minutes (200 in all), requests get 429 until the window passes.
+- **Failed tokens are throttled, never the right one:** after 20 failures from one address within 10 minutes (or once 200 have failed in all, for any address that has failed in that window), that address's requests are answered one per second and its failures get 429 with `Retry-After`. A request with a valid token always succeeds, and an address with no failures is never slowed.
 - **`X-Somememos-Client: <id>`** names the client: the server records events and change records under that id and authors git commits with it. Without it they are recorded as `server`.
 - **Paths** are brain-relative note paths ending in `.md`, with no `..` or dot folders. Notes are at most 2 MiB.
 
@@ -87,7 +87,7 @@ $ curl -X POST localhost:3000/api/brains -H "Authorization: Bearer $T" -H 'Conte
 
 ### Sync
 
-`POST /api/brains/{brain}/sync` is the whole sync protocol in one request: the client sends `since` (the last mutation number it applied), its new `events`, `changes` and `edits` (each edit with the hash it was based on), and gets back the result of each edit and everything newer than `since`. The web app and `somememos clone`/`sync` use it; the shapes are in PLAN.md section 7. A response holds at most `SOMEMEMOS_MAX_PAGE` mutations (2000) and says `"more": true` when there are more. Requests can be up to 32 MiB.
+`POST /api/brains/{brain}/sync` is the whole sync protocol in one request: the client sends `since` (the last mutation number it applied), its new `events`, `changes` and `edits` (each edit with the hash it was based on), and gets back the result of each edit and everything newer than `since`. The web app and `somememos clone`/`sync` use it; the shapes are in PLAN.md section 7. A response holds at most `SOMEMEMOS_MAX_PAGE` mutations (2000) and says `"more": true` when there are more. Requests can be up to 32 MiB. A new note whose name is a folder on the server, or that would need an existing note's name as a folder (`a.md` beside `a.md/b.md`, including two such notes in one request), is answered `refused` with code `name-clash`; the client keeps it on that device and does not send it again until it is renamed.
 
 ```
 $ curl -X POST localhost:3000/api/brains/garden/sync -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"since":0,"events":[],"changes":[],"edits":[]}'
@@ -135,14 +135,14 @@ $ curl -X DELETE "localhost:3000/api/brains/garden/notes/memos/aeration-pump.md?
 
 | Route | Does |
 |---|---|
-| `GET /api/brains/{brain}/notes/{path}/history?limit=` | The note's versions, newest first, following renames |
+| `GET /api/brains/{brain}/notes/{path}/history?limit=` | The note's versions, newest first, following renames (a rename is one version, at its new path, with `renamedFrom`) |
 | `GET /api/brains/{brain}/notes/{path}/versions/{commit}` | The note's text at a commit |
 | `GET /api/brains/{brain}/notes/{path}/versions?hash=` | The latest version with that content hash |
 | `POST /api/brains/{brain}/notes/{path}/restore` `{commit, baseHash?, message?}` | Make that version current, as a new version |
 
 ```
 $ curl localhost:3000/api/brains/garden/notes/memos/compost-tea.md/history -H "Authorization: Bearer $T"
-{"path":"memos/compost-tea.md","versions":[{"path":"memos/compost-tea.md","mutation":1,"commit":"dd2aab2e0014cb882a422d2e4748271d6a0bc953","hash":"8deb6363…","renamedTo":null,"time":1795773654,"client":"server","message":"ingest first notes"}]}
+{"path":"memos/compost-tea.md","versions":[{"path":"memos/compost-tea.md","mutation":1,"commit":"dd2aab2e0014cb882a422d2e4748271d6a0bc953","hash":"8deb6363…","renamedTo":null,"renamedFrom":null,"time":1795773654,"client":"server","message":"ingest first notes"}]}
 ```
 
 ### Blog settings
@@ -194,7 +194,7 @@ An address depends only on the file's path, so editing a post never moves it. Re
 
 **What is public.** Only published posts in the blog folder of a blog that is turned on: their title, date, text and the blog's own settings. Front matter is never shown. A `[[link]]` to another published post becomes a link; a link to anything else (a memo, a draft, a note that doesn't exist) is shown as its plain text, so whether a private note of that name exists cannot change a page. In the example above, `[[compost-tea]]` is a private memo and appears only as the words "compost-tea". Images and attachments are not served: an image shows its alt text.
 
-**What is not.** Everything else. A draft, a private note, an excluded file, a post in a disabled blog and an address that never existed all get the same 404 page, with the same headers. Public page views are not events and never change a score. Pages are plain server-rendered HTML with no script, raw HTML in markdown is switched off, and a strict content security policy is sent. Public requests are rate-limited (240 a minute per address).
+**What is not.** Everything else. A draft, a private note, an excluded file, a post in a disabled blog and an address that never existed all get the same 404 page, with the same headers. Public page views are not events and never change a score. Pages are plain server-rendered HTML with no script, raw HTML in markdown is switched off, HTML comments (`<!-- … -->`, including multi-line ones; not inside code) are left out of the page, its title and its summary, and a strict content security policy is sent. Public requests are rate-limited (240 a minute per address).
 
 **Caching.** Pages may stay in a browser or proxy cache for up to a minute, so an unpublished post can remain visible that long.
 

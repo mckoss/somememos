@@ -28,7 +28,15 @@
 
   let loadedPath: string | null = null;
   let request = 0;
+  /** The newest load whose result is on screen. */
+  let shown = 0;
 
+  // Loads the note, and loads it again after every change to the brain (a
+  // save, a sync). A load that finishes after a newer one has been shown is
+  // dropped; otherwise each finished load for this path is shown, even while
+  // newer ones are still running, so a stream of changes (a long sync) never
+  // keeps the note from appearing. Each result replaces the whole state: a
+  // note that was missing and then arrives is shown, and vice versa.
   $effect(() => {
     const p = path;
     void brain.revision;
@@ -39,24 +47,30 @@
     loadedPath = p;
     const id = ++request;
     if (fresh) {
+      shown = id - 1;
       note = null;
       missing = false;
       error = null;
       actionError = null;
     }
+    const current = () => p === loadedPath && id > shown;
     void (async () => {
       try {
         const h = await host();
         const view = await h.engine.readNote(p, { record });
         const log = await h.engine.log({ path: p, all: true, limit: 50 });
-        if (id !== request) return;
+        if (!current()) return;
+        shown = id;
         note = view;
         history = log;
+        missing = false;
         error = null;
       } catch (e) {
-        if (id !== request) return;
-        if (errorCode(e) === 'not-found') missing = true;
-        else error = errorMessage(e);
+        if (!current()) return;
+        shown = id;
+        note = null;
+        missing = errorCode(e) === 'not-found';
+        error = missing ? null : errorMessage(e);
       }
     })();
   });

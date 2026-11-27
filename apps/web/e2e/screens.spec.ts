@@ -1,7 +1,13 @@
 // Screenshots of the main screens in light and dark, for review (not compared
-// against a baseline). They go to $SCREENSHOT_DIR (see fixtures.ts).
+// against a baseline). They go to $SCREENSHOT_DIR, and the spec runs only when
+// that is set: it exists to produce images, and the behaviour it passes
+// through is asserted by app.spec.ts.
+//
+//   SCREENSHOT_DIR=/some/dir npx playwright test -c apps/web/playwright.config.ts screens
 import { expect, test } from '@playwright/test';
 import { clientGo, engineCall, importBrain, nav, screenshotPath, typeAtEnd } from './fixtures.ts';
+
+test.skip(!process.env.SCREENSHOT_DIR, 'screenshots only: set SCREENSHOT_DIR to take them');
 
 test('screenshots of the main screens', async ({ page }, info) => {
   test.setTimeout(120_000);

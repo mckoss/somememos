@@ -4,7 +4,7 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { markdown } from '@somememos/core';
+import { keyword, markdown } from '@somememos/core';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { fakeContext, tempDir, writeTestConfig } from '../../brain/testing.js';
 import { EXIT_FAILURE, EXIT_OK, EXIT_USAGE, run } from '../../index.js';
@@ -77,14 +77,44 @@ describe('eval on a brain with imported history', { timeout: 30_000 }, () => {
   }, 60_000);
   afterAll(() => tmp.remove());
 
-  it('prints the aggregate table for the baseline preset', async () => {
+  it('by default, with only orientation cases, compares the half-lives behind hot', async () => {
     const r = await cli(dir, ['eval']);
     expect(r.code, r.stderr).toBe(EXIT_OK);
     const lines = r.stdout.split('\n');
-    expect(lines[0]).toMatch(/^cases: \d+ orientation .*; 2 settings; seed 1$/);
+    expect(lines[0]).toMatch(
+      /^cases: \d+ orientation .*, 0 hand-written, 0 from git; 4 settings; seed 1$/,
+    );
+    expect(lines[1]).toMatch(/^note: no search cases .*half-lives/);
     expect(r.stdout).toContain('orientation cases\nsetting ');
+    const rows = ['day', 'week', 'month', 'year'].map((hl) => {
+      const m = new RegExp(`\\nhalfLives\\.hot=${hl} +((?:\\d\\.\\d{3} +){5}\\d+ +\\d+)\\n`).exec(
+        r.stdout,
+      );
+      expect(m, hl).not.toBeNull();
+      return m![1];
+    });
+    // Not one row repeated four times: the half-life changes what orientation measures.
+    expect(new Set(rows).size).toBeGreaterThan(1);
+  });
+
+  it('uses the baseline preset by default when there are search cases', async () => {
+    const r = await cli(dir, ['eval', '--from-git', '--samples', '5']);
+    expect(r.code, r.stderr).toBe(EXIT_OK);
+    expect(r.stdout.split('\n')[0]).toMatch(/; 2 settings; seed 1$/);
+    expect(r.stdout).not.toContain('note:');
     expect(r.stdout).toMatch(/\nmode=all +(?:\d\.\d{3} +){5}\d+ +\d+\n/);
     expect(r.stdout).toMatch(/\nmode=hot +(?:\d\.\d{3} +){5}\d+ +\d+\n/);
+  });
+
+  it('says plainly when --preset baseline has no search cases to compare', async () => {
+    const r = await cli(dir, ['eval', '--preset', 'baseline']);
+    expect(r.code, r.stderr).toBe(EXIT_OK);
+    expect(r.stdout.split('\n')[1]).toMatch(
+      /^note: preset baseline compares keyword search with and without activation, and there are no search cases/,
+    );
+    const json = JSON.parse((await cli(dir, ['eval', '--preset', 'baseline', '--json'])).stdout);
+    expect(json.settings).toEqual(['mode=all', 'mode=hot']);
+    expect(json.note).toMatch(/no search cases/);
   });
 
   it('is deterministic for a seed', async () => {
@@ -313,7 +343,7 @@ describe('search cases from git history', () => {
 
   it('builds the index as of the parent, so later text cannot leak the answer', async () => {
     const classifier = markdown.createRoleClassifier(ROLES);
-    const snapshots = new GitSnapshots(dir, classifier, { stem: true });
+    const snapshots = new GitSnapshots(dir, classifier, keyword.DEFAULT_ANALYZER_OPTIONS);
     try {
       const before = await snapshots.at(parent);
       expect(before.index.search('zeppelinar')).toEqual([]);

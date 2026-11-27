@@ -17,6 +17,10 @@ import {
 import type { ImportFile } from './host.ts';
 import { ENGINE_METHODS, type EngineMethod, type Target, type WorkerStorage } from './protocol.ts';
 import { SyncController, type SyncEventMessage } from './sync-controller.ts';
+import { ZipWriter } from './zip.ts';
+
+/** The event log's name inside an export archive, beside the notes. */
+export const EXPORT_LOG_NAME = 'events.jsonl';
 
 /** Where the brain's two databases live. */
 export interface DatabaseProvider {
@@ -223,6 +227,32 @@ export async function openBrainService(
     }
   };
 
+  // --- Export everything (PLAN.md section 2: the markdown plus the event log).
+  // Every file in the content table, whatever its folder's role: notes in a
+  // folder excluded after they were stored are still the person's files on
+  // this device. (An import never stores excluded files, so those were never
+  // here.) Notes are read one at a time into the zip's Blob, never joined
+  // into one string; only the event log is built as one text, by the engine.
+  const exportArchive = (): Promise<{ archive: Blob; notes: number; records: number }> =>
+    queue(async () => {
+      const zip = new ZipWriter();
+      const entries = [...(await content.list())].sort((a, b) =>
+        a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
+      );
+      let notes = 0;
+      for (const entry of entries) {
+        const text = await content.read(entry.path);
+        if (text === undefined) continue;
+        zip.add(entry.path, text, new Date(entry.mtime * 1000));
+        notes++;
+      }
+      const log = await current.exportLog();
+      zip.add(EXPORT_LOG_NAME, log);
+      let records = 0;
+      for (let i = log.indexOf('\n'); i >= 0; i = log.indexOf('\n', i + 1)) records++;
+      return { archive: zip.finish(), notes, records };
+    });
+
   // --- Config and reset.
   const updateConfig = async (next: unknown): Promise<storage.BrainConfig> => {
     const parsed = storage.parseBrainConfig(next, 'the new config');
@@ -350,6 +380,8 @@ export async function openBrainService(
         case 'importAbort':
           if (active && active.id === args[0]) endImport(active);
           return undefined;
+        case 'exportArchive':
+          return exportArchive();
         case 'config':
           return config;
         case 'storageKind':

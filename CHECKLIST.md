@@ -27,7 +27,7 @@ Status key: `[x]` merged to `main` with CI green, `[~]` in progress, `[ ]` not s
 - [x] Sync design written into PLAN.md section 7
 - [x] Postgres implementation of the storage interfaces, passing the shared conformance suite in CI
 - [x] Server: one git repository per brain, sync API, engine over HTTP, note history and restore
-- [~] Sync in the web app (v0.5.0 PR)
+- [x] Sync in the web app (v0.5.0)
 - [x] Single-user access token, with a seam for real sign-in
 - [!] Deploy to Railway (needs Mike: see QUESTIONS.md). Dockerfile, railway.json and docs/deploy.md are written; the image has not been built, because this environment has no Docker daemon
 
@@ -39,15 +39,16 @@ Status key: `[x]` merged to `main` with CI green, `[~]` in progress, `[ ]` not s
 
 ## Blog publishing (milestone 5, pulled forward if time allows)
 
-- [~] Public pages for posts marked `published: true`, with the privacy rules in PLAN.md section 8 (v0.5.0 PR)
+- [x] Public pages for posts marked `published: true`, with the privacy rules in PLAN.md section 8 (v0.5.0)
 
 ## Added during the night
 
-- [~] Shared settings (folder roles) that sync between devices, a blog settings screen, one remote commit as one change, `history` and `restore` from a clone (v0.5.0 PR)
-- [~] Independent security review of the server, with fixes (v0.5.0 PR)
-- [~] README and user guides under `docs/` (v0.5.0 PR)
-- [~] Fix for the sync browser test that fails on CI (agent running)
-- [~] Final polish: lockout fix, export of notes from the app, and eight smaller fixes (agent running)
+- [x] Shared settings (folder roles) that sync between devices, a blog settings screen, one remote commit as one change, `history` and `restore` from a clone (v0.5.0)
+- [x] Independent security review of the server, with fixes (v0.5.0)
+- [x] README and user guides under `docs/` (v0.5.0)
+- [~] Fix for the sync browser test that failed once on CI: a real note-page bug fixed, exact CI cause not reproduced (v0.6.0 PR)
+- [~] Final polish: lockout fix, export of notes from the app, and nine smaller fixes (v0.6.0 PR)
+- [~] Scores could depend on arrival order when two renames share a timestamp, found by a property test (agent fixing; blocks the v0.6.0 PR)
 
 ## Interruptions
 

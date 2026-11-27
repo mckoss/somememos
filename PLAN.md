@@ -191,6 +191,7 @@ Implemented in `packages/core/src/storage` (interfaces, folding, an in-memory re
 - Change records have their own tables beside the event log.
 - **Scores are combined in application code**, not with the SQL statement shown below. SQLite and Postgres would each round that statement slightly differently; doing it in core makes every store agree exactly. Scores rebuilt from the log agree with incrementally folded ones to within rounding in the last digits.
 - **Renames apply by time.** An event dated at or before a rename counts toward the new name, following chains of renames. An event dated after it stays with the old name. So a late-arriving event from before the rename follows the note, while a new note that later reuses the old path starts fresh.
+- **Ties are part of the rule** (settled 2026-11-27, after a property test found arrival order leaking into scores). Renames dated the same second are simultaneous: a chain only continues with a rename dated strictly later, so `a→b` and `b→c` in one second move `a`'s history to `b` and `b`'s to `c`, and `a→b` with `b→a` swaps them. Of several renames of one item in one second, the one with the smallest id applies. An event at exactly a rename's second counts toward the new name. Nothing depends on a copy's own arrival sequence, so every copy holding the same entries computes the same scores. An incremental fold that receives same-second renames that interact in another order than this rule refolds from the log.
 - Folding is safe when several processes run at once: a fold that loses the race is recomputed, never double-counted.
 - Every implementation must pass one shared conformance test suite, which the Postgres implementation will also run.
 
@@ -443,6 +444,13 @@ somememos eval [--cases file]        run the ranking experiments (section 5)
 - The repo ships a short `AGENTS.md` snippet (and a skill) to paste into a brain: run `somememos hot` to orient, `somememos search` before grep, `somememos log` to see what changed recently, `somememos read` in place of `cat`, and `somememos commit -m` with a reason after editing.
 - somememos requires no other structure from agents. There is no citation step and no handle to pass back.
 
+### Additions in v0.6.0
+
+- **The CLI refuses to send its token to a plain `http` server,** unless the host is this machine or the person passes `--allow-insecure`.
+- **`connect --name` and `clone --name`** give a device a readable name, which is what `history` shows.
+- **`somememos eval` with no options** compares the half-lives when there are no search cases, since keyword settings can't differ on cases that have no keywords.
+- **`somememos diary`** no longer counts a new entry that holds only its heading as an uncommitted change.
+
 ### Additions in v0.5.0
 
 - **One remote commit is one change.** `somememos commit` in remote mode sends all its files as one change set: one change-log entry and one commit on the server, or nothing if any file is stale.
@@ -557,6 +565,16 @@ Implemented on 2026-11-27 in `packages/server`, mounted by the web app under `/a
 - **A blog post's badge** reads "Published, waiting to sync" until the server has the note's current version.
 - **A brain's shared settings sync too** (added 2026-11-27): folder roles, half-lives, weights and the other ranking settings, everything except the device's own id. The server keeps them with a revision number. A device that changes them sends the change before anything else; a device whose copy is out of date applies the newer settings and re-indexes before it sends or receives any note. If two devices changed them while offline, the second to sync is stopped and the person chooses which to keep; neither is overwritten silently.
 - **Excluding a folder never deletes its notes.** They stay on every device and in the server's repository and history. They leave every index, list, search and public page, and sync stops carrying them. If the folder is accepted again, every copy receives them.
+
+### Additions in v0.6.0
+
+- **Export everything.** The web app can export every note plus the event log as one zip, and import such a zip back, which is what principle 5 promises. The zip holds every file stored on the device, including notes in folders that were excluded after they were stored.
+- **Conflict copies remember their original.** A conflict copy can land in a different folder from its note (a diary entry's copy goes to the memos folder). The copy's own change record says which note it belongs to, so every device resolves it into the right note.
+- **A note named like a folder** (`a.md` beside a folder `a.md/`) is kept on the device and reported as "rename it to sync it", instead of breaking sync.
+- **Words longer than 128 characters are not indexed or searched,** in every store. Existing indexes rebuild once.
+- **Wrong tokens are slowed, not locked out.** An address that keeps failing has its requests spaced a second apart; a request with a valid token always passes.
+- **Public blog pages drop HTML comments** from a post's body, title and summary.
+- **The note page no longer gets stuck** on "No note here yet" when the note arrives after the page opened, and a sync request that never answers now times out.
 
 ### Security review (2026-11-27)
 

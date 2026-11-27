@@ -313,6 +313,8 @@ next: cd ~/garden-remote; somememos hot; somememos search <words>; somememos rea
 
 `connect` checks that the server answers and accepts the token before writing anything. It refuses a folder that already holds markdown or is already a brain. The token is never written to the folder: it comes from `SOMEMEMOS_TOKEN`, or from `--token-file <path>`, a file outside the folder whose path (not its content) is recorded. Inside a git repository it adds a `.gitignore` that keeps the folder's notes out of git.
 
+The server must be `https://`. The CLI refuses to send the token over plain `http://`, where anyone on the network can read it, except to this machine (`localhost`, `127.0.0.1`, `[::1]`). On a network you trust, pass `--allow-insecure` to `connect`, `clone` or `sync`, or set `SOMEMEMOS_ALLOW_INSECURE=1` (which every command of a working folder or environment-only mode on such a server needs).
+
 ### Read, edit, commit
 
 ```
@@ -458,9 +460,9 @@ Set `SOMEMEMOS_DEBUG=1` for stack traces.
 
 | Preset | Compares |
 |---|---|
-| `baseline` (default) | keywords only (mode all) against keywords plus activation (mode hot) |
+| `baseline` (default with search cases) | keywords only (mode all) against keywords plus activation (mode hot) |
 | `weights` | the mention weight (edit = 1) and α |
-| `half-lives` | which half-life drives hot: day, week, month or year |
+| `half-lives` (default without search cases) | which half-life drives hot: day, week, month or year |
 | `bursts` | the burst window: off, 10 minutes, 1 hour, 1 day |
 | `keyword` | BM25F's k1, the title weight and body length normalization |
 | `spreading` | spreading activation along links, in several directions and strengths |
@@ -488,7 +490,7 @@ mode=hot  0.686  0.886  0.886  0.886  0.781     35        0
 
 `R@10` is recall at 10: the share of right answers that appear in the top ten, averaged over cases. `MRR` is the mean reciprocal rank: 1 divided by the position of the first right answer (1.0 when it is first, 0.5 when second), averaged. Higher is better for both. Differences of a couple of hundredths are noise on a brain this size.
 
-Orientation cases have no keywords, so `mode=all` and `mode=hot` rank them identically and the two orientation rows always match; compare settings on the search table, or use a preset such as `half-lives` for orientation:
+Orientation cases have no keywords, so `mode=all` and `mode=hot` rank them identically and the two orientation rows always match; compare settings on the search table, or use a preset such as `half-lives` for orientation. Plain `somememos eval`, with no `--cases` or `--from-git`, has only orientation cases, so it compares `half-lives` instead of `baseline` and prints a note saying so; `--preset baseline` without search cases prints a note that its rows cannot differ:
 
 ```
 $ somememos eval --preset half-lives --window 1d

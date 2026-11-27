@@ -61,7 +61,9 @@ Cases:
   and links are rebuilt in memory as of the commit's parent, so later text
   can't leak the answer. Commits that changed more than 20 notes are skipped.
 
-Settings (default: --preset baseline). Each starts from the brain's config:
+Settings (default: --preset baseline when there are search cases; without
+any, --preset half-lives, since orientation cases cannot tell baseline's rows
+apart, with a note saying so). Each starts from the brain's config:
 ${presetHelp}
 --grid takes 'key=v1,v2;key=v1,v2', every combination a setting, for example
 'alpha=0,0.5,1;weights.mention=0.5,1;fold.burst.window=0,600'. Keys: mode,
@@ -92,7 +94,7 @@ Output: a line of case counts, then one table per kind of case (orientation,
 search) with a row per setting: R@1, R@5, R@10, R@20, MRR, cases, skipped.
 Aggregates only, safe to share. With --json: {seed, cases: {orientation,
 orientationSkipped: {history, answers}, hand, git, gitCommits: {read,
-eligible}}, settings, report: {ks, settings: [{name, all, orientation,
+eligible}}, settings, note, report: {ks, settings: [{name, all, orientation,
 search}]}, detailFile}.
 
 Examples:
@@ -179,6 +181,8 @@ export interface EvalRecord {
   seed: number;
   cases: EvalCounts;
   settings: string[];
+  /** Why the settings are what they are, when that is not obvious (no case content). */
+  note: string | null;
   report: unknown;
   /** The per-case detail file, when --detail was given. */
   detailFile: string | null;
@@ -188,6 +192,7 @@ function formatEval(record: EvalRecord, report: evaluation.EvalReport): string[]
   const c = record.cases;
   const lines = [
     `cases: ${c.orientation} orientation (skipped ${c.orientationSkipped.history} for too little history, ${c.orientationSkipped.answers} with no answers), ${c.hand} hand-written, ${c.git} from git${c.gitCommits ? ` (of ${c.gitCommits.eligible} eligible commits)` : ''}; ${record.settings.length} settings; seed ${record.seed}`,
+    ...(record.note ? [record.note] : []),
   ];
   const tables: ['orientation' | 'search', number][] = [
     ['orientation', c.orientation],
@@ -272,7 +277,8 @@ export const evalCommand: Command = {
     return withBrain(ctx, brainOptions(globals), async (brain) => {
       const base = configBase(brain.config);
       const settings: evaluation.EvalSetting[] = [];
-      for (const name of presetNames.length > 0 || grid ? presetNames : ['baseline']) {
+      const explicit = presetNames.length > 0 || grid !== null;
+      for (const name of presetNames) {
         settings.push(...(PRESETS[name] as (typeof PRESETS)[string]).settings(base));
       }
       if (grid) settings.push(...evaluation.expandGrid(grid, base));
@@ -306,6 +312,23 @@ export const evalCommand: Command = {
         ? await buildGitCases({ brainDir: brain.root, classifier, samples, seed })
         : null;
       const cases: evaluation.EvalCase[] = [...orientation.cases, ...hand, ...(git?.cases ?? [])];
+      const searchCases = hand.length + (git?.cases.length ?? 0);
+
+      // The default: baseline compares keyword search with and without
+      // activation, which only search cases can tell apart. Without any,
+      // compare what orientation cases do measure: the half-life behind hot.
+      let note: string | null = null;
+      if (!explicit) {
+        const preset = searchCases > 0 ? 'baseline' : 'half-lives';
+        settings.push(...(PRESETS[preset] as (typeof PRESETS)[string]).settings(base));
+        if (preset === 'half-lives') {
+          note =
+            'note: no search cases (give --cases or --from-git), so comparing the half-lives behind hot instead of the baseline preset, whose rows would all be the same';
+        }
+      } else if (searchCases === 0 && presetNames.includes('baseline')) {
+        note =
+          'note: preset baseline compares keyword search with and without activation, and there are no search cases (give --cases or --from-git): orientation cases cannot tell its rows apart';
+      }
 
       const notes = await replayNotes(brain, log);
       let links: ranking.LinkGraph | null = null;
@@ -362,6 +385,7 @@ export const evalCommand: Command = {
           gitCommits: git ? { ...git.commits } : null,
         },
         settings: settings.map((s) => s.name),
+        note,
         report: evaluation.reportToJson(report),
         detailFile,
       };

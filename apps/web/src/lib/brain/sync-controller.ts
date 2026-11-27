@@ -112,6 +112,11 @@ function viewFromError(error: SyncHttpError): coreSync.ConfigView | null {
   return { revision, config: config as coreSync.SharedConfig };
 }
 
+/** How long a sync request (which may carry megabytes) may take to answer. */
+export const SYNC_REQUEST_TIMEOUT_MS = 120_000;
+/** How long any other request may take. */
+export const REQUEST_TIMEOUT_MS = 30_000;
+
 const nowSeconds = (): number => Math.floor(Date.now() / 1000);
 const enc = encodeURIComponent;
 
@@ -305,6 +310,12 @@ export class SyncController {
     };
     if (token !== null) headers.authorization = `Bearer ${token}`;
     if (body !== undefined) headers['content-type'] = 'application/json';
+    // A request that never answers must not hold sync forever (one run at a
+    // time): give up after a while; the retry is safe (ids deduplicate).
+    const signal = AbortSignal.timeout(
+      body !== undefined ? SYNC_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+    );
+    const timedOut = () => new SyncHttpError(0, 'timeout', 'the server took too long to answer');
     let response: Response;
     try {
       response = await this.fetchFn(`${this.deps.origin}/api${path}`, {
@@ -314,8 +325,10 @@ export class SyncController {
         cache: 'no-store',
         credentials: 'same-origin',
         redirect: 'error',
+        signal,
       });
     } catch {
+      if (signal.aborted) throw timedOut();
       throw new SyncHttpError(0, 'network', 'no answer from the server');
     }
     const type = response.headers.get('content-type') ?? '';
@@ -324,6 +337,7 @@ export class SyncController {
       try {
         json = await response.json();
       } catch {
+        if (signal.aborted) throw timedOut();
         json = null;
       }
     }
@@ -349,6 +363,9 @@ export class SyncController {
   private connectError(error: unknown): Error {
     if (error instanceof ConnectPlanError) return error;
     if (error instanceof SyncHttpError) {
+      if (error.code === 'timeout') {
+        return new ConnectPlanError('The server took too long to answer. Try again in a moment.');
+      }
       if (error.status === 0) {
         return new ConnectPlanError(
           'The server can’t be reached. Check that this device is online, then try again.',
@@ -389,6 +406,7 @@ export class SyncController {
       response = await this.fetchFn(`${this.deps.origin}/api/health`, {
         cache: 'no-store',
         credentials: 'omit',
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch {
       return {
@@ -626,6 +644,7 @@ export class SyncController {
       conflicts: 0,
     };
     const tooLarge = new Set<string>();
+    const nameClash = new Set<string>();
     let dataChanged = false;
     let configChanged = false;
     const io = this.configIo(conn, () => {
@@ -652,6 +671,7 @@ export class SyncController {
         const prepared = await this.deps.queue(() => this.deps.engine().prepareSync());
         if (generation !== this.generation) return { ok: true };
         for (const p of prepared.tooLarge) tooLarge.add(p);
+        for (const p of prepared.nameClash) nameClash.add(p);
         let response: coreSync.SyncResponse;
         try {
           response = (await this.api(
@@ -683,6 +703,7 @@ export class SyncController {
         totals.pushed.events += outcome.pushed.events;
         totals.pushed.changes += outcome.pushed.changes;
         totals.conflicts += outcome.conflicts.length;
+        for (const p of outcome.nameClash) nameClash.add(p);
         if (
           outcome.received.notes + outcome.received.events + outcome.received.changes > 0 ||
           outcome.conflicts.length > 0 ||
@@ -716,7 +737,12 @@ export class SyncController {
       }
       this.problem = null;
       this.lastSyncAt = nowSeconds();
-      this.lastRun = { at: this.lastSyncAt, ...totals, tooLarge: [...tooLarge].sort() };
+      this.lastRun = {
+        at: this.lastSyncAt,
+        ...totals,
+        tooLarge: [...tooLarge].sort(),
+        nameClash: [...nameClash].sort(),
+      };
       return { ok: true };
     } catch (error) {
       if (error instanceof coreSync.ConfigConflictError) this.configConflict = error;
@@ -819,6 +845,15 @@ export class SyncController {
       at,
     });
     if (error instanceof SyncHttpError) {
+      if (error.code === 'timeout') {
+        return {
+          problem: problem(
+            'server',
+            'The server took too long to answer. Your changes are kept here; it will try again shortly.',
+          ),
+          result: { ok: false, kind: 'server' },
+        };
+      }
       if (error.status === 0) {
         const online = this.deps.online?.() ?? true;
         return {
@@ -911,12 +946,16 @@ export class SyncController {
         .map((e) => e.path)
         .filter((p) => parseConflictPath(p))
         .sort();
+      // A copy may sit in another folder than its note (core's
+      // conflictCopyPath): core recorded which note it belongs to.
+      const originals = await this.deps.engine().conflictOriginals(entries);
       for (const path of entries) {
         const parsed = parseConflictPath(path);
         const mine = await content.read(path);
         if (!parsed || mine === undefined) continue;
-        const theirs = (await content.read(parsed.original)) ?? null;
-        out.push({ path, ...parsed, mine, theirs });
+        const original = originals[path] ?? parsed.original;
+        const theirs = (await content.read(original)) ?? null;
+        out.push({ path, ...parsed, original, mine, theirs });
       }
       return out;
     });
@@ -930,14 +969,16 @@ export class SyncController {
    */
   async resolve(path: unknown, choice: unknown): Promise<{ kept: string | null }> {
     if (typeof path !== 'string') throw new ConnectPlanError('No such conflict copy.');
-    const parsed = parseConflictPath(path);
-    if (!parsed) throw new ConnectPlanError('That note is not a conflict copy.');
+    const named = parseConflictPath(path);
+    if (!named) throw new ConnectPlanError('That note is not a conflict copy.');
     if (choice !== 'mine' && choice !== 'theirs' && choice !== 'both') {
       throw new ConnectPlanError('Choose mine, theirs or both.');
     }
     const result = await this.deps.queue(async () => {
       const content = this.deps.content();
       const engine = this.deps.engine();
+      const recorded = (await engine.conflictOriginals([path]))[path];
+      const parsed = { ...named, original: recorded ?? named.original };
       const mine = await content.read(path);
       if (mine === undefined) throw new ConnectPlanError('That conflict copy is gone already.');
       let kept: string | null = null;

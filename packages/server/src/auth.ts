@@ -95,33 +95,68 @@ export function tokenAuthorizer(tokens: TokenSet): Authorizer {
 export interface FailureLimiterOptions {
   /** The window failures are counted over, in milliseconds. Default 10 minutes. */
   readonly windowMs?: number;
-  /** Failures one address may make in a window. Default 20. */
+  /** Failures one address may make in a window before it is throttled. Default 20. */
   readonly perAddress?: number;
-  /** Failures all addresses together may make in a window. Default 200. */
+  /**
+   * Failures all addresses together may make in a window. Past it, every
+   * address that has failed at least once in the window is throttled; an
+   * address with no failures is not. Default 200.
+   */
   readonly total?: number;
+  /** How far apart a throttled address's requests are spaced, in milliseconds. Default 1 s. */
+  readonly spacingMs?: number;
+  /**
+   * The longest a throttled address's request may queue for its turn, in
+   * milliseconds; a request that would wait longer is refused unchecked.
+   * Default 30 s.
+   */
+  readonly maxQueueMs?: number;
   readonly now?: () => number;
 }
 
+/** What to do with a request before its token is checked. */
+export type Admission =
+  | { readonly kind: 'check'; readonly delayMs: number }
+  | { readonly kind: 'refuse'; readonly retryAfter: number };
+
 /**
- * Counts failed authentication attempts per client address (and in total)
- * over a fixed window. Once a limit is reached, requests from that address
- * (or every request, for the total) are refused with 429 until the window
- * ends, even with a valid token, so guessing gains nothing. In memory: a
- * restart forgets, which is acceptable for a single-user server.
+ * Throttles failed authentication (security review 2026-11-27, finding 3).
+ *
+ * Failures are counted per client address and in total over a fixed window.
+ * A valid token is never refused because of other clients' failures: an
+ * address that has not failed in the window is never slowed or refused, and
+ * every admitted request has its token compared, so the owner gets in.
+ *
+ * Guessing is bounded by spacing instead of by refusal. Once an address is
+ * over its own limit (or the total limit is reached and the address has
+ * failed in this window), each of its requests waits for a turn, `spacingMs`
+ * apart, before its token is compared at all. That address therefore learns
+ * at most one guess's result per `spacingMs`, however many connections it
+ * opens, and giving up on a slow answer teaches it nothing because the
+ * comparison has not happened yet. Its failed attempts answer 429 instead of
+ * 401. A request whose turn would be more than `maxQueueMs` away is refused
+ * with 429 without comparing, which only an address flooding its own queue
+ * can cause. In memory: a restart forgets, which is acceptable for a
+ * single-user server.
  */
 export class FailureLimiter {
   private readonly windowMs: number;
   private readonly perAddress: number;
   private readonly total: number;
+  private readonly spacingMs: number;
+  private readonly maxQueueMs: number;
   private readonly now: () => number;
   private windowStart = 0;
   private readonly counts = new Map<string, number>();
+  private readonly nextTurn = new Map<string, number>();
   private all = 0;
 
   constructor(options: FailureLimiterOptions = {}) {
     this.windowMs = options.windowMs ?? 10 * 60_000;
     this.perAddress = options.perAddress ?? 20;
     this.total = options.total ?? 200;
+    this.spacingMs = options.spacingMs ?? 1000;
+    this.maxQueueMs = options.maxQueueMs ?? 30_000;
     this.now = options.now ?? Date.now;
   }
 
@@ -130,15 +165,38 @@ export class FailureLimiter {
     if (t - this.windowStart >= this.windowMs) {
       this.windowStart = t;
       this.counts.clear();
+      this.nextTurn.clear();
       this.all = 0;
     }
   }
 
-  /** Seconds until `address` may try again, or 0 when it may now. */
-  blockedFor(address: string): number {
+  /** True when `address`'s requests are spaced out (and its failures answer 429). */
+  throttled(address: string): boolean {
     this.roll();
-    if ((this.counts.get(address) ?? 0) < this.perAddress && this.all < this.total) return 0;
+    const mine = this.counts.get(address) ?? 0;
+    return mine >= this.perAddress || (this.all >= this.total && mine > 0);
+  }
+
+  /** Seconds until the window ends: the `Retry-After` for a throttled address's failure. */
+  retryAfter(): number {
+    this.roll();
     return Math.max(1, Math.ceil((this.windowStart + this.windowMs - this.now()) / 1000));
+  }
+
+  /**
+   * Admits a request from `address` before its token is checked: at once,
+   * after a delay (its turn), or refused when its turn is too far away.
+   */
+  admit(address: string): Admission {
+    if (!this.throttled(address)) return { kind: 'check', delayMs: 0 };
+    const t = this.now();
+    const turn = Math.max(t, this.nextTurn.get(address) ?? 0);
+    const delayMs = turn - t;
+    if (delayMs > this.maxQueueMs) {
+      return { kind: 'refuse', retryAfter: Math.max(1, Math.ceil(delayMs / 1000)) };
+    }
+    this.nextTurn.set(address, turn + this.spacingMs);
+    return { kind: 'check', delayMs };
   }
 
   fail(address: string): void {

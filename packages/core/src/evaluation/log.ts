@@ -22,6 +22,12 @@ export interface ReplayRename {
   readonly to: string;
   readonly time: number;
   readonly seq?: number;
+  /**
+   * The record's id: the tie-break between renames of one item at one second
+   * (`storage.RenameIndex`). Give it whenever the log has it; without one,
+   * ties go to the rename that comes first in `timeOrdered` order.
+   */
+  readonly id?: string;
 }
 
 export type ReplayEntry = ReplayEvent | ReplayRename;
@@ -82,8 +88,8 @@ export function collapseBursts<E extends ReplayEntry>(
   if (window === 0) return [...entries];
   const kinds = options.kinds ? new Set<string>(options.kinds) : null;
   const known = new RenameIndex();
-  entries.forEach((e, i) => {
-    if (isRename(e)) known.add({ item: e.item, to: e.to, time: e.time, seq: e.seq ?? i });
+  entries.forEach((e) => {
+    if (isRename(e)) known.add({ item: e.item, to: e.to, time: e.time, id: e.id ?? '' });
   });
   const subject: number[] = [];
   entries.forEach((e, i) => {

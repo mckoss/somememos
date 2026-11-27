@@ -25,6 +25,11 @@
 //    a trailing possessive `students'`, is a separator.
 // 5. No stop words are removed. Scripts without spaces (Chinese, Japanese,
 //    Thai) are not segmented: each run of such letters is one token.
+// 6. A run longer than `MAX_TERM_LENGTH` UTF-16 code units after folding
+//    (a pasted hash, a base64 blob, a line of `x`) is not a token: it is
+//    neither indexed nor searched for, in every store alike. Its position is
+//    still used up, so a phrase never matches across it. (One term must fit
+//    in a database index row; Postgres's limit is a few kilobytes.)
 //
 // Each token carries its ordinal position (0, 1, 2, ... within the text) and
 // its UTF-16 code unit offsets `[start, end)` in the original, unfolded text.
@@ -71,6 +76,13 @@ function units(text: string): Unit[] {
   return out;
 }
 
+/**
+ * The longest token, in UTF-16 code units of folded text; longer runs are
+ * not tokens (rule 6). Changing it changes index contents: bump
+ * `ANALYZER_FORMAT`.
+ */
+export const MAX_TERM_LENGTH = 128;
+
 /** Splits `text` into folded tokens. No stemming; see `analyze` for that. */
 export function tokenize(text: string): Token[] {
   const tokens: Token[] = [];
@@ -78,10 +90,14 @@ export function tokenize(text: string): Token[] {
   let current = '';
   let start = -1;
   let end = -1;
+  let position = 0;
 
   const flush = (): void => {
     if (current.length > 0) {
-      tokens.push({ text: current, position: tokens.length, start, end });
+      if (current.length <= MAX_TERM_LENGTH) {
+        tokens.push({ text: current, position, start, end });
+      }
+      position++;
     }
     current = '';
     start = -1;
@@ -104,7 +120,8 @@ export function tokenize(text: string): Token[] {
     for (const ch of u.folded) {
       if (WORD_CHAR.test(ch)) {
         if (current.length === 0) start = u.start;
-        current += ch;
+        // Past the limit the run is dropped anyway: stop growing it.
+        if (current.length <= MAX_TERM_LENGTH) current += ch;
         end = u.end;
       } else {
         flush();

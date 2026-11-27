@@ -135,6 +135,63 @@
       : 'The browser didn’t agree. Installing the app, or using it more often, usually helps.';
   }
 
+  // Export everything: every note plus the event log, as a zip built in the worker.
+  let exportMessage = $state<{ ok: boolean; text: string } | null>(null);
+  let exporting = $state(false);
+
+  interface SaveFileHandle {
+    createWritable(): Promise<WritableStream<Uint8Array>>;
+  }
+  type SavePicker = (options: {
+    suggestedName: string;
+    types: { description: string; accept: Record<string, string[]> }[];
+  }) => Promise<SaveFileHandle>;
+
+  async function exportEverything() {
+    exporting = true;
+    exportMessage = null;
+    const name = `somememos-${new Date().toISOString().slice(0, 10)}.zip`;
+    // Ask where to save first: the picker needs the click that started this.
+    const picker = (window as unknown as { showSaveFilePicker?: SavePicker }).showSaveFilePicker;
+    let handle: SaveFileHandle | null = null;
+    if (typeof picker === 'function') {
+      try {
+        handle = await picker({
+          suggestedName: name,
+          types: [{ description: 'Zip archive', accept: { 'application/zip': ['.zip'] } }],
+        });
+      } catch (e) {
+        if ((e as Error)?.name === 'AbortError') {
+          exporting = false;
+          return;
+        }
+        handle = null; // Not allowed here: fall back to a download.
+      }
+    }
+    try {
+      const { archive, notes, records } = await (await host()).exportArchive();
+      if (handle) {
+        // Streams the Blob into the file; pipeTo closes it when done.
+        await archive.stream().pipeTo(await handle.createWritable());
+      } else {
+        const url = URL.createObjectURL(archive);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = name;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 60_000);
+      }
+      exportMessage = {
+        ok: true,
+        text: `Exported ${plural(notes, 'note')} and ${plural(records, 'log record')}.`,
+      };
+    } catch (e) {
+      exportMessage = { ok: false, text: errorMessage(e) };
+    } finally {
+      exporting = false;
+    }
+  }
+
   // Event log export and import.
   let logMessage = $state<{ ok: boolean; text: string } | null>(null);
   let logInput = $state<HTMLInputElement>();
@@ -274,7 +331,7 @@
       {#if brain.storage.kind === 'memory'}
         <p class="notice">
           Your notes are only in this tab’s memory right now. They are lost when you reload or close
-          the tab. Export the event log to keep your activity.
+          the tab. Export everything to keep a copy.
           {#if brain.storage.reason}<br />{brain.storage.reason}{/if}
         </p>
       {:else}
@@ -306,6 +363,35 @@
       {#if persistMessage}<p class="hint" role="status">{persistMessage}</p>{/if}
     {:else}
       <p class="hint">Checking…</p>
+    {/if}
+  </section>
+
+  <section id="export" class="card" aria-labelledby="export-h">
+    <h2 id="export-h">Export everything</h2>
+    <p>
+      One <code>.zip</code> with every note stored on this device at its path (including notes in
+      excluded folders) and the event log as <code>events.jsonl</code>. It is your whole brain:
+      unzip it into a folder to use it anywhere, or import it here again.
+    </p>
+    <div class="row">
+      <button
+        type="button"
+        onclick={exportEverything}
+        disabled={exporting}
+        data-testid="export-everything"
+      >
+        <Icon name="download" size={18} />
+        {exporting ? 'Exporting…' : 'Export everything'}
+      </button>
+    </div>
+    {#if exportMessage}
+      <p
+        class="notice {exportMessage.ok ? 'ok' : 'error'}"
+        role="status"
+        data-testid="export-message"
+      >
+        {exportMessage.text}
+      </p>
     {/if}
   </section>
 
@@ -430,8 +516,8 @@
   <section id="reset" class="card danger-zone" aria-labelledby="reset-h">
     <h2 id="reset-h">Start over</h2>
     <p>
-      Delete every note and all activity from this device. Export the event log first if you want
-      it.
+      Delete every note and all activity from this device. Export everything first if you want a
+      copy.
     </p>
     <button
       type="button"

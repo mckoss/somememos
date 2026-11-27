@@ -18,7 +18,12 @@ import type { Brain, RemoteSession, Session } from '../brain/index.js';
 import type { Context } from '../context.js';
 import { EXIT_OK, UsageError } from '../context.js';
 import { RemoteError, createRemoteClient } from '../remote/client.js';
-import { type CloneRemote, readCloneRemote, resolveToken } from '../remote/config.js';
+import {
+  type CloneRemote,
+  insecureAllowed,
+  readCloneRemote,
+  resolveToken,
+} from '../remote/config.js';
 import { type RemoteEngine, type RemoteNoteVersion, createRemoteEngine } from '../remote/engine.js';
 import { sync as coreSync } from '@somememos/core';
 import { syncWithServer } from './clone.js';
@@ -43,9 +48,11 @@ ${GLOBAL_OPTIONS_HELP}
 
 Output: one line per version:
   <YYYY-MM-DD HH:MM>  <commit>  <client>  <message>
-with "(deleted)" or "(renamed to <path>)" on the version that did that, and
+with "(deleted)", "(renamed to <path>)" or "(renamed from <path>)" on the
+version that did that (a rename is one version, at its new path), and
 "[<path>]" when the version is from an earlier path. Times are local. With
---json: {path, versions: [{path, mutation, commit, hash, renamedTo, time,
+--json: {path, versions: [{path, mutation, commit, hash, renamedTo,
+renamedFrom, time,
 client, message}]}.
 
 Examples:
@@ -98,6 +105,7 @@ function needsServer(ctx: Context, session: Session, what: string): VersionServe
     brainId: remote.brainId,
     token: resolveToken(ctx.env, remote.tokenFile, ctx.cwd),
     clientId: brain.config.clientId,
+    allowInsecure: insecureAllowed(ctx.env),
   });
   return { engine: createRemoteEngine(client), remote: null, clone: { brain, remote } };
 }
@@ -120,6 +128,7 @@ export function formatVersion(session: Session, path: string, v: RemoteNoteVersi
   const parts = [formatLocalTime(v.time), v.commit.slice(0, 12), v.client];
   let message = oneLineText(v.message.split('\n')[0] ?? '', 100) || '(no message)';
   if (v.renamedTo) message += ` (renamed to ${session.displayPath(v.renamedTo)})`;
+  else if (v.renamedFrom) message += ` (renamed from ${session.displayPath(v.renamedFrom)})`;
   else if (v.hash === null) message += ' (deleted)';
   if (v.path !== path) message += ` [${session.displayPath(v.path)}]`;
   parts.push(message);

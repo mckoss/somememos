@@ -10,8 +10,17 @@ import {
   parseBrainConfig,
   serializeBrainConfig,
 } from './config.js';
+import { ANALYZER_FORMAT } from '../keyword/analyze.js';
 import { decodePositions, encodePositions } from './positions.js';
-import { newEvent, newRename, parseSectionId, sectionId } from './validate.js';
+import {
+  analyzerFromJson,
+  analyzerToJson,
+  compareAnalyzers,
+  newEvent,
+  newRename,
+  parseSectionId,
+  sectionId,
+} from './validate.js';
 
 describe('positions codec', () => {
   it('round-trips any ascending positions (property)', () => {
@@ -65,6 +74,26 @@ describe('ids', () => {
   });
 });
 
+describe('stored analyzer options', () => {
+  it('records the analyzer format, and an index stored before it was recorded is stale', () => {
+    const current = { stem: true, format: ANALYZER_FORMAT };
+    expect(analyzerFromJson(analyzerToJson(current))).toEqual(current);
+    const old = analyzerFromJson('{"stem":true}');
+    expect(old).toEqual({ stem: true, format: 1 });
+    expect(compareAnalyzers(old, { stem: true })).toEqual({ stored: old, requested: current });
+    expect(compareAnalyzers(current, { stem: true })).toBeNull();
+    expect(() => analyzerFromJson('{"stem":true,"format":"x"}')).toThrow(RangeError);
+  });
+
+  it('keeps the format out of the config file', () => {
+    const text = serializeBrainConfig(defaultBrainConfig('abc-123'));
+    expect(JSON.parse(text).analyzer).toEqual({ stem: true });
+    // A config object passed through JSON as is still parses; its format is ignored.
+    const parsed = parseBrainConfig({ clientId: 'a', analyzer: { stem: false, format: 1 } });
+    expect(parsed.analyzer).toEqual({ stem: false, format: ANALYZER_FORMAT });
+  });
+});
+
 describe('brain config', () => {
   it('fills in every default from a minimal config', () => {
     expect(parseBrainConfig({ clientId: 'laptop-1' })).toEqual({
@@ -76,7 +105,7 @@ describe('brain config', () => {
       weights: { ...UNIT_WEIGHTS },
       alpha: 0.5,
       keyword: {},
-      analyzer: { stem: true },
+      analyzer: { stem: true, format: ANALYZER_FORMAT },
       changeOps: ['ingest', 'update', 'session', 'query', 'lint'],
     });
   });
@@ -108,7 +137,7 @@ describe('brain config', () => {
     expect(foldOptions(config)).toEqual({ halfLives: config.halfLives, burstWindow: 0 });
     expect(config.weights).toEqual({ read: 0.5, edit: 1, mention: 1 });
     expect(config.keyword).toEqual({ k1: 1.5, b: { body: 0.6 }, weights: { title: 4 } });
-    expect(config.analyzer).toEqual({ stem: false });
+    expect(config.analyzer).toEqual({ stem: false, format: ANALYZER_FORMAT });
     expect(config.changeOps).toEqual(['ingest', 'garden']);
   });
 

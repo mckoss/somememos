@@ -368,6 +368,30 @@ describe('runReplay', () => {
     expect(search.settings[0]?.orientation.cases).toBe(0);
   });
 
+  it('applies renames of one second together, as the live fold does', async () => {
+    const t = T + DAY;
+    // Every order of the same entries: a chain of two renames in one second.
+    const entries: ReplayEntry[] = [
+      ev('memos/delta.md', 'read', t),
+      { kind: 'rename', item: 'memos/delta.md', to: 'memos/alpha.md', time: t + 6, id: 'r1' },
+      { kind: 'rename', item: 'memos/alpha.md', to: 'delta topic', time: t + 6, id: 'r2' },
+      ev('memos/alpha.md', 'read', t),
+    ];
+    const c: EvalCase = { id: 'o', time: t + 60, query: null, answers: ['delta topic'] };
+    for (const order of [entries, [...entries].reverse()]) {
+      const report = await runReplay({
+        log: order,
+        cases: [c],
+        settings: [{ name: 'off' }, { name: 'burst', fold: { burst: { window: 3 } } }],
+        notesAt: () => notesOf('memos/alpha.md', 'memos/delta.md'),
+        detail: true,
+      });
+      for (const d of report.detail ?? []) {
+        expect([...d.ranked].sort()).toEqual(['delta topic', 'memos/alpha.md']);
+      }
+    }
+  });
+
   it('burst collapsing changes the counts that reach the scores', async () => {
     // alpha gets one burst of ten saves; beta gets three spread-out edits.
     const log = [

@@ -7,13 +7,15 @@
 // advances from one case time to the next: new events are folded with
 // `timescore.foldEvents` and combined into the table, and a rename record
 // moves the old name's scores to the new name, exactly as `storage.foldPending`
-// does for a time-ordered log. An entry dated at or after a case's time is
-// never folded for that case.
+// does for a time-ordered log. Renames at the same second move together, as
+// one simultaneous step (`storage.RenameIndex`: they never chain into each
+// other, and of several renames of one item the smallest id applies). An
+// entry dated at or after a case's time is never folded for that case.
 
 import type { PostingsSource } from '../keyword/search.js';
 import { searchSource } from '../keyword/search.js';
 import type { HalfLives } from '../storage/types.js';
-import { assertValidHalfLives } from '../storage/validate.js';
+import { assertValidHalfLives, compareStrings } from '../storage/validate.js';
 import { foldEvents, type ItemScores, type ScoreEvent } from '../timescore/events.js';
 import { HALF_LIVES } from '../timescore/halfLives.js';
 import { EVENT_KINDS } from '../timescore/kinds.js';
@@ -38,6 +40,7 @@ import {
   collapseBursts,
   isRename,
   timeOrdered,
+  type ReplayRename,
   type BurstOptions,
   type ReplayEntry,
 } from './log.js';
@@ -154,7 +157,15 @@ class Replayer {
       this.pos++;
       if (isRename(entry)) {
         flush();
-        this.move(entry.item, entry.to);
+        // Every rename at this second (they are consecutive: events come first).
+        const group: ReplayRename[] = [entry];
+        while (this.pos < this.entries.length) {
+          const next = this.entries[this.pos] as ReplayEntry;
+          if (!isRename(next) || next.time !== entry.time) break;
+          group.push(next);
+          this.pos++;
+        }
+        this.moveTogether(group);
       } else {
         pending.push({ item: entry.item, kind: entry.kind, time: entry.time });
       }
@@ -176,12 +187,21 @@ class Replayer {
     }
   }
 
-  private move(from: string, to: string): void {
-    if (from === to) return;
-    const scores = this.scores.get(from);
-    if (!scores) return;
-    this.scores.delete(from);
-    this.merge(to, scores);
+  /** Applies renames of one second at once: each item's scores move to where its applying rename says. */
+  private moveTogether(group: readonly ReplayRename[]): void {
+    const applies = new Map<string, ReplayRename>();
+    for (const r of group) {
+      const was = applies.get(r.item);
+      if (!was || compareStrings(r.id ?? '', was.id ?? '') < 0) applies.set(r.item, r);
+    }
+    const moving: [string, ItemScores<string>][] = [];
+    for (const r of applies.values()) {
+      const scores = this.scores.get(r.item);
+      if (!scores || r.item === r.to) continue;
+      this.scores.delete(r.item);
+      moving.push([r.to, scores]);
+    }
+    for (const [to, scores] of moving) this.merge(to, scores);
   }
 }
 

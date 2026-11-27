@@ -23,6 +23,7 @@ import {
   envRemoteConfigured,
   envTarget,
   envWorkFolder,
+  insecureAllowed,
   resolveToken,
   sidecarKind,
 } from '../remote/config.js';
@@ -151,6 +152,7 @@ export function openRemote(
     server: location.target.server,
     brainId: location.target.brainId,
     clientId: location.target.clientId,
+    allowInsecure: insecureAllowed(ctx.env),
     token,
     ...(Number.isFinite(timeout) && timeout > 0 ? { timeoutMs: timeout } : {}),
   });

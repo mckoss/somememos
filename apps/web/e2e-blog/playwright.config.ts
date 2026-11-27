@@ -8,8 +8,7 @@ import { defineConfig } from '@playwright/test';
 //   eval "$(packages/pg-store/scripts/dev-postgres.sh)"
 //   npx playwright test -c apps/web/e2e-blog/playwright.config.ts --trace off
 //
-// Screenshots go to $BLOG_SCREENSHOT_DIR (default: under node_modules/.cache,
-// which git ignores).
+// Screenshots are taken only when $BLOG_SCREENSHOT_DIR is set.
 
 const PORT = Number(process.env.E2E_BLOG_PORT ?? 4319);
 export const E2E_TOKEN = 'blog-e2e-token-0123456789abcdefghij';

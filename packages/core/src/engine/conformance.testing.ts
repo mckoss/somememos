@@ -613,6 +613,20 @@ export function describeEngineConformance(
           created: true,
         });
         expect((await b.engine.ensureDiary('2027-03-04')).created).toBe(false);
+        // The generated heading alone is not an edit: nothing to commit.
+        const edits = (await b.engine.status()).events.edit ?? 0;
+        expect((await b.engine.status()).uncommitted).toEqual([]);
+        expect(await b.engine.commit({ message: 'nothing yet' })).toMatchObject({
+          committed: false,
+        });
+        // The person's first words in it are uncommitted.
+        await b.content.write(diary.path, '# 2027-03-04\n\nGlazed six bowls.\n', {
+          mtime: T + 200,
+        });
+        await b.engine.index({ paths: [diary.path] });
+        expect((await b.engine.status()).uncommitted).toEqual([diary.path]);
+        // (Dated entries are not scored, so their edits log no event either way.)
+        expect((await b.engine.status()).events.edit).toBe(edits);
         await b.engine.commit({ message: 'session diary' });
         b.setNow(T + 300);
         await b.engine.saveNote('memos/a.md', '# A\n\nMore.\n', { message: 'update more' });
@@ -1305,6 +1319,16 @@ export function describeEngineConformance(
           expect(next.request.edits.map((e) => e.path).sort()).toEqual(
             [...kept.values()].map(String).sort(),
           );
+          // Which note each copy belongs to is recorded, not guessed from its name.
+          const copies = [...kept.values()].map(String);
+          const expected = {
+            [kept.get(diary) as string]: diary,
+            [kept.get('memos/plan.md') as string]: 'memos/plan.md',
+          };
+          expect(await b.engine.conflictOriginals([...copies, 'memos/other.md'])).toEqual(expected);
+          // Without the sync state (a fresh start), the copy's change record still says.
+          await b.engine.resetSync();
+          expect(await b.engine.conflictOriginals(copies)).toEqual(expected);
         },
       );
 

@@ -17,6 +17,11 @@ export interface NoteVersion {
   readonly hash: string | null;
   /** Set on the version that renamed the note away from `path`. */
   readonly renamedTo: string | null;
+  /**
+   * Set on the version that renamed the note to `path`, from this older
+   * path. A rename is listed once, at its new path.
+   */
+  readonly renamedFrom: string | null;
   /** Author time (when the change was made), Unix seconds. */
   readonly time: number;
   /** The client that made the change. */
@@ -47,6 +52,7 @@ export async function noteHistory(
   let current = path;
   let before = Number.MAX_SAFE_INTEGER;
   const seen = new Set<string>();
+  const renamedFrom = new Map<Row, string>();
   while (rows.length < limit && !seen.has(`${current}\0${before}`)) {
     seen.add(`${current}\0${before}`);
     const found = await ctx.query<Row>(
@@ -63,7 +69,10 @@ export async function noteHistory(
       [ctx.brainId, oldest.mutation, current],
     );
     if (!from[0]) break;
-    before = Number(oldest.mutation) + 1;
+    // The rename is one version, the one at the new path: the old path's
+    // record of the same mutation (renamed away) is not listed again.
+    renamedFrom.set(oldest, from[0].path);
+    before = Number(oldest.mutation);
     current = from[0].path;
   }
   // A folder accepted again after being excluded re-records its notes'
@@ -85,6 +94,7 @@ export async function noteHistory(
         commit: r.commit,
         hash: r.hash,
         renamedTo: r.renamed_to,
+        renamedFrom: renamedFrom.get(r) ?? null,
         time: c?.time ?? 0,
         client: c?.author ?? '',
         message: c?.message ?? '',

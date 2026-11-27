@@ -16,7 +16,7 @@ import { type AddressInfo, createServer } from 'node:net';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { fakeContext, tempDir, writeTestConfig } from '../brain/testing.js';
-import { EXIT_FAILURE, EXIT_OK, run } from '../index.js';
+import { EXIT_FAILURE, EXIT_OK, EXIT_USAGE, run } from '../index.js';
 import {
   EXCLUDED_FOLDER,
   type SyntheticBrain,
@@ -691,6 +691,70 @@ describePg(
         expect(record.tooLarge).toEqual(['memos/huge.md']);
         expect(existsSync(join(copy, 'memos/huge.md'))).toBe(true);
         rmSync(join(copy, 'memos/huge.md'));
+      });
+
+      it('sync keeps a note named like a folder on the server, and does not loop', async () => {
+        const one = newDir('clone-clash-1');
+        const two = newDir('clone-clash-2');
+        await ok(tmp.dir, ['clone', server.url, 'garden', one]);
+        await ok(tmp.dir, ['clone', server.url, 'garden', two]);
+        mkdirSync(join(one, 'memos/willow.md'), { recursive: true });
+        writeFileSync(join(one, 'memos/willow.md/catkin.md'), '# Catkin\n');
+        await ok(one, ['commit', '-m', 'ingest catkin']);
+        await ok(one, ['sync']);
+        // The other copy makes a note of that name before it has pulled the folder.
+        writeFileSync(join(two, 'memos/willow.md'), '# Willow\n');
+        await ok(two, ['commit', '-m', 'ingest willow']);
+        const r = await ok(two, ['sync']);
+        expect(r.stderr).toMatch(
+          /warning: 1 note shares its name with a folder on the server, so it stays in this copy only: memos\/willow\.md; rename it to sync/,
+        );
+        for (let i = 0; i < 3; i++) {
+          const again = await json<{ nameClash: string[]; conflicts: unknown[]; rounds: number }>(
+            two,
+            ['sync'],
+          );
+          expect(again.nameClash).toEqual(['memos/willow.md']);
+          expect(again.conflicts).toEqual([]);
+          expect(again.rounds).toBe(1);
+        }
+        expect(readFileSync(join(two, 'memos/willow.md'), 'utf8')).toBe('# Willow\n');
+        rmSync(join(two, 'memos/willow.md'));
+        rmSync(join(one, 'memos/willow.md'), { recursive: true });
+        await ok(one, ['commit', '-m', 'remove catkin']);
+        await ok(one, ['sync']);
+        await ok(two, ['sync']);
+      });
+
+      it('connect and clone --name give the device a readable id that history shows', async () => {
+        const named = newDir('named-wf');
+        await ok(tmp.dir, ['connect', server.url, 'garden', named, '--name', 'study-desk']);
+        const config = JSON.parse(readFileSync(join(named, '.somememos/config.json'), 'utf8'));
+        expect(config.clientId).toBe('study-desk');
+        mkdirSync(join(named, 'memos'), { recursive: true });
+        writeFileSync(join(named, 'memos/birch-bark.md'), '# Birch bark\n\nPeeling.\n');
+        await ok(named, ['commit', '-m', 'ingest birch bark']);
+        const history = await json<{ versions: { client: string }[] }>(named, [
+          'history',
+          'memos/birch-bark.md',
+        ]);
+        expect(history.versions[0]?.client).toBe('study-desk');
+
+        const copy = newDir('named-copy');
+        await ok(tmp.dir, ['clone', server.url, 'garden', copy, '--name', 'cabin.laptop']);
+        const copyConfig = JSON.parse(readFileSync(join(copy, '.somememos/config.json'), 'utf8'));
+        expect(copyConfig.clientId).toBe('cabin.laptop');
+
+        const bad = await cli(tmp.dir, [
+          'connect',
+          server.url,
+          'garden',
+          newDir('bad-name'),
+          '--name',
+          TEST_TOKEN,
+        ]);
+        expect(bad.code).toBe(EXIT_USAGE);
+        expect(bad.stderr).not.toContain(TEST_TOKEN);
       });
 
       it('sync in a brain with no server says how to set one', async () => {

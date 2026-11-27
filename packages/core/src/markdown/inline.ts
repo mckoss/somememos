@@ -28,6 +28,43 @@ export function maskCodeSpans(text: string): string {
   return out;
 }
 
+/**
+ * Removes HTML comments from `text` (one line, or the lines of one
+ * paragraph) outside code spans, the way CommonMark reads them: `<!-->`,
+ * `<!--->`, or `<!--` up to the next `-->`. `open` says a comment begun
+ * earlier (a multi-line comment) is still open at the start of `text`; the
+ * result says whether one is still open at its end. Used for a public post's
+ * title and summary, where comments (often private notes to self) must not
+ * appear. Linear in the length of `text`.
+ */
+export function stripHtmlComments(text: string, open = false): { text: string; open: boolean } {
+  const masked = maskCodeSpans(text);
+  let out = '';
+  let i = 0;
+  if (open) {
+    const close = masked.indexOf('-->');
+    if (close < 0) return { text: '', open: true };
+    i = close + 3;
+  }
+  for (;;) {
+    const start = masked.indexOf('<!--', i);
+    if (start < 0) {
+      out += text.slice(i);
+      return { text: out, open: false };
+    }
+    out += text.slice(i, start);
+    let end: number;
+    if (masked.startsWith('>', start + 4)) end = start + 5;
+    else if (masked.startsWith('->', start + 4)) end = start + 6;
+    else {
+      const close = masked.indexOf('-->', start + 4);
+      if (close < 0) return { text: out, open: true };
+      end = close + 3;
+    }
+    i = end;
+  }
+}
+
 /** True if the character at `i` is itself escaped by an odd run of backslashes before it. */
 function isEscaped(text: string, i: number): boolean {
   let n = 0;

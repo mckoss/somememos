@@ -132,17 +132,19 @@ If a note was changed both on this device and on the server (or another device) 
 
 **More → Storage on this device** says where the notes are and how much space they use. Browsers may clear a site's storage when the device runs low on space. **Keep my data** asks the browser to keep it; if it agrees, the page says "The browser has promised to keep them."
 
-If the browser offers no private storage for the app (some private-browsing modes, for example), the app still runs, keeping notes only in the tab's memory, and shows a warning: "Your notes are not being saved on this device." Export your event log before closing such a tab.
+If the browser offers no private storage for the app (some private-browsing modes, for example), the app still runs, keeping notes only in the tab's memory, and shows a warning: "Your notes are not being saved on this device." Use **More → Export everything** before closing such a tab.
 
 ## Export and backup
 
 **More → Event log → Export events.jsonl** downloads the event log: every read, edit and mention, with the change history. It is the one part of your brain that can't be rebuilt from the notes, so keep a copy. It holds note paths but no note text, and it is private. The CLI can load it (`somememos import-log`), and so can the app on another device.
 
-The app has **no export of the notes themselves** yet. Your markdown is safe if you imported it from a folder that you keep, or if the device syncs with a server (which keeps every version in git), but there is no button to download the notes from the app.
+**More → Export everything** saves your whole brain as one `.zip`: every note stored on this device at its path, plus `events.jsonl`. Notes in a folder you marked Excluded *after* importing them are included, since they are still your files on this device; files that were excluded when you imported never reached the app, so they are not. Where the browser can save files directly (Chrome, Edge) you choose where; elsewhere it downloads. The zip is uncompressed, so any unzip tool opens it, and unzipping it gives a folder the CLI can use (`somememos import-log events.jsonl` brings in the activity).
+
+To bring such a zip back, use **Import notes → Import a .zip export** on More. Its notes go through the same folder-role review as a folder, and its `events.jsonl` is imported after them (records already here are skipped).
 
 ## Starting over
 
-**More → Start over → Delete everything…** removes every note and all activity from this browser after you type `delete my notes` to confirm. If the device is connected, it also disconnects and forgets the token; nothing is deleted from the server. Export the event log first if you want it.
+**More → Start over → Delete everything…** removes every note and all activity from this browser after you type `delete my notes` to confirm. If the device is connected, it also disconnects and forgets the token; nothing is deleted from the server. Export everything first if you want a copy.
 
 ## Browser requirements
 
@@ -156,7 +158,6 @@ The app needs a current browser with private file storage for web apps (the Orig
 
 - **Only Chromium has been tested.** Safari and Firefox are untested.
 - **Nothing is hosted**; you must run a server (or the bare build) to open the app.
-- **No export of the notes** from the app, only of the event log.
 - **No screen for blog settings**: turning a blog on needs the server's API.
 - **Folder roles don't sync**: a change on one device applies to that device only.
 - **Unsaved drafts are kept in the browser's local storage**, separately from the brain, and from reading the code, "Delete everything" does not clear them.

@@ -332,23 +332,31 @@ export function compareAnalyzers(
   requested?: Partial<AnalyzerOptions>,
 ): AnalyzerMismatch | null {
   const resolved = resolveAnalyzerOptions(requested);
-  return resolved.stem === stored.stem ? null : { stored, requested: resolved };
+  return resolved.stem === stored.stem && resolved.format === stored.format
+    ? null
+    : { stored, requested: resolved };
 }
 
-/** Parses analyzer options stored as JSON; throws on anything else. */
+/**
+ * Parses analyzer options stored as JSON; throws on anything else. Options
+ * stored before the format was recorded are format 1.
+ */
 export function analyzerFromJson(json: string): AnalyzerOptions {
   const parsed: unknown = JSON.parse(json);
+  const format = (parsed as { format?: unknown } | null)?.format ?? 1;
   if (
     parsed === null ||
     typeof parsed !== 'object' ||
-    typeof (parsed as { stem?: unknown }).stem !== 'boolean'
+    typeof (parsed as { stem?: unknown }).stem !== 'boolean' ||
+    !Number.isSafeInteger(format) ||
+    (format as number) < 1
   ) {
     throw new RangeError(`stored analyzer options are invalid: ${json}`);
   }
-  return resolveAnalyzerOptions(parsed as AnalyzerOptions);
+  return { stem: (parsed as { stem: boolean }).stem, format: format as number };
 }
 
 /** The canonical JSON form of analyzer options, for storage. */
 export function analyzerToJson(options: AnalyzerOptions): string {
-  return JSON.stringify({ stem: options.stem });
+  return JSON.stringify({ stem: options.stem, format: options.format });
 }

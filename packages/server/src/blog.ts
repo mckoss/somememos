@@ -139,11 +139,21 @@ function frontMatterScalar(raw: string, keys: readonly string[]): string | null 
 
 function firstParagraph(lines: readonly markdown.ScannedLine[], from: number): string | null {
   const para: string[] = [];
+  // HTML comments are private remarks: never part of a summary.
+  let open = false;
   for (let i = from; i < lines.length; i++) {
     const line = lines[i] as markdown.ScannedLine;
-    if (line.kind === 'text') {
-      if (/^\s*(?:[-*+>]|\d+[.)]|\||!\[)/.test(line.text) && para.length === 0) continue;
-      para.push(line.text.trim());
+    if (open || line.kind === 'text') {
+      const stripped = markdown.stripHtmlComments(line.text, open);
+      open = stripped.open;
+      if (line.kind !== 'text') continue;
+      const text = stripped.text.trim();
+      if (text === '') {
+        if (para.length > 0 && !open) break;
+        continue;
+      }
+      if (/^\s*(?:[-*+>]|\d+[.)]|\||!\[)/.test(text) && para.length === 0) continue;
+      para.push(text);
     } else if (para.length > 0) break;
   }
   const text = markdown.stripInlineMarkdown(para.join(' '));
@@ -163,20 +173,46 @@ interface Candidate {
   readonly slug: string;
 }
 
-/** Parses one published post's text; `times` are its first and latest versions. */
-function makePost(c: Candidate, text: string, times: { first: number; last: number }): PublicPost {
+/**
+ * A post's public title and summary: the front matter's, else its first
+ * `#` heading and first paragraph, never anything inside an HTML comment.
+ */
+export function postHeadline(
+  text: string,
+  slug: string,
+): { title: string; description: string | null } {
   const scan = markdown.scanBlocks(text);
-  const heading = scan.lines.find(
-    (l) =>
-      l.kind === 'heading' && l.level === 1 && markdown.stripInlineMarkdown(l.heading ?? '') !== '',
-  );
-  const title =
-    scan.frontMatter?.title ??
-    (heading ? markdown.stripInlineMarkdown(heading.heading ?? '') : humanize(c.slug));
+  return headlineOf(scan, slug);
+}
+
+function headlineOf(
+  scan: markdown.BlockScan,
+  slug: string,
+): { title: string; description: string | null } {
+  // A heading's comments are not part of the title (they are not shown either).
+  const headingText = (l: markdown.ScannedLine) =>
+    markdown.stripInlineMarkdown(markdown.stripHtmlComments(l.heading ?? '').text);
+  // A heading inside a multi-line comment is not one.
+  let open = false;
+  const heading = scan.lines.slice(scan.bodyStart).find((l) => {
+    const inside = open;
+    if (open || l.kind === 'text' || l.kind === 'heading') {
+      open = markdown.stripHtmlComments(l.text, open).open;
+    }
+    return !inside && l.kind === 'heading' && l.level === 1 && headingText(l) !== '';
+  });
+  const title = scan.frontMatter?.title ?? (heading ? headingText(heading) : humanize(slug));
   const description =
     (scan.frontMatter
       ? frontMatterScalar(scan.frontMatter.raw, ['description', 'summary'])
       : null) ?? firstParagraph(scan.lines, scan.bodyStart);
+  return { title, description };
+}
+
+/** Parses one published post's text; `times` are its first and latest versions. */
+function makePost(c: Candidate, text: string, times: { first: number; last: number }): PublicPost {
+  const scan = markdown.scanBlocks(text);
+  const { title, description } = headlineOf(scan, c.slug);
   const body = scan.lines
     .slice(scan.bodyStart)
     .map((l) => l.text)

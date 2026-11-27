@@ -269,6 +269,29 @@ describePg('postgres store', () => {
     },
   );
 
+  it('reports an index built under older analyzer rules as stale, so it rebuilds', async () => {
+    const pool = await testPool();
+    const brainId = newBrainId();
+    const s = await freshStores(pool, brainId);
+    await s.terms.replaceSections('memos/a.md', 'Basalt', [{ heading: null, body: 'columns' }]);
+    expect(s.terms.analyzerMismatch()).toBeNull();
+    // As an index written before the analyzer format was recorded.
+    await query(pool, `UPDATE index_state SET analyzer = '{"stem":true}' WHERE brain_id = $1`, [
+      brainId,
+    ]);
+    const again = await createPgStores({ pool, brainId, now: () => NOW });
+    try {
+      expect(again.terms.analyzer).toEqual({ stem: true, format: 1 });
+      expect(again.terms.analyzerMismatch()).toMatchObject({
+        requested: { format: keyword.ANALYZER_FORMAT },
+      });
+      await again.resetIndex();
+      expect(again.terms.analyzerMismatch()).toBeNull();
+    } finally {
+      await again.close();
+    }
+  });
+
   it('stores scores bit for bit as the memory store folds them', async () => {
     const pool = await testPool();
     const s = await freshStores(pool);

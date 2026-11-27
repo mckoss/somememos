@@ -324,6 +324,22 @@
         <p>Split a note into smaller ones to sync it.</p>
       </div>
     {/if}
+    {#if view.lastRun && view.lastRun.nameClash.length > 0}
+      <div class="notice" data-testid="sync-name-clash">
+        <p>
+          {view.lastRun.nameClash.length === 1
+            ? 'One note has the same name as a folder, which the server can’t store, so it stays on this device only:'
+            : `${view.lastRun.nameClash.length} notes have the same name as a folder, which the server can’t store, so they stay on this device only:`}
+        </p>
+        <ul>
+          {#each view.lastRun.nameClash.slice(0, 20) as p (p)}<li><code>{p}</code></li>{/each}
+        </ul>
+        {#if view.lastRun.nameClash.length > 20}
+          <p>…and {view.lastRun.nameClash.length - 20} more.</p>
+        {/if}
+        <p>Rename a note to sync it.</p>
+      </div>
+    {/if}
 
     <div class="row">
       <button

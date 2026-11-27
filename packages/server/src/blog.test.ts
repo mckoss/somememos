@@ -8,12 +8,40 @@ import { createPgStores } from '@somememos/pg-store';
 import { describe, expect, it } from 'vitest';
 import { PublicLimiter } from './blog-limit.js';
 import { blogSlugProblem } from './blog-settings.js';
-import { postKey, postSlug, type PublicBlogs } from './blog.js';
+import { postHeadline, postKey, postSlug, type PublicBlogs } from './blog.js';
 import { OWNER_ID } from './auth.js';
 import { BLOG_ROLES, blogClient, brainWithBlog, save } from './blog.testing.js';
 import { type TestServer, createBrain, describePg, testServer } from './test-env.testing.js';
 
 const blogsOf = (server: TestServer): PublicBlogs => server.app.blogs as PublicBlogs;
+
+describe('post headlines', () => {
+  it('never take a title or summary from an HTML comment', () => {
+    expect(
+      postHeadline(
+        [
+          '<!--',
+          '# A secret working title',
+          'notes to self',
+          '-->',
+          '',
+          '# Walnut <!-- rename? --> harvest',
+          '',
+          '<!-- draft: check the dates -->',
+          '',
+          'Gathering walnuts <!-- with whom? --> in the rain.',
+          '',
+          'Second paragraph.',
+        ].join('\n'),
+        'walnut',
+      ),
+    ).toEqual({ title: 'Walnut harvest', description: 'Gathering walnuts in the rain.' });
+    expect(postHeadline('Code `<!-- kept -->` stays.\n', 'code')).toEqual({
+      title: 'Code',
+      description: 'Code <!-- kept --> stays.',
+    });
+  });
+});
 
 describe('post addresses', () => {
   it('derives a stable key from the path and its date, never the text', () => {

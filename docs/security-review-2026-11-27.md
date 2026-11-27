@@ -16,14 +16,14 @@ Method: the route table was enumerated and every route was called without a toke
 |---|---|---|---|
 | 1 | Stripping inline markdown from a heading took quadratic time: one note freezes the server | High | Fixed (`e0e3d76`) |
 | 2 | Both markdown renderers took quadratic time on many unclosed `[[` | Medium | Fixed (`2e8e9a0`) |
-| 3 | Failed-login limits can lock the owner out of the API | Medium | Left for the owner |
+| 3 | Failed-login limits can lock the owner out of the API | Medium | Fixed: failures are throttled, a valid token always passes |
 | 4 | The app had no content security policy and could be framed | Low | Fixed (`0865d33`) |
 | 5 | The container ran the server as root | Low | Fixed (`60b4fa9`) |
 | 6 | A file or folder name over 255 bytes failed with a 500, logged the note's path, and jammed a device's sync | Low | Fixed (`7919aac`) |
-| 7 | A note sharing its name with a folder failed with a 500 and logged the note's path | Low | Fixed for save and rename (`55f7884`); sync left for the owner |
-| 8 | HTML comments in a published post appear as visible text on the public blog | Low | Left for the owner |
+| 7 | A note sharing its name with a folder failed with a 500 and logged the note's path | Low | Fixed for save and rename (`55f7884`) and for sync (`name-clash` refusal) |
+| 8 | HTML comments in a published post appear as visible text on the public blog | Low | Fixed: dropped from the page, title and summary |
 | 9 | Notes can load images from any https address | Low | Left for the owner |
-| 10 | The CLI sends its token to an `http://` server | Low | Left for the owner |
+| 10 | The CLI sends its token to an `http://` server | Low | Fixed: refused unless local or `--allow-insecure` |
 | 11 | Brain ids and blog slugs are one namespace across users | Low | Accepted (single-user server) |
 
 ### 1. Quadratic heading stripping (high, fixed)
@@ -38,11 +38,13 @@ Fix: the five rules are now linear scans with exactly the old output; a randomiz
 
 The app's note view (`apps/web/src/lib/ui/markdown.ts`) and the public blog's renderer (`apps/web/src/lib/server/blog/render.ts`) searched the whole rest of the text for `]]` at every `[[`. Demonstration: a 400 KB body of `[a][` repeated took 78 to 80 seconds to render in each. In the app this freezes the owner's tab when they open a note synced from a compromised device; on the server it blocks the process the first time anyone requests such a published post (rendering is then cached per commit). Fix: the scan stops at the first bracket or line break, which cannot be inside a link anyway, so the same links render. Tests in both renderers' test files.
 
-### 3. Failed-login limits as a lockout lever (medium, left for the owner)
+### 3. Failed-login limits as a lockout lever (medium, fixed)
 
 `FailureLimiter` (`packages/server/src/auth.ts`) refuses every request with 429 once 200 failed attempts were made by all addresses together in a 10-minute window, or 20 by one address, "even with a valid token, so guessing gains nothing". Demonstration (by reading; not run as a test): an anonymous client sends `GET /api/brains` with `Authorization: Bearer x` 200 times from any addresses; for the rest of the window every request, including the owner's with the right token, gets 429. Twenty such requests a minute keep the API closed indefinitely. If `ADDRESS_HEADER` is not set (docs/deploy.md asks for it), every client shares the proxy's address and 20 failures suffice.
 
 This trades availability for brute-force resistance, a choice the code makes deliberately, so it is not changed here. Tokens are at least 24 characters and the documented way to make one gives about 190 bits, so guessing is already hopeless; the limiter is defence in depth. Options, in order of preference: let a request with a valid token through when only the total limit is reached (per-address limits still cap each address's guesses); or count the total limit only toward addresses that have failed before; or raise the total limit substantially. Whatever is chosen, keep `ADDRESS_HEADER=X-Forwarded-For` and `XFF_DEPTH=1` in the deployment.
+
+**Fixed afterwards.** The limiter no longer refuses; it throttles. An address over its own limit (20 failures in the window), or any address that has failed in the window once the total (200) is reached, has its requests spaced one second apart *before* the token is compared, and its failures answer 429 instead of 401. Every admitted request is compared in constant time, so a valid token always passes, and an address with no failures is never slowed by anyone else's. Guessing stays bounded: a throttled address learns at most one result per second however many connections it opens, and abandoning a slow answer reveals nothing because the comparison has not yet happened; past the total, each fresh address gets one guess before it is throttled too. The only outright refusal left is for an address whose own queue is over 30 seconds long. Without `ADDRESS_HEADER`, everyone shares the proxy's address, so a flooding attacker slows the owner to one request a second (and can fill that queue) rather than locking them out completely; the header remains required. Tests: `packages/server/src/config.test.ts` and `http.test.ts`.
 
 ### 4. No content security policy or frame protection on the app (low, fixed)
 
@@ -60,21 +62,27 @@ The Dockerfile ran `node` as root so it could write to a root-owned volume. It n
 
 The path rule allowed any segment length within the 1024-byte path limit. Demonstration: `PUT /api/brains/{b}/notes/memos/<300 × "x">.md` answered 500, and the server log line carried the note's full file system path; a sync carrying such a note failed as a whole, every time, so that device could never sync again. `syncPathProblem` (core, shared by server and clients) now refuses a segment over 255 UTF-8 bytes: the server answers 400 and devices leave the note out of sync, as they do for other paths sync cannot carry.
 
-### 7. A note and a folder with the same name (low, partly fixed)
+### 7. A note and a folder with the same name (low, fixed)
 
 Saving `memos/a.md/b.md` next to an existing `memos/a.md` (or `memos/a.md` where a folder `memos/a.md/` exists) answered 500 and logged the full path. The content store now refuses it as `exists` (409). **Left for the owner:** a sync that carries such a note still fails as a whole (now with 409 instead of 500), so a device holding both a note and a "folder" of the same name stays stuck. Answering `refused` for just that edit is the natural fix, but the client then keeps a conflict copy beside the note, which clashes again, and would create a new copy on every sync. It needs a protocol decision (for example a refusal code the client does not copy, or conflict copies placed outside the clashing folder).
 
-### 8. HTML comments in published posts (low, left for the owner)
+**Fixed afterwards.** The server judges such an edit (a new note, or a rename's target, that clashes with a file or folder on the server or with another new path in the same request) as `refused` with code `name-clash`, so the rest of the sync goes through. A client that gets that code makes no conflict copy: it keeps the note where it is, records the path in its sync state, leaves it out of later requests while a note is at that path, and reports it like a note too large to sync (`runSync`'s `nameClash`, the CLI's `sync` warning and JSON, the app's sync details). Renaming the note clears it. A server note that would land inside such a kept note's name is skipped on that copy (a copy that keeps files could not store it); it arrives with a sync from the start once the clash is renamed. Tested over several syncs in `packages/server/src/sync.test.ts` and through the CLI in `packages/cli/src/remote/remote.test.ts`.
+
+### 8. HTML comments in published posts (low, fixed)
 
 The public renderer runs with raw HTML off, so `<!-- remark -->` in a published post is shown as the literal text `<!-- remark -->`, while the app (which allows sanitized HTML) shows nothing. An author who keeps private remarks in comments, a common markdown habit, would publish them. Options: drop HTML comments (and Obsidian-style `%% … %%` comments, if supported) from blog bodies before rendering, or document that everything in a published post is public.
+
+**Fixed afterwards.** The public renderer now reads HTML comments as CommonMark does and drops them: a block comment (a line starting `<!--`, through the line holding `-->`, blank lines included) and inline comments within a paragraph; text in code spans and code blocks is untouched, and an unclosed inline `<!--` stays visible text, as in the app. The post's title and summary (page title, feed, meta description) leave comments out too, including a heading inside a multi-line comment. The app's preview already showed nothing for comments (it passes them to the browser as comments), so both now show the same visible text. Obsidian-style `%% … %%` comments are not handled. Tests: `apps/web/src/lib/server/blog/render.test.ts`, `packages/server/src/blog.test.ts`, `packages/core/src/markdown/inline.test.ts`.
 
 ### 9. Images from any https address (low, left for the owner)
 
 Notes may embed `<img src="https://…">` or `![](https://…)`, and the app's CSP allows `img-src https:` to keep that working. A note synced from a compromised device can therefore make the owner's browser contact a chosen host when the note is opened (revealing the owner's address and when they read it). Restricting `img-src` to `'self' data: blob:` closes this, at the cost of remote images in notes.
 
-### 10. The CLI accepts `http://` servers (low, left for the owner)
+### 10. The CLI accepts `http://` servers (low, fixed)
 
 `packages/cli/src/remote/config.ts` accepts `http:` server URLs, so the bearer token can be sent in clear over a network. Suggest refusing `http:` except for `localhost`, `127.0.0.1` and `::1`. (Left alone: another change to the CLI is in progress.)
+
+**Fixed afterwards.** Every remote client the CLI makes (connect, clone, sync, working folders, environment-only mode, history, config) refuses an `http://` server before sending anything, unless its host is `localhost`, `127.0.0.1` or `[::1]`, with a one-line error naming the override: `--allow-insecure` on `connect`, `clone` and `sync`, or `SOMEMEMOS_ALLOW_INSECURE=1`. The override is not recorded, so it stays a choice made each time. Redirects were already refused, so an `https://` server cannot downgrade a request. Tests: `packages/cli/src/remote/client.test.ts`, `packages/cli/src/commands/commands.test.ts`.
 
 ### 11. Shared namespaces (low, accepted)
 
@@ -102,9 +110,9 @@ On a future multi-user server, `POST /api/brains` answers `brain-exists` for ano
 
 ## What the owner must decide
 
-1. The lockout trade-off in finding 3.
-2. How sync should treat a note and folder with the same name (finding 7).
-3. Whether HTML comments in published posts should be dropped (finding 8).
+1. ~~The lockout trade-off in finding 3.~~ Settled: throttle failures, never refuse a valid token.
+2. ~~How sync should treat a note and folder with the same name (finding 7).~~ Settled: a `name-clash` refusal the client does not copy.
+3. ~~Whether HTML comments in published posts should be dropped (finding 8).~~ Settled: dropped.
 4. Whether remote images in notes are worth the tracking risk (finding 9).
-5. Whether the CLI should refuse plain `http://` servers (finding 10).
+5. ~~Whether the CLI should refuse plain `http://` servers (finding 10).~~ Settled: refused, with an explicit override.
 6. A contact line in `SECURITY.md`, and HSTS once the domain is settled.

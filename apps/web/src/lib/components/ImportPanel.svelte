@@ -3,6 +3,7 @@
   import Icon from './Icon.svelte';
   import RolesEditor, { rolesToText, type RolesText } from './RolesEditor.svelte';
   import { brain, changed, host } from '#lib/ui/brain.svelte.ts';
+  import { readZip } from '#lib/brain/zip.ts';
   import { errorMessage } from '#lib/ui/errors.ts';
   import { plural } from '#lib/ui/format.ts';
   import {
@@ -72,6 +73,37 @@
     phase = 'review';
   }
 
+  // A zip made by "Export everything": its notes go through the same review
+  // as a folder, and its events.jsonl is imported after them.
+  let zipLog = $state<string | null>(null);
+  let logAdded = $state<number | null>(null);
+  let zipInput = $state<HTMLInputElement>();
+
+  async function chooseZip(file: File) {
+    error = null;
+    try {
+      const entries = await readZip(new Uint8Array(await file.arrayBuffer()));
+      const log = entries.find((e) => e.name === 'events.jsonl');
+      const decoder = new TextDecoder('utf-8', { fatal: true });
+      zipLog = log ? decoder.decode(log.data) : null;
+      choose(
+        entries
+          .filter((e) => e.name !== 'events.jsonl')
+          .map((e) => ({
+            path: e.name,
+            file: new File([e.data as Uint8Array<ArrayBuffer>], e.name.split('/').pop() ?? e.name, {
+              lastModified: e.modified.getTime(),
+            }),
+          })),
+      );
+    } catch (err) {
+      zipLog = null;
+      error = errorMessage(err);
+    } finally {
+      if (zipInput) zipInput.value = '';
+    }
+  }
+
   async function pickWithApi() {
     const files = await filesFromDirectoryPicker();
     if (files) choose(files);
@@ -128,6 +160,13 @@
                 };
         },
       });
+      logAdded = null;
+      if (zipLog !== null) {
+        progress = { done: 0, total: 0, stage: 'Importing the event log…' };
+        const added = await h.engine.importLog(zipLog);
+        logAdded = added.log.appended + added.changes.appended;
+        zipLog = null;
+      }
       result = { ...r, excluded: counts.excluded };
       phase = 'done';
       await changed();
@@ -140,6 +179,8 @@
   function reset() {
     picked = [];
     result = null;
+    zipLog = null;
+    logAdded = null;
     phase = 'choose';
     if (input) input.value = '';
   }
@@ -187,6 +228,20 @@
             if (list) choose(filesFromInput(list));
           }}
         />
+        <label class="button">
+          Import a .zip export
+          <input
+            bind:this={zipInput}
+            class="visually-hidden"
+            type="file"
+            accept=".zip,application/zip"
+            data-testid="import-zip"
+            onchange={(e) => {
+              const f = e.currentTarget.files?.[0];
+              if (f) void chooseZip(f);
+            }}
+          />
+        </label>
       </div>
       <p class="hint">
         Files are read on this device and nothing is uploaded. Next, you can mark private folders as
@@ -232,6 +287,7 @@
         <strong>Imported {plural(result.imported, 'note')}.</strong>
         {#if result.skipped}{plural(result.skipped, 'file')} skipped.{/if}
         {#if result.excluded}{result.excluded} excluded files were never read.{/if}
+        {#if logAdded !== null}Added {plural(logAdded, 'record')} from the event log.{/if}
       </p>
       <p class="hint">
         A first import is the starting point: it adds no activity. Notes gain activity as you read,

@@ -27,6 +27,8 @@ export interface RemoteNoteVersion {
   readonly commit: string;
   readonly hash: string | null;
   readonly renamedTo: string | null;
+  /** The older path, on the version that renamed the note to this one (listed once). */
+  readonly renamedFrom?: string | null;
   readonly time: number;
   readonly client: string;
   readonly message: string;
@@ -193,6 +195,7 @@ export function createRemoteEngine(client: RemoteClient): RemoteEngine {
     prepareSync: async () => unavailable('sync', 'a working folder holds no copy to sync'),
     applySync: async () => unavailable('sync', 'a working folder holds no copy to sync'),
     resetSync: async () => unavailable('sync', 'a working folder holds no copy to sync'),
+    conflictOriginals: async () => ({}),
 
     history: (path, limit) => client.brain('GET', note(path, '/history'), { query: { limit } }),
     restore: (path, commit, options = {}) =>

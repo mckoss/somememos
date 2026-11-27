@@ -14,6 +14,7 @@ import { engine as coreEngine, markdown, storage, sync, timescore } from '@somem
 import type { BrainContext } from './brains.js';
 import { CLIENT_ID } from './brains.js';
 import { HttpError } from './errors.js';
+import { folderClash } from './git-content.js';
 
 type Edit = sync.SyncEdit;
 
@@ -222,12 +223,24 @@ async function current(
   return { text, hash: text === null ? null : await storage.contentHash(text) };
 }
 
-/** Whether `edit` applies, is a duplicate, conflicts or is refused, against the notes as they are. */
+/** True when notes at `a` and `b` would make one of them a folder of the other. */
+const nested = (a: string, b: string): boolean => a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
+
+/**
+ * Whether `edit` applies, is a duplicate, conflicts or is refused, against
+ * the notes as they are. `arriving` holds the new paths of the request's
+ * edits applied so far: a new note may not share its name with a folder on
+ * the server or among them (finding 7 of the 2026-11-27 security review),
+ * and is refused with `sync.NAME_CLASH` instead of failing the whole sync.
+ */
 async function judge(
   ctx: BrainContext,
   edit: Edit,
   classifier: markdown.RoleClassifier,
+  arriving: Set<string>,
 ): Promise<Judged> {
+  const clashes = (path: string): boolean =>
+    folderClash(ctx.repo.dir, path) || [...arriving].some((p) => nested(p, path));
   const here = await current(ctx, edit.path);
   const conflict = (status: 'conflict' | 'refused' = 'conflict', code?: string): Judged => ({
     edit,
@@ -249,6 +262,8 @@ async function judge(
     if (here.hash !== null && classifier.classify(edit.path)?.role === 'source') {
       return conflict('refused', 'source-immutable');
     }
+    if (here.hash === null && clashes(edit.path)) return conflict('refused', sync.NAME_CLASH);
+    arriving.add(edit.path);
     return {
       edit,
       notes: [{ path: edit.path, hash, text }],
@@ -271,6 +286,8 @@ async function judge(
     return { edit, notes: [], result: { id: edit.id, status: 'duplicate', hash: there.hash } };
   }
   if (here.hash !== edit.baseHash || there.hash !== null) return conflict();
+  if (clashes(to)) return conflict('refused', sync.NAME_CLASH);
+  arriving.add(to);
   return {
     edit,
     notes: [{ path: edit.path, renamedTo: to }],
@@ -311,7 +328,8 @@ export async function runSync(
 
   // --- Edits: judge all, then store the applied ones, one commit per change set.
   const judged: Judged[] = [];
-  for (const edit of request.edits) judged.push(await judge(ctx, edit, classifier));
+  const arriving = new Set<string>();
+  for (const edit of request.edits) judged.push(await judge(ctx, edit, classifier, arriving));
   const applied = judged.filter((j) => j.result.status === 'applied');
 
   // Each applied edit goes with the latest change record that names one of its paths.
