@@ -104,17 +104,17 @@ Done when: Claude Code and Hermes sessions on the main machine orient with `some
 
 Goal: the server's filesystem becomes the home of the vault, and agents on any machine use it with only the CLI and a credential.
 
-- [ ] **3.0 Design review.** Settle version history (how long it is kept), single-user authentication, the request API, and how the vault moves from git to the server. Update PLAN.md section 7 before coding.
-- [ ] **3.1 Server storage.** Notes on the server's filesystem, a version store keyed by content hash with timestamps, the event log, and one mutation counter that numbers every change.
+- [ ] **3.0 Design review.** Settle single-user authentication, the request API, how commits are attributed and described, and how the vault's existing repository becomes the server's. Update PLAN.md section 7 before coding.
+- [ ] **3.1 Server storage.** One git repository per brain on the server's filesystem, the event log beside it, and one mutation counter that numbers every change. Writes to a brain are serialized, and each accepted change is exactly one git commit. Confirm how the server runs git (the `git` binary in the deploy image, or a library).
 - [ ] **3.2 Query API.** `search`, the activation lists and `status` as server routes that run the same core code as local mode.
 - [ ] **3.3 Read API and working folder.** `read` fetches a note into the working folder, records its path and hash in a manifest, and logs the read on the server. A repeated read refetches when the server is newer and the local file is untouched, and warns when both have changed.
-- [ ] **3.4 Commit API.** `commit` sends changed and new files with their base hashes. The server stores a new version and logs `edit` and `mention` events, or refuses a stale base and returns the current version, which the CLI saves beside the file. Deletes and renames are explicit.
+- [ ] **3.4 Commit API.** `commit` sends changed and new files with their base hashes. The server compares each base with the note's current version, then writes the files, makes a git commit and logs `edit` and `mention` events, or refuses a stale base and returns the current version, which the CLI saves beside the file. Deletes and renames are explicit.
 - [ ] **3.5 Forgotten commits.** Every remote command compares the working folder with its manifest and prints a reminder naming edited, uncommitted files. `status` lists them.
 - [ ] **3.6 Tests.** Two clients editing the same note; a commit retried after a dropped connection; a stale working folder; excluded paths refused by every route.
-- [ ] **3.7 Version history commands.** List a note's versions and restore one.
+- [ ] **3.7 Version history commands.** List a note's versions and restore one, served from the brain's git history. Restoring is a new commit, never a rewrite of history.
 - [ ] **3.8 Deploy.** Railway with `adapter-node`, a volume for the notes and databases, backups, and a health endpoint that reports the version.
 - [ ] **3.9 Cloud sessions.** Add the CLI install and credential to the cloud environment's setup (Mike changes the environment; give him the exact lines).
-- [ ] **3.10 Move the vault.** Upload the vault and its event log to the server, and update the vault's agent instructions so git is no longer how it travels.
+- [ ] **3.10 Move the vault.** Load the vault's existing git repository, with its history, as the brain's repository on the server, along with the event log. Update the vault's agent instructions so agents use the CLI and no longer clone the vault.
 
 ## M4 — PWA client (outline)
 

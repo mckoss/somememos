@@ -8,7 +8,7 @@ Read [PLAN.md](PLAN.md) before starting work. It holds the design, the decisions
 - **The event log is the source of truth for scores.** It is append-only, and every event has a unique id. Scores and the keyword index are derived data that must always be rebuildable. Search query text is not logged.
 - **Search results and activation lists are not events.** Reads through somememos (`somememos read`) are. Events are dated when the interaction happens, and future-dated events are rejected.
 - **Scoring is set by experiment.** Don't pick a weight or ranking parameter by intuition; measure it with `somememos eval` (PLAN.md section 5).
-- **No git inside.** The server's filesystem holds the notes and their version history. Git is used only by the one-time `import-git` command.
+- **Git on the server only.** Each brain is one git repository on the server, used as the version store. No git interface is exposed; clients use somememos's own protocol. Local mode uses git only for the one-time `import-git` command.
 - **Scores are stored per event kind, unweighted.** Weights are applied when scores are read.
 - **Sync sends events, never scores.** The receiver ignores an event id it already has. Never merge two score tables. A change that arrives through sync is not a new event.
 - **Never change the time epoch** (Unix seconds); event times depend on it. Changing a half-life requires rebuilding scores from the event log.
