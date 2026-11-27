@@ -39,7 +39,7 @@ function withOfflineShell(inner: Adapter): Adapter {
 }
 
 /**
- * The app's content security policy. SvelteKit adds the hashes of the inline
+ * The app's content security policy (`csp` below). SvelteKit adds the hashes of the inline
  * scripts it writes into each page. The brain worker and SQLite's
  * WebAssembly need `worker-src 'self'` and `'wasm-unsafe-eval'`; images in
  * notes may come from any https address, as they always could. Notes are
@@ -48,27 +48,28 @@ function withOfflineShell(inner: Adapter): Adapter {
  * it renders; hooks.server.ts adds `X-Frame-Options` as well. The public
  * blog sets its own, stricter policy (#lib/server/blog/pages.ts).
  */
-export const APP_CSP = {
-  'default-src': ['self'],
-  'script-src': ['self', 'wasm-unsafe-eval'],
-  'style-src': ['self', 'unsafe-inline'],
-  'img-src': ['self', 'data:', 'blob:', 'https:'],
-  'font-src': ['self'],
-  'connect-src': ['self'],
-  'worker-src': ['self'],
-  'manifest-src': ['self'],
-  'object-src': ['none'],
-  'base-uri': ['self'],
-  'form-action': ['self'],
-  'frame-ancestors': ['none'],
-} as const;
-
 export default defineConfig({
   // SvelteKit 3 takes its configuration here; there is no svelte.config.js.
   plugins: [
     sveltekit({
       adapter: withOfflineShell(adapterNode()),
-      csp: { mode: 'hash', directives: APP_CSP },
+      csp: {
+        mode: 'hash',
+        directives: {
+          'default-src': ['self'],
+          'script-src': ['self', 'wasm-unsafe-eval'],
+          'style-src': ['self', 'unsafe-inline'],
+          'img-src': ['self', 'data:', 'blob:', 'https:'],
+          'font-src': ['self'],
+          'connect-src': ['self'],
+          'worker-src': ['self'],
+          'manifest-src': ['self'],
+          'object-src': ['none'],
+          'base-uri': ['self'],
+          'form-action': ['self'],
+          'frame-ancestors': ['none'],
+        },
+      },
     }),
   ],
   define,
