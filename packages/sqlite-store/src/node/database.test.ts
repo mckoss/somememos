@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { typeStrippingFlags } from './child.testing.js';
 import { close, open } from './database.js';
 import type { Database } from './database.js';
 
@@ -422,21 +423,20 @@ describe('the experimental warning', () => {
     expect(quiet.stderr).toBe('');
   });
 
-  it.skipIf(!process.features.typescript)(
-    'the wrapper loads node:sqlite without printing the warning, and keeps other warnings',
-    () => {
-      const wrapper = fileURLToPath(new URL('./database.ts', import.meta.url));
-      const code = `
+  it('the wrapper loads node:sqlite without printing the warning, and keeps other warnings', () => {
+    const wrapper = fileURLToPath(new URL('./database.ts', import.meta.url));
+    const code = `
         const { open } = await import(${JSON.stringify(wrapper)});
         const db = open(':memory:');
         console.log(db.get('select 1 as one').one);
         process.emitWarning('still shown', 'ExperimentalWarning');
       `;
-      const result = spawnSync(NODE, ['--input-type=module', '-e', code], { encoding: 'utf8' });
-      expect(result.status).toBe(0);
-      expect(result.stdout.trim()).toBe('1');
-      expect(result.stderr).not.toMatch(/SQLite/);
-      expect(result.stderr).toMatch(/still shown/);
-    },
-  );
+    const result = spawnSync(NODE, [...typeStrippingFlags(), '--input-type=module', '-e', code], {
+      encoding: 'utf8',
+    });
+    expect(result.status).toBe(0);
+    expect(result.stdout.trim()).toBe('1');
+    expect(result.stderr).not.toMatch(/SQLite/);
+    expect(result.stderr).toMatch(/still shown/);
+  });
 });

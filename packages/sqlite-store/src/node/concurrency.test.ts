@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { storage } from '@somememos/core';
 import { expectScoresClose } from '@somememos/core/testing/storage';
 import { afterEach, beforeEach, expect, it } from 'vitest';
+import { sourceChildFlags } from './child.testing.js';
 import { openSqliteFiles } from './files.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -18,24 +19,6 @@ const storeUrl = pathToFileURL(join(here, 'index.ts')).href;
 
 const openBrainStores = (dir: string) =>
   openSqliteFiles({ eventsPath: join(dir, 'events.sqlite'), indexPath: join(dir, 'index.sqlite') });
-
-// Lets a plain `node` child load this package's TypeScript source: imports
-// written as `./x.js` resolve to `./x.ts`.
-const HOOKS = `
-import { registerHooks } from 'node:module';
-registerHooks({
-  resolve(specifier, context, next) {
-    try {
-      return next(specifier, context);
-    } catch (error) {
-      if (error?.code === 'ERR_MODULE_NOT_FOUND' && specifier.startsWith('.') && specifier.endsWith('.js')) {
-        return next(specifier.slice(0, -3) + '.ts', context);
-      }
-      throw error;
-    }
-  },
-});
-`;
 
 const WORKER = `
 const [brainDir, worker, rounds, perRound] = process.argv.slice(1);
@@ -72,17 +55,7 @@ function runWorker(
   return new Promise((resolve, reject) => {
     const child = spawn(
       process.execPath,
-      [
-        '--conditions=source',
-        '--experimental-transform-types',
-        '--disable-warning=ExperimentalWarning',
-        `--import=data:text/javascript,${encodeURIComponent(HOOKS)}`,
-        '--input-type=module',
-        '-e',
-        WORKER,
-        '--',
-        ...args,
-      ],
+      [...sourceChildFlags(), '--input-type=module', '-e', WORKER, '--', ...args],
       { cwd: packageRoot, stdio: ['ignore', 'pipe', 'pipe'] },
     );
     let stdout = '';

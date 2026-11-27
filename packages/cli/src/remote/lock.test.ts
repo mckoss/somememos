@@ -7,6 +7,7 @@ import { existsSync, readFileSync, readdirSync, utimesSync, writeFileSync } from
 import { hostname } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { sourceChildFlags } from '@somememos/sqlite-store/testing/node';
 import { afterEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../brain/testing.js';
 import { LockTimeoutError, withFileLock } from './lock.js';
@@ -15,24 +16,6 @@ import { openWorkFolder } from './workfolder.js';
 const here = dirname(fileURLToPath(import.meta.url));
 const workfolderUrl = pathToFileURL(join(here, 'workfolder.ts')).href;
 const TARGET = { server: 'https://brain.example.test', brainId: 'garden' };
-
-// Lets a plain `node` child load this package's TypeScript source (as in
-// ../indexer/concurrency.test.ts): `./x.js` imports resolve to `./x.ts`.
-const HOOKS = `
-import { registerHooks } from 'node:module';
-registerHooks({
-  resolve(specifier, context, next) {
-    try {
-      return next(specifier, context);
-    } catch (error) {
-      if (error?.code === 'ERR_MODULE_NOT_FOUND' && specifier.startsWith('.') && specifier.endsWith('.js')) {
-        return next(specifier.slice(0, -3) + '.ts', context);
-      }
-      throw error;
-    }
-  },
-});
-`;
 
 // Waits for the barrier file, then makes `count` manifest updates, each adding one entry.
 const WORKER = `
@@ -49,14 +32,7 @@ for (let i = 0; i < Number(count); i++) {
 }
 `;
 
-const NODE_ARGS = [
-  '--conditions=source',
-  '--experimental-transform-types',
-  '--disable-warning=ExperimentalWarning',
-  `--import=data:text/javascript,${encodeURIComponent(HOOKS)}`,
-  '--input-type=module',
-  '-e',
-];
+const NODE_ARGS = [...sourceChildFlags(), '--input-type=module', '-e'];
 
 function worker(args: string[]): Promise<{ code: number | null; stderr: string }> {
   return new Promise((resolve, reject) => {
