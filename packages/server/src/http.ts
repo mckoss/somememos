@@ -24,6 +24,11 @@
 //   GET    /api/brains/{b}/dangling                              → { dangling: DanglingCount[] }
 //   GET    /api/brains/{b}/diary?date=                           → DiaryPath
 //   POST   /api/brains/{b}/diary  { date? }                      → DiaryEntry
+//   GET    /api/brains/{b}/blog                                  → BlogSettingsView
+//   PUT    /api/brains/{b}/blog   BlogSettings                   → BlogSettingsView (409 slug-taken)
+//
+// The public blog pages themselves are not here: `App.blogs` (./blog.ts)
+// serves their data and apps/web renders them under /blog.
 //
 // A request may name its client with `X-Somememos-Client: <client id>`: the
 // server's engine records events and change records under it, and git
@@ -33,10 +38,12 @@
 // Cross-origin browser requests are refused: there are no CORS headers, and
 // a request whose Origin is another host gets 403.
 
-import { VERSION, engine as coreEngine, markdown, sync } from '@somememos/core';
+import { VERSION, engine as coreEngine, markdown, storage, sync } from '@somememos/core';
 import { ensureMigrated, MIGRATIONS } from '@somememos/pg-store';
 import pg from 'pg';
 import { FailureLimiter, tokenAuthorizer, type Authorizer } from './auth.js';
+import { PublicBlogs } from './blog.js';
+import { parseBlogSettings, readBlogSettings, writeBlogSettings } from './blog-settings.js';
 import { BrainError, BrainService, CLIENT_ID, type BrainContext } from './brains.js';
 import { loadServerConfig, type ServerConfig } from './config.js';
 import { ENGINE_ERROR_STATUS, HttpError } from './errors.js';
@@ -54,6 +61,8 @@ export interface App {
   start(): Promise<void>;
   close(): Promise<void>;
   readonly service: BrainService | null;
+  /** The public blogs (./blog.ts), when there is a database. */
+  readonly blogs: PublicBlogs | null;
 }
 
 export interface AppOptions {
@@ -222,6 +231,9 @@ export function createApp(options: AppOptions): App {
             : {}),
         })
       : null;
+  const blogs = service
+    ? new PublicBlogs({ pool: service.pool, repoDir: (id) => service.repoDir(id) })
+    : null;
   const authorizer = options.authorizer ?? (config ? tokenAuthorizer(config.tokens) : null);
   const limiter = options.limiter ?? new FailureLimiter();
   const pageSize = config?.pageSize ?? 2000;
@@ -333,6 +345,16 @@ export function createApp(options: AppOptions): App {
           return runSync(ctx, parseSyncRequest(body, classifier, ctx.now), pageSize);
         }),
       );
+    }
+
+    if (action === 'blog' && tail.length === 0) {
+      // The brain's blog settings (./blog-settings.ts); the owner only.
+      allow('GET', 'PUT');
+      await svc.get(owner, brainId);
+      if (method === 'GET') return json(200, await readBlogSettings(svc.pool, brainId));
+      const settings = parseBlogSettings(await readJson(request, SMALL_BODY));
+      const now = (options.now ?? storage.unixNow)();
+      return json(200, await writeBlogSettings(svc.pool, brainId, settings, now));
     }
 
     if (action === 'notes' && tail.length > 0) {
@@ -597,6 +619,7 @@ export function createApp(options: AppOptions): App {
   return {
     handle,
     service,
+    blogs,
     async start() {
       if (problems) {
         log.error(

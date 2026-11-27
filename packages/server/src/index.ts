@@ -38,6 +38,27 @@ export {
   type StoredConfig,
   parseStoredConfig,
 } from './brains.js';
+export {
+  type BlogSnapshot,
+  MAX_POST_BYTES,
+  type PublicBlog,
+  type PublicBlogSettings,
+  PublicBlogs,
+  type PublicBlogsOptions,
+  type PublicPost,
+  postKey,
+  postSlug,
+} from './blog.js';
+export { PublicLimiter, type PublicLimiterOptions } from './blog-limit.js';
+export {
+  BLOG_SLUG,
+  type BlogSettings,
+  type BlogSettingsView,
+  DEFAULT_BLOG_SETTINGS,
+  RESERVED_BLOG_SLUGS,
+  blogSlugProblem,
+  parseBlogSettings,
+} from './blog-settings.js';
 export { type ConfigResult, type ServerConfig, loadServerConfig } from './config.js';
 export { ENGINE_ERROR_STATUS, HttpError } from './errors.js';
 export {
