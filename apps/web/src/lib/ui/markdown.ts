@@ -43,6 +43,21 @@ export function headingId(text: string): string {
   return `h-${slugify(text, 60)}`;
 }
 
+/**
+ * Where the `]]` closing a `[[` whose inside starts at `from` is, or -1. The
+ * inside has no bracket or line break, so the scan stops at the first one:
+ * searching the rest of the text for `]]` instead would make a note full of
+ * `[[` take time quadratic in its length.
+ */
+function wikiLinkEnd(src: string, from: number): number {
+  for (let i = from; i < src.length; i++) {
+    const c = src.charCodeAt(i);
+    if (c === 0x5d /* ] */) return src.charCodeAt(i + 1) === 0x5d ? i : -1;
+    if (c === 0x5b /* [ */ || c === 0x0a /* \n */) return -1;
+  }
+  return -1;
+}
+
 function wikiLinkRule(options: RenderOptions) {
   return (state: StateInline, silent: boolean): boolean => {
     const src = state.src;
@@ -50,10 +65,9 @@ function wikiLinkRule(options: RenderOptions) {
     const embed = src.charCodeAt(pos) === 0x21; /* ! */
     if (embed) pos += 1;
     if (src.charCodeAt(pos) !== 0x5b || src.charCodeAt(pos + 1) !== 0x5b) return false;
-    const close = src.indexOf(']]', pos + 2);
+    const close = wikiLinkEnd(src, pos + 2);
     if (close < 0) return false;
     const inner = src.slice(pos + 2, close);
-    if (/[[\]\n]/.test(inner)) return false;
     const parts = md.splitWikiLink(inner);
     if (!silent) {
       const label =

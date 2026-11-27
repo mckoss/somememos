@@ -187,3 +187,14 @@ describe('the public renderer', () => {
     expect(escapeXml('\ud800 lone')).toBe(' lone');
   });
 });
+
+describe('hostile posts', () => {
+  it('renders many unclosed [[ in linear time', () => {
+    // An unclosed `[[` used to search the rest of the post for `]]`.
+    for (const body of ['[a]['.repeat(100_000), '[['.repeat(200_000)]) {
+      const started = performance.now();
+      render(body);
+      expect(performance.now() - started).toBeLessThan(3000);
+    }
+  });
+});
