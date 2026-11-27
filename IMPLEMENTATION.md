@@ -17,17 +17,17 @@ Goal: an empty but working workspace, with the TimeScore math proven correct.
 
 - [x] **0.1 Workspace scaffold.** Root `package.json` (private, version `0.1.0`, npm workspaces), `tsconfig.base.json`, ESLint and Prettier, `.gitignore`, Node version pinned in `engines` and `.nvmrc`.
 - [x] **0.1a Privacy guards.** `.gitignore` covers `.somememos/`, `*.sqlite` and `events.jsonl`. A CI step fails if any such file, or any file over a small size limit outside known source folders, is committed.
-- [ ] **0.1b Synthetic brain.** A seeded generator script that builds an invented brain (memos, dated entries, sources, links, a git history with renames) for tests, examples and documentation.
+- [x] **0.1b Synthetic brain.** A seeded generator script that builds an invented brain (memos, dated entries, sources, links, a git history with renames) for tests, examples and documentation.
 - [x] **0.2 `packages/core` skeleton.** Builds with `tsc` to ESM. Exports a `VERSION` read from the root `package.json` at build time.
-- [ ] **0.3 TimeScore functions.** Read the blog post first (PLAN.md section 3). Implement `eventScore`, `combine`, `addEvent`, `scoreAt`, the half-life table, and `weightedTotal(scoresByKind, weights)`.
+- [x] **0.3 TimeScore functions.** Read the blog post first (PLAN.md section 3). Implement `eventScore`, `combine`, `addEvent`, `scoreAt`, the half-life table, and `weightedTotal(scoresByKind, weights)`.
   - Unit tests against worked values from the post and its demo code.
   - Property tests (fast-check): `combine` is commutative and associative within tolerance; order is unchanged as `now` advances; two simultaneous events of value 1 add `ln 2`; weighting at read time equals weighting at record time; a future-dated event is rejected.
 - [x] **0.4 `packages/cli` skeleton.** A `somememos` binary with `--version` and `--help`, using an argument parser with no heavy dependencies (`node:util` `parseArgs` unless it proves too limited).
 - [x] **0.5 `apps/web` skeleton.** SvelteKit with `adapter-node`, one page whose header shows the version from the root `package.json`.
 - [x] **0.6 CI.** A GitHub Actions workflow that runs lint, type-check, tests and the web build on every PR and on `main`.
-- [ ] **0.7 Confirm `node:sqlite`.** A test suite that checks what the CLI's local store needs from the built-in `node:sqlite`: typed values at full precision, transactions, `INSERT … ON CONFLICT` with the `ln` and `exp` functions, WAL mode, a busy timeout, and concurrent writers in separate processes. Record the result in PLAN.md section 9. FTS5 is not required.
+- [x] **0.7 Confirm `node:sqlite`.** A test suite that checks what the CLI's local store needs from the built-in `node:sqlite`: typed values at full precision, transactions, `INSERT … ON CONFLICT` with the `ln` and `exp` functions, WAL mode, a busy timeout, and concurrent writers in separate processes. Record the result in PLAN.md section 9. FTS5 is not required.
 - [ ] **0.8 Storage interfaces.** Define storage interfaces in core as operations (event log, scores, notes and links, term index), not SQL, so SQLite and Postgres can each implement them. Implement them for SQLite in the CLI, with a shared test suite that a Postgres implementation will also have to pass in M3.
-- [ ] **0.9 Keyword scoring (core).** Tokenizer, Porter stemmer, BM25 with title, heading and body weights, an in-memory reference index, and snippets. All parameters are tunable placeholders until the experiments set them.
+- [x] **0.9 Keyword scoring (core).** Tokenizer, Porter stemmer, BM25 with title, heading and body weights, an in-memory reference index, and snippets. All parameters are tunable placeholders until the experiments set them.
 
 Done when: CI is green, `npx somememos --version` prints `0.1.0`, the web skeleton shows the same version, and PLAN.md section 9 records the SQLite decision.
 
@@ -44,8 +44,8 @@ Goal: on one machine, Mike indexes his vault, imports its git history, gets usef
 
 ### Indexing
 
-- [ ] **1.5 Markdown chunker (core).** Split a note into a preamble plus one chunk per `##` heading. Extract the title (front matter `title`, else first `#` heading, else file name). Ignore headings inside code fences.
-- [ ] **1.6 Link parser (core).** Find `[[target]]`, `[[target|alias]]` and `[[target#heading]]`, skipping code fences and inline code. Resolve targets to paths with the vault's rules (read the vault's `AGENTS.md` for its link conventions before fixing these); unresolved targets are dangling links keyed by their normalized text.
+- [x] **1.5 Markdown chunker (core).** Split a note into a preamble plus one chunk per `##` heading. Extract the title (front matter `title`, else first `#` heading, else file name). Ignore headings inside code fences.
+- [x] **1.6 Link parser (core).** Find `[[target]]`, `[[target|alias]]` and `[[target#heading]]`, skipping code fences and inline code. Resolve targets to paths with the vault's rules (read the vault's `AGENTS.md` for its link conventions before fixing these); unresolved targets are dangling links keyed by their normalized text.
 - [ ] **1.7 Keyword indexing.** `somememos index` scans the working tree (path, size, mtime, then content hash for changed files) and updates the `notes`, `links`, `sections` and `postings` tables, using core's tokenizer. `--rebuild` deletes `index.sqlite` first.
 - [ ] **1.8 Edit detection.** During the scan, for each scored note whose content hash changed since the last pass: log an `edit` event at the file's modification time (at most now), and a `mention` event for each link target in the new version that the old version lacked. A new file counts as an edit. The very first index of a brain logs nothing, since nothing is known to have changed.
 - [ ] **1.9 Renames and dangling links.** A path that disappears while a new path appears with the same content hash is a rename: log a rename record instead of an edit. When a new note resolves a dangling target, log a rename from the dangling key to the note's path.

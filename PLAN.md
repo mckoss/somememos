@@ -132,6 +132,8 @@ Each item keeps one log score per half-life:
 
 - **Trending (heating up):** `D = L_week − L_month`. D does not depend on `now`, so it can be indexed directly. (The demos build their "Weekly trending" lists this way.)
 - **Neglected (cooling but important):** a high year score with a low month score, for example ranked by `L_year − L_month`.
+- **Guidance from the blog post on trending.** One recent event on an otherwise quiet item is "all trend", so rank trending only among items with enough recent activity (for example the top 100 by week score), then order those by D. Dividing the ratio by its steady value (about 0.24 for week over month with daily activity) makes 1.0 mean an item's usual pace.
+- An item with no events in either half-life has no derived signal and sorts last.
 
 ## 4. Data model
 
@@ -341,6 +343,20 @@ No ranking parameter is chosen by intuition. `somememos eval` replays the brain'
   - Tests and documentation use a synthetic brain made by a generator script, never a sample of real notes.
   - The repo's `.gitignore` covers every sidecar file, and CI fails if a database or an event log export is committed.
 
+### Keyword scoring details
+
+Implemented in `packages/core/src/keyword`. The parameter values below are **placeholders until the experiments set them**.
+
+- **Tokens:** text is lower-cased and stripped of diacritics, and a token is a run of letters and digits. `snake_case`, `kebab-case` and dotted names split at the punctuation; `camelCase` does not split. No stop words are removed.
+- **Stemming:** the Porter stemmer, on by default and switchable off. An index records whether it was built with stemming, and a query must use the same setting.
+- **Scoring:** BM25F over three fields, with an inverse document frequency that is never negative. Placeholder defaults: `k1` 1.2; `b` 0.5 for title and heading, 0.75 for body; field weights title 3, heading 2, body 1.
+- **Queries:** a section matches when it contains any query term (an option requires all of them). Quoted phrases match consecutive words within one field, which needs term positions in the index.
+- **Storage keeps counts, never scores.** Per section: the three field lengths. Per term and section: the term's frequency in each field, and its positions. Scores are computed at query time so the parameters stay tunable.
+
+### Link resolution
+
+Implemented in `packages/core/src/markdown`. A `[[target]]` resolves, in order, to: an exact path (with or without `.md`); a path relative to the linking note's folder; then a unique file name anywhere in the brain, case-insensitively. When several notes share the name, the one in the linking note's folder wins, then the shortest path. Anything else is a dangling link, keyed by the target trimmed, lower-cased and without `.md`. A link to a heading in the same note (`[[#heading]]`) is not a link. Only `##` headings written with hashes start a section.
+
 ## 6. Interfaces
 
 ### CLI (`somememos`)
@@ -462,7 +478,7 @@ apps/web          SvelteKit app: server routes (sync API, remote MCP, accounts) 
 ### Details to confirm at milestone 0
 
 - **Two databases, by role** (decided 2026-11-27): **Postgres on the server**, and **SQLite in offline clients** (the CLI's local mode, `somememos clone` and the PWA). Core defines storage interfaces in terms of operations (append an event, fold scores, read postings for a term), not SQL, with one implementation per database and one shared test suite run against both.
-- **SQLite on Node (the CLI):** `node:sqlite` (built in), which keeps the CLI free of native dependencies. Milestone 0 confirms it has what the local store needs. FTS5 is no longer required.
+- **SQLite on Node (the CLI):** `node:sqlite` (built in), which keeps the CLI free of native dependencies. **Confirmed on 2026-11-27** (Node 22.23, SQLite 3.54): full-precision values, transactions, the event-fold upsert with `ln` and `exp`, WAL, a busy timeout and concurrent writers in separate processes all pass (`packages/cli/src/sqlite`). Node 22 prints an experimental warning on load, which the CLI's wrapper hides. FTS5 is present but not used.
 - **SQLite in the PWA:** the official `@sqlite.org/sqlite-wasm` build, persisted to OPFS from a Web Worker. Prefer the `opfs-sahpool` VFS, which (as far as we know) doesn't need cross-origin isolation (COOP/COEP headers). FTS5 is not needed, because keyword scoring is in core.
 - **PWA plumbing:** SvelteKit's built-in service worker support (`src/service-worker.ts`) for offline caching, plus a web app manifest. Add a plugin only if needed.
 - **Deployment:** `@sveltejs/adapter-node` on Railway, with Railway's managed Postgres (which handles database backups) and a volume for the brains' git repositories, which need their own backup.
