@@ -7,3 +7,4 @@ export { VERSION } from './version.js';
 export * as timescore from './timescore/index.js';
 export * as keyword from './keyword/index.js';
 export * as markdown from './markdown/index.js';
+export * as storage from './storage/index.js';

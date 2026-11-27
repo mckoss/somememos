@@ -182,6 +182,18 @@ somememos keeps the change log itself. Agents are not asked to write changelog f
 - Messages are indexed for search, and they are the best source of queries for the experiments (section 5).
 - Because the log is no longer a note full of links, a change no longer counts twice, once as an edit and once as a mention from its log entry.
 
+### Storage as built
+
+Implemented in `packages/core/src/storage` (interfaces, folding, an in-memory reference) and `packages/cli/src/store` (SQLite). The table sketches below are illustrative; the code is the reference. Points that differ from the sketches:
+
+- Notes are keyed by path. A section's id is its note's path plus its position, so ids stay the same across rebuilds.
+- The term index stores each term's positions as well as its counts, which is what makes quoted phrases work.
+- Change records have their own tables beside the event log.
+- **Scores are combined in application code**, not with the SQL statement shown below. SQLite and Postgres would each round that statement slightly differently; doing it in core makes every store agree exactly. Scores rebuilt from the log agree with incrementally folded ones to within rounding in the last digits.
+- **Renames apply by time.** An event dated at or before a rename counts toward the new name, following chains of renames. An event dated after it stays with the old name. So a late-arriving event from before the rename follows the note, while a new note that later reuses the old path starts fresh.
+- Folding is safe when several processes run at once: a fold that loses the race is recomputed, never double-counted.
+- Every implementation must pass one shared conformance test suite, which the Postgres implementation will also run.
+
 ### One-time import from git
 
 An existing vault that has lived in git (Mike's has) carries years of history. `somememos import-git` reads that history once and writes it into the event log: an `edit` event for each commit that changed a note, and a `mention` event for each `[[link]]` a commit added, both at the commit's time, following renames. Imported events get ids derived from the commit, so running the import twice adds nothing. After the import, clients have no further use for git. When the vault moves to the server, its repository becomes the brain's version store (section 7).
