@@ -17,6 +17,8 @@ export default ts.config(
       '**/build/',
       '**/coverage/',
       '**/.svelte-kit/',
+      '**/test-results/',
+      '**/playwright-report/',
       'packages/core/src/version.ts',
     ],
   },

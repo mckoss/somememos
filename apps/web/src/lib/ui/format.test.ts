@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { timescore } from '@somememos/core';
 import {
+  describeCount,
   describePace,
   formatBytes,
   formatNumber,
@@ -71,8 +72,20 @@ describe('weekly pace', () => {
     expect(describePace(0)).toBe('none');
     expect(describePace(3.2)).toBe('about 3.2 a week');
     expect(describePace(0.5)).toBe('about 2.1 a month');
-    expect(describePace(0.1)).toBe('less than one a month');
+    expect(describePace(0.1)).toBe('less than once a month');
+    expect(describePace(1.02)).toBe('about once a week');
     expect(describePace(0.01)).toBe('almost none');
+  });
+
+  it('counts the activity a window held, in that window', () => {
+    expect(describeCount(0, 7)).toBe('none');
+    expect(describeCount(7, 1)).toBe('about once');
+    expect(describeCount(3.2, 7)).toBe('about 3 times');
+    expect(describeCount(0.5, 30)).toBe('about 2 times');
+    expect(describeCount(0.5, 1)).toBe('less than once');
+    expect(describeCount(0.001, 7)).toBe('almost none');
+    expect(describeCount(0.25, 1)).toBe('less than once');
+    expect(describeCount(14, 365)).toBe('about 730 times');
   });
 
   it('gives one bar per half-life, scaled to the fastest', () => {
@@ -110,6 +123,15 @@ describe('signals', () => {
     expect(neglectedSignal(view({ neglected: steady })).label).toBe('As usual');
     expect(neglectedSignal(view({ neglected: steady / 3 })).label).toBe('Busier lately');
     expect(neglectedSignal(view({})).tone).toBe('none');
+  });
+
+  it('only says how much quieter when it is quieter', () => {
+    const steady = steadyNeglectedRatio();
+    expect(scoreSummary(view({ neglected: steady * 4 }), 'neglected')).toBe(
+      'Gone quiet · 4.0× quieter',
+    );
+    expect(scoreSummary(view({ neglected: steady / 3 }), 'neglected')).toBe('Busier lately');
+    expect(scoreSummary(view({ neglected: steady }), 'neglected')).toBe('As usual');
   });
 
   it('summarizes a result by mode', () => {

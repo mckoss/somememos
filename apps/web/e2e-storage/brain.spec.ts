@@ -268,10 +268,19 @@ test('two tabs share one brain; the second takes over when the first closes', as
   ]);
   expect([ra.status, rb.status].sort()).toEqual(['conflict', 'saved']);
 
+  await b.evaluate(() => {
+    const w = window as unknown as { __host: HostLike; __changes: unknown[] };
+    w.__changes = [];
+    w.__host.subscribe((c) => w.__changes.push(c));
+  });
   await a.close();
   await expect
     .poll(async () => (await withHost(b, (h) => h.storageInfo())).runsIn)
     .toBe('this-tab');
+  // The tab that took over says so, so its UI can refresh what it shows.
+  await expect
+    .poll(() => b.evaluate(() => (window as unknown as { __changes: unknown[] }).__changes))
+    .toContainEqual({ source: 'this-tab', operation: 'reopen' });
   const kept = await withHost(b, async (h) => ({
     shared: (await h.engine.readNote('memos/shared.md', { record: false })).text,
     total: (await h.engine.status()).notes.total,
@@ -439,15 +448,14 @@ test('a new app version waits until the page asks it to take over', async ({ pag
     expect(await page.evaluate(() => caches.keys())).toContain(before[0]);
 
     // What #lib/brain/updates.ts applyUpdate() does: ask it to take over.
+    // The app (whose layout loads updates.ts) then reloads itself.
+    const reloaded = page.waitForEvent('load');
     await page.evaluate(async () => {
       const registration =
         (await navigator.serviceWorker.getRegistration()) as ServiceWorkerRegistration;
-      const changed = new Promise((r) =>
-        navigator.serviceWorker.addEventListener('controllerchange', r),
-      );
       registration.waiting?.postMessage({ type: 'skip-waiting' });
-      await changed;
     });
+    await reloaded;
     await expect.poll(() => page.evaluate(() => caches.keys())).toEqual([`${before[0]}.next`]);
   } finally {
     await page.close();

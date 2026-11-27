@@ -3,7 +3,7 @@
   // never rewrites it: the text that comes out is exactly what was typed,
   // line endings included (see editor-text.ts).
   import { onMount } from 'svelte';
-  import { EditorView, keymap, highlightSpecialChars } from '@codemirror/view';
+  import { EditorView, keymap, highlightSpecialChars, tooltips } from '@codemirror/view';
   import { EditorState, type Extension } from '@codemirror/state';
   import { defaultKeymap, history, historyKeymap, redo, undo } from '@codemirror/commands';
   import { markdown } from '@codemirror/lang-markdown';
@@ -82,7 +82,18 @@
       borderRadius: 'var(--radius-sm)',
       boxShadow: 'var(--shadow)',
     },
-    '.cm-tooltip-autocomplete > ul': { fontFamily: 'var(--font-sans)', maxHeight: '16em' },
+    // As specific as CodeMirror's own rules, so these win (its default is a
+    // monospace list as wide as its longest line).
+    '.cm-tooltip.cm-tooltip-autocomplete': { maxWidth: 'calc(100vw - 1rem)' },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul': {
+      fontFamily: 'var(--font-sans)',
+      maxHeight: '16em',
+      maxWidth: '100%',
+    },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul > li > .cm-completionDetail': {
+      minWidth: '0',
+      overflowWrap: 'anywhere',
+    },
     '.cm-tooltip-autocomplete > ul > li': {
       padding: '0.45em 0.7em !important',
       minHeight: 'var(--target)',
@@ -130,6 +141,15 @@
       syntaxHighlighting(highlight),
       EditorView.lineWrapping,
       autocompletion({ override: [linkSource], icons: false }),
+      // Keep tooltips (link autocomplete) a little inside the screen edges.
+      tooltips({
+        tooltipSpace: () => ({
+          top: 0,
+          left: 8,
+          bottom: innerHeight,
+          right: document.documentElement.clientWidth - 8,
+        }),
+      }),
       keymap.of([
         {
           key: 'Mod-s',

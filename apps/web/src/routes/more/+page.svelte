@@ -184,6 +184,7 @@
         <p class="notice">
           Your notes are only in this tab’s memory right now. They are lost when you reload or close
           the tab. Export the event log to keep your activity.
+          {#if brain.storage.reason}<br />{brain.storage.reason}{/if}
         </p>
       {:else}
         <p>
@@ -193,6 +194,12 @@
           {:else}
             The browser may clear them if the device runs low on space.
           {/if}
+        </p>
+      {/if}
+      {#if brain.storage.runsIn === 'other-tab'}
+        <p class="hint" data-testid="runs-in-other-tab">
+          The app is also open in another tab or window, which looks after your notes while it is
+          open. Changes you make here go through it, and both stay up to date.
         </p>
       {/if}
       {#if brain.storage.usage !== undefined}

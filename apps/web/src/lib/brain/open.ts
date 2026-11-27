@@ -147,6 +147,8 @@ class BrainConnection {
   private channel: BroadcastChannel | undefined;
   private local: Transport | undefined;
   private ownerId: string | undefined;
+  /** True once another tab ran the brain for this one, so owning it later is a takeover. */
+  private followedAnother = false;
   private failure: Error | undefined;
   private waiters: (() => void)[] = [];
   private readonly remote = new Map<number, RemoteCall>();
@@ -205,7 +207,9 @@ class BrainConnection {
       transport.close();
       throw error;
     }
-    const tookOver = this.ownerId !== undefined && this.ownerId !== this.tabId;
+    // `ownerId` is usually cleared by then (`ownerGone` runs as soon as the
+    // old owner's lock is released), so remember having followed one instead.
+    const tookOver = this.followedAnother;
     this.local = transport;
     this.storage = opened.storage;
     this.config = opened.config;
@@ -229,6 +233,7 @@ class BrainConnection {
     this.ownerId = id;
     this.failure = undefined;
     if (id !== this.tabId) {
+      this.followedAnother = true;
       // Granted when the owner tab is gone.
       void navigator.locks.request(TAB_LOCK_PREFIX + id, async () => this.ownerGone(id));
     }

@@ -509,12 +509,15 @@
 
   .message-row {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: var(--space-2) var(--space-3);
   }
 
+  /* On a phone the publish control wraps under the message box rather than
+     squeezing it to a few letters. */
   .message-row input {
-    flex: 1;
+    flex: 1 1 16rem;
     min-inline-size: 0;
   }
 
@@ -617,12 +620,20 @@
 
   .versions pre {
     margin: 0;
-    max-block-size: 40vh;
+    /* Short on a phone, where the two versions stack, so the choices below
+       stay in view without scrolling the dialog. */
+    max-block-size: 20vh;
     overflow: auto;
     padding: var(--space-2) var(--space-3);
     background: var(--surface-2);
     border-radius: var(--radius-sm);
     white-space: pre-wrap;
     font-size: 0.82rem;
+  }
+
+  @media (min-width: 45rem) {
+    .versions pre {
+      max-block-size: 40vh;
+    }
   }
 </style>

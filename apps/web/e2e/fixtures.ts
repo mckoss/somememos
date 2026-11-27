@@ -1,7 +1,8 @@
 // Shared end-to-end helpers: an invented brain written to a temporary folder
 // (files plus an events.jsonl built from its timeline), importing it through
-// the UI, and client-side navigation (the brain lives in the page, so a full
-// reload would start from an empty brain while storage is in memory).
+// the UI, and client-side navigation (faster than a reload, which reopens the
+// brain from device storage). Each test gets a fresh browser context, so a
+// fresh, empty brain.
 
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

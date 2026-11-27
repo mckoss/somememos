@@ -1,7 +1,7 @@
 <script lang="ts">
   import type { engine } from '@somememos/core';
   import {
-    describePace,
+    describeCount,
     formatNumber,
     kindSplit,
     neglectedSignal,
@@ -66,8 +66,9 @@
     <h4>Activity</h4>
     {#if hasActivity}
       <p class="explain">
-        Every read, edit and mention counts, and fades with time. Each bar is the average pace over
-        a window; longer windows remember longer.
+        About how often it was read, edited or mentioned, with older activity counting for less. The
+        bars compare how busy each period was for its length, so a note that is heating up has
+        longer bars at the top.
       </p>
       <ul class="bars">
         {#each rows as row (row.name)}
@@ -80,7 +81,7 @@
               ></span>
             </span>
             <span class="bar-value">
-              {describePace(row.perWeek)}
+              {describeCount(row.perWeek, row.days)}
               <span class="detail">score {formatNumber(row.score)}</span>
             </span>
           </li>
