@@ -14,8 +14,11 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node build",
-    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
-    "test": "vitest run"
+    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings && tsc --noEmit -p src/service-worker/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json && tsc --noEmit -p e2e-storage/tsconfig.json",
+    "test": "vitest run",
+    "e2e:ui": "playwright test -c playwright.config.ts --trace off",
+    "e2e:storage": "playwright test -c playwright.storage.config.ts --trace off",
+    "e2e": "npm run e2e:ui && STORAGE_SKIP_BUILD=1 npm run e2e:storage"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

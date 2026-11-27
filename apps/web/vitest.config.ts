@@ -6,6 +6,10 @@ import { define } from './app-version.ts';
 // `svelte()` from @sveltejs/vite-plugin-svelte here when component tests arrive.
 export default defineProject({
   define,
+  // Resolve workspace packages to their TypeScript source (the "source" export
+  // condition), so tests run from a clean tree without building them first.
+  resolve: { conditions: ['source'] },
+  ssr: { resolve: { conditions: ['source'] } },
   test: {
     name: 'web',
     include: ['src/**/*.test.ts'],
