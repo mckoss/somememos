@@ -13,6 +13,8 @@ const PORT = Number(process.env.E2E_PORT ?? 4317);
 
 export default defineConfig({
   testDir: 'e2e',
+  // The sync suite needs a server with a database: playwright.sync.config.ts.
+  testIgnore: 'sync*.spec.ts',
   outputDir: '../../node_modules/.cache/somememos-e2e/results',
   timeout: 60_000,
   expect: { timeout: 10_000 },

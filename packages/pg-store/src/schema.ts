@@ -248,11 +248,40 @@ CREATE TABLE burst_last (
 ALTER TABLE links ADD COLUMN display text;  -- a dangling link's text as written; otherwise NULL
 `;
 
+// A brain's public blog (PLAN.md section 8, "Publishing a blog"; served by
+// packages/server/src/blog.ts): off until the owner turns it on, under a
+// public slug unique across the server (never the brain id). Only settings
+// live here: which posts are public is read from the brain's repository at
+// its recorded commit, so there is nothing derived to keep in step.
+const BLOG = `
+CREATE TABLE server_blogs (
+  brain_id    text COLLATE "C" PRIMARY KEY REFERENCES server_brains ON DELETE CASCADE,
+  enabled     boolean NOT NULL DEFAULT false,
+  slug        text COLLATE "C" UNIQUE,      -- NULL until chosen; required to enable
+  title       text,                         -- required to enable
+  description text,
+  author      text,
+  language    text NOT NULL DEFAULT 'en',
+  updated_at  bigint NOT NULL,              -- Unix seconds
+  CHECK (NOT enabled OR (slug IS NOT NULL AND title IS NOT NULL))
+);
+`;
+
+// A brain's shared config is one synced thing (packages/server/src/config-sync.ts):
+// it carries a revision, raised by one on every change, so copies can tell
+// whether theirs is current and a change based on an old one is refused.
+// Every existing brain starts at revision 1.
+const CONFIG_REVISION = `
+ALTER TABLE server_brains ADD COLUMN config_revision bigint NOT NULL DEFAULT 1;
+`;
+
 /** Every migration, in order. Append only. */
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'initial', sql: INITIAL },
   { version: 2, name: 'server', sql: SERVER },
   { version: 3, name: 'burst-and-display', sql: BURST_AND_DISPLAY },
+  { version: 4, name: 'blog', sql: BLOG },
+  { version: 5, name: 'config-revision', sql: CONFIG_REVISION },
 ];
 
 /** The derived tables of a brain, in an order safe to delete from. */

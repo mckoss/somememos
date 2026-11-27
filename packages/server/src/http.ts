@@ -6,14 +6,17 @@
 //   GET    /api/health
 //   GET    /api/brains                         → { brains: BrainInfo[] }
 //   POST   /api/brains        { id, config? }  → 201 BrainInfo
-//   GET    /api/brains/{b}                     → BrainInfo & { config }
-//   POST   /api/brains/{b}/sync   SyncRequest  → SyncResponse
+//   GET    /api/brains/{b}                     → BrainInfo & { config, configRevision }
+//   GET    /api/brains/{b}/config              → { revision, config }
+//   PUT    /api/brains/{b}/config { baseRevision, config } → { status, revision, config } (409 config-conflict)
+//   POST   /api/brains/{b}/sync   SyncRequest  → SyncResponse (409 config-changed when its configRevision is stale)
 //   GET    /api/brains/{b}/search?q=&mode=&limit=&since=&until=  → SearchResponse
 //   GET    /api/brains/{b}/list?mode=&limit=                     → SearchResponse
 //   GET    /api/brains/{b}/notes/{path}?record=false             → NoteView (logs a read)
 //   PUT    /api/brains/{b}/notes/{path}  { text, baseHash?, message? } → SaveResult (409 on conflict)
 //   DELETE /api/brains/{b}/notes/{path}?message=                 → DeleteResult
 //   POST   /api/brains/{b}/rename { from, to, message? }         → RenameResult
+//   POST   /api/brains/{b}/changes { message?, ops }             → BatchResult (409: nothing applied, stale files listed)
 //   GET    /api/brains/{b}/notes/{path}/history?limit=           → NoteHistory
 //   GET    /api/brains/{b}/notes/{path}/versions/{commit}        → PastVersion
 //   GET    /api/brains/{b}/notes/{path}/versions?hash=           → PastVersion (the latest with that hash)
@@ -24,6 +27,13 @@
 //   GET    /api/brains/{b}/dangling                              → { dangling: DanglingCount[] }
 //   GET    /api/brains/{b}/diary?date=                           → DiaryPath
 //   POST   /api/brains/{b}/diary  { date? }                      → DiaryEntry
+//   GET    /api/brains/{b}/blog                                  → BlogSettingsView
+//   PUT    /api/brains/{b}/blog   BlogSettings                   → BlogSettingsView (409 slug-taken)
+//   GET    /api/brains/{b}/blog/slug?slug=                       → { slug, available, taken, problem }
+//   GET    /api/brains/{b}/blog/address?path=                    → { url } (null unless the blog is on and path is a post)
+//
+// The public blog pages themselves are not here: `App.blogs` (./blog.ts)
+// serves their data and apps/web renders them under /blog.
 //
 // A request may name its client with `X-Somememos-Client: <client id>`: the
 // server's engine records events and change records under it, and git
@@ -38,15 +48,25 @@
 // Cross-origin browser requests are refused: there are no CORS headers, and
 // a request whose Origin is another host gets 403.
 
-import { VERSION, engine as coreEngine, markdown, sync } from '@somememos/core';
+import { VERSION, engine as coreEngine, markdown, storage, sync } from '@somememos/core';
 import { ensureMigrated, MIGRATIONS } from '@somememos/pg-store';
 import pg from 'pg';
 import { FailureLimiter, tokenAuthorizer, type Authorizer } from './auth.js';
+import { PublicBlogs } from './blog.js';
+import { parseBlogSettings, readBlogSettings, writeBlogSettings } from './blog-settings.js';
+import { checkBlogSlug, postAddress } from './blog-owner.js';
+import { applyBatch, parseBatch } from './batch.js';
 import { BrainError, BrainService, CLIENT_ID, type BrainContext } from './brains.js';
 import { loadServerConfig, type ServerConfig } from './config.js';
 import { ENGINE_ERROR_STATUS, HttpError } from './errors.js';
 import { noteHistory, pastVersion } from './history.js';
 import { parseSyncRequest, runSync } from './sync.js';
+import {
+  checkSyncConfigRevision,
+  parseConfigPut,
+  putSharedConfig,
+  readSharedConfig,
+} from './config-sync.js';
 
 export interface RequestInfo {
   /** The client's address, for rate limiting failed attempts. */
@@ -59,6 +79,8 @@ export interface App {
   start(): Promise<void>;
   close(): Promise<void>;
   readonly service: BrainService | null;
+  /** The public blogs (./blog.ts), when there is a database. */
+  readonly blogs: PublicBlogs | null;
 }
 
 export interface AppOptions {
@@ -227,6 +249,9 @@ export function createApp(options: AppOptions): App {
             : {}),
         })
       : null;
+  const blogs = service
+    ? new PublicBlogs({ pool: service.pool, repoDir: (id) => service.repoDir(id) })
+    : null;
   const authorizer = options.authorizer ?? (config ? tokenAuthorizer(config.tokens) : null);
   const limiter = options.limiter ?? new FailureLimiter();
   const pageSize = config?.pageSize ?? 2000;
@@ -336,11 +361,49 @@ export function createApp(options: AppOptions): App {
       const body = await readJson(request, sync.SYNC_LIMITS.maxRequestBytes);
       return json(
         200,
-        await withBrain((ctx) => {
+        await withBrain(async (ctx) => {
           const classifier = markdown.createRoleClassifier(ctx.config.roles);
-          return runSync(ctx, parseSyncRequest(body, classifier, ctx.now), pageSize);
+          const parsed = parseSyncRequest(body, classifier, ctx.now);
+          await checkSyncConfigRevision(ctx, parsed.configRevision);
+          return runSync(ctx, parsed, pageSize);
         }),
       );
+    }
+
+    if (action === 'changes' && tail.length === 0) {
+      // One change set of writes, deletes and renames, all or none (./batch.ts).
+      allow('POST');
+      const batch = parseBatch(await readJson(request, sync.SYNC_LIMITS.maxRequestBytes));
+      const result = await withBrain((ctx) => applyBatch(ctx, batch));
+      return json(result.status === 'conflict' ? 409 : 200, result);
+    }
+
+    if (action === 'config' && tail.length === 0) {
+      // The brain's shared config (./config-sync.ts).
+      allow('GET', 'PUT');
+      if (method === 'GET') return json(200, await readBrain((ctx) => readSharedConfig(ctx)));
+      const put = parseConfigPut(await readJson(request, SMALL_BODY));
+      return json(200, await withBrain((ctx) => putSharedConfig(ctx, put)));
+    }
+
+    if (action === 'blog' && tail.length === 1 && (tail[0] === 'slug' || tail[0] === 'address')) {
+      // The owner's slug check and a post's public address (./blog-owner.ts).
+      allow('GET');
+      await svc.get(owner, brainId);
+      if (tail[0] === 'slug') {
+        return json(200, await checkBlogSlug(svc.pool, brainId, params.get('slug') ?? ''));
+      }
+      return json(200, await postAddress(svc.pool, brainId, params.get('path') ?? ''));
+    }
+
+    if (action === 'blog' && tail.length === 0) {
+      // The brain's blog settings (./blog-settings.ts); the owner only.
+      allow('GET', 'PUT');
+      await svc.get(owner, brainId);
+      if (method === 'GET') return json(200, await readBlogSettings(svc.pool, brainId));
+      const settings = parseBlogSettings(await readJson(request, SMALL_BODY));
+      const now = (options.now ?? storage.unixNow)();
+      return json(200, await writeBlogSettings(svc.pool, brainId, settings, now));
     }
 
     if (action === 'notes' && tail.length > 0) {
@@ -584,7 +647,7 @@ export function createApp(options: AppOptions): App {
       );
     } catch (error) {
       if (error instanceof HttpError) {
-        return errorResponse(error.status, error.code, error.message, {}, error.headers);
+        return errorResponse(error.status, error.code, error.message, error.extra, error.headers);
       }
       if (error instanceof BrainError)
         return errorResponse(error.status, error.code, error.message);
@@ -607,6 +670,7 @@ export function createApp(options: AppOptions): App {
   return {
     handle,
     service,
+    blogs,
     async start() {
       if (problems) {
         log.error(

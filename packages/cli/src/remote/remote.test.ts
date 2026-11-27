@@ -275,7 +275,7 @@ describePg(
       expect(log.stdout).toContain('update  add a line and an idea');
     });
 
-    it('a stale base is refused for that file only and keeps both versions', async () => {
+    it('one commit is one change set; a stale base refuses it all and keeps both versions', async () => {
       const [a, b] = [memos[5] as string, memos[6] as string];
       const mine = newDir('mine');
       const theirs = newDir('theirs');
@@ -296,23 +296,39 @@ describePg(
       expect(again.stdout).toBe(`${files.get(a)}\nMy change.\n`);
       expect(again.stderr).toMatch(/server has a newer version/);
 
+      // One stale file refuses the whole commit: nothing of it lands.
       const refused = await cli(mine, ['commit', '-m', 'update my changes']);
       expect(refused.code).toBe(EXIT_FAILURE);
-      expect(refused.stdout).toBe(`committed 1 note (update): update my changes\n  ${b}\n`);
+      expect(refused.stdout).toBe(
+        'not committed: 1 other note sent with a conflicting one; nothing of this commit landed, so commit again once the conflict is merged\n',
+      );
       const copy = a.replace(/\.md$/, '.server.md');
       expect(refused.stderr.trim().split('\n')).toEqual([
         `somememos commit: ${a}: not committed: the server has a newer version, saved as ${copy}; merge it into ${a}, delete ${copy}, then commit again`,
       ]);
       expect(readFileSync(join(mine, a), 'utf8')).toBe(`${files.get(a)}\nMy change.\n`);
       expect(readFileSync(join(mine, copy), 'utf8')).toBe(`${files.get(a)}\nTheir change.\n`);
-      // Committing again before merging is refused again.
-      const still = await cli(mine, ['commit']);
+      expect((await ok(theirs, ['read', b])).stdout).toBe(files.get(b));
+      // Committing again before merging is refused again for that file.
+      const still = await cli(mine, ['commit', a]);
       expect(still.code).toBe(EXIT_FAILURE);
       expect(still.stderr).toMatch(/merge .* into it, delete/);
 
       writeFileSync(join(mine, a), `${files.get(a)}\nTheir change.\nMy change.\n`);
       rmSync(join(mine, copy));
-      await ok(mine, ['commit', '-m', 'update merge']);
+      const merged = await ok(mine, ['commit', '-m', 'update merge']);
+      // Both files land as one change record.
+      expect(merged.stdout).toBe(`committed 2 notes (update): update merge\n  ${a}\n  ${b}\n`);
+      const log = (
+        await json<{ changes: { message: string; paths: string[] }[] }>(mine, [
+          'log',
+          '--limit',
+          '1',
+        ])
+      ).changes;
+      expect(log[0]?.message).toBe('update merge');
+      expect([...(log[0]?.paths ?? [])].sort()).toEqual([a, b].sort());
+      expect((await ok(theirs, ['read', b])).stdout).toContain('My other change.');
       // The other folder's copy is untouched, so a repeated read fetches the merge.
       expect((await ok(theirs, ['read', a])).stdout).toBe(
         `${files.get(a)}\nTheir change.\nMy change.\n`,
@@ -392,13 +408,8 @@ describePg(
       const env = envOnly({ SOMEMEMOS_WORKDIR: workdir });
       const l = await ok(work, ['hot']);
       const r = await ok(cwd, ['hot'], env);
-      // Paths are shown from the working folder, which is outside cwd.
-      expect(r.stdout).toBe(
-        l.stdout
-          .split('\n')
-          .map((line) => (line === '' || line.startsWith('(') ? line : join(workdir, line)))
-          .join('\n'),
-      );
+      // Paths are shown brain-relative: the working folder is not where the agent is.
+      expect(r.stdout).toBe(l.stdout);
       expect(existsSync(workdir)).toBe(false); // queries write nothing
       const path = memos[9] as string;
       expect((await ok(cwd, ['read', path], env)).stdout).toBe(files.get(path));
@@ -413,6 +424,18 @@ describePg(
       // Default working folder: ~/somememos/<brain id>.
       await ok(cwd, ['read', path], envOnly());
       expect(existsSync(join(home, 'somememos', 'garden', path))).toBe(true);
+
+      // Paths are shown brain-relative there (the working folder is not where
+      // the agent is), and read takes either form.
+      const hot = (await ok(cwd, ['hot'], envOnly())).stdout;
+      expect(hot).not.toContain(join(home, 'somememos'));
+      expect(hot).toMatch(/^memos\//m);
+      const found = (await ok(cwd, ['search', brain.topics[0]?.name as string], envOnly())).stdout;
+      expect(found).not.toContain(home);
+      expect(found).toMatch(/^memos\//m);
+      expect(
+        (await ok(cwd, ['read', join(home, 'somememos', 'garden', path)], envOnly())).stdout,
+      ).toBe(readFileSync(join(home, 'somememos', 'garden', path), 'utf8'));
     });
 
     it('a wrong token and an unreachable server are one-line errors with exit 1', async () => {
@@ -531,6 +554,143 @@ describePg(
         // The conflict file reaches the other copy too.
         await ok(a, ['sync']);
         expect(filesUnder(join(a, 'memos')).some((f) => f.includes('.conflict-'))).toBe(true);
+      });
+
+      it('the shared config syncs between clones; a conflict stops sync until pull or push', async () => {
+        await server.createBrain('roles', ROLES);
+        const a = newDir('roles-a');
+        const b = newDir('roles-b');
+        await ok(tmp.dir, ['clone', server.url, 'roles', a]);
+        mkdirSync(join(a, 'memos/hush'), { recursive: true });
+        writeFileSync(join(a, 'memos/hush/pond.md'), '# Pond\n\nheron reeds\n');
+        await ok(a, ['commit', '-m', 'a note']);
+        await ok(a, ['sync']);
+        await ok(tmp.dir, ['clone', server.url, 'roles', b]);
+        expect(readFileSync(join(b, 'memos/hush/pond.md'), 'utf8')).toContain('heron');
+
+        const shown = await json<{ source: string; state: string; revision: number }>(a, [
+          'config',
+        ]);
+        expect(shown).toMatchObject({ source: 'copy', state: 'in-step', revision: 1 });
+
+        // Edit config.json in clone a: the next command re-indexes, sync sends it.
+        const configFile = join(a, '.somememos', 'config.json');
+        const config = JSON.parse(readFileSync(configFile, 'utf8')) as {
+          roles: Record<string, string[]>;
+        };
+        config.roles.excluded = [...(config.roles.excluded ?? []), 'memos/hush/'];
+        writeFileSync(configFile, JSON.stringify(config));
+        expect((await ok(a, ['search', 'heron'])).stdout).toBe('');
+        expect((await json<{ state: string }>(a, ['config'])).state).toBe('changed-here');
+        expect((await ok(a, ['sync'])).stdout).toMatch(/sent this copy’s shared config/);
+        // Nothing deleted, and the working folder of remote mode reads the server's config.
+        expect(existsSync(join(a, 'memos/hush/pond.md'))).toBe(true);
+        const remoteView = await json<{ source: string; revision: number }>(work, ['config']);
+        expect(remoteView.source).toBe('server');
+
+        const pulled = await ok(b, ['sync']);
+        expect(pulled.stdout).toMatch(/took the server’s shared config/);
+        expect(
+          (JSON.parse(readFileSync(join(b, '.somememos', 'config.json'), 'utf8')) as typeof config)
+            .roles.excluded,
+        ).toContain('memos/hush/');
+        expect((await ok(b, ['search', 'heron'])).stdout).toBe('');
+        expect(existsSync(join(b, 'memos/hush/pond.md'))).toBe(true);
+
+        // Both change it: the second sync refuses, and push keeps b's.
+        const edit = (dir: string, blog: string[]) => {
+          const file = join(dir, '.somememos', 'config.json');
+          const c = JSON.parse(readFileSync(file, 'utf8')) as typeof config;
+          c.roles.blog = blog;
+          writeFileSync(file, JSON.stringify(c));
+        };
+        edit(a, ['posts/']);
+        edit(b, ['journal/']);
+        await ok(a, ['sync']);
+        const refused = await cli(b, ['sync']);
+        expect(refused.code).toBe(EXIT_FAILURE);
+        expect(refused.stderr).toMatch(/changed both in this copy and on the server/);
+        expect((await json<{ state: string }>(b, ['config'])).state).toBe('both-changed');
+        await ok(b, ['config', 'push']);
+        await ok(a, ['sync']);
+        const blogOf = (dir: string) =>
+          (
+            JSON.parse(
+              readFileSync(join(dir, '.somememos', 'config.json'), 'utf8'),
+            ) as typeof config
+          ).roles.blog;
+        expect(blogOf(a)).toEqual(['journal/']);
+        // And pull takes the server's.
+        edit(a, ['diary-posts/']);
+        edit(b, ['other/']);
+        await ok(a, ['sync']);
+        expect((await cli(b, ['sync'])).code).toBe(EXIT_FAILURE);
+        await ok(b, ['config', 'pull']);
+        expect(blogOf(b)).toEqual(['diary-posts/']);
+        await ok(b, ['sync']);
+      });
+
+      it('history and restore work in a clone, and restore updates the copy', async () => {
+        const copy = newDir('clone-history');
+        await ok(tmp.dir, ['clone', server.url, 'garden', copy]);
+        writeFileSync(join(copy, 'memos/lantern.md'), '# Lantern\n\nfirst wording\n');
+        await ok(copy, ['commit', '-m', 'ingest lantern']);
+        await ok(copy, ['sync']);
+        writeFileSync(join(copy, 'memos/lantern.md'), '# Lantern\n\nsecond wording\n');
+        await ok(copy, ['commit', '-m', 'update lantern']);
+        await ok(copy, ['sync']);
+
+        const history = await json<{ versions: { commit: string; message: string }[] }>(copy, [
+          'history',
+          'memos/lantern.md',
+        ]);
+        expect(history.versions.map((v) => v.message)).toEqual([
+          'update lantern',
+          'ingest lantern',
+        ]);
+        const first = (history.versions[1] as { commit: string }).commit;
+        const restored = await ok(copy, ['restore', 'memos/lantern.md', first.slice(0, 10)]);
+        expect(restored.stdout).toBe(`restored memos/lantern.md to ${first.slice(0, 12)}\n`);
+        expect(readFileSync(join(copy, 'memos/lantern.md'), 'utf8')).toBe(
+          '# Lantern\n\nfirst wording\n',
+        );
+        expect((await ok(work, ['read', 'memos/lantern.md'])).stdout).toContain('first wording');
+        expect((await ok(copy, ['sync'])).stdout).toMatch(/pushed 0 edits/);
+
+        // Offline: one clear line.
+        await server.stop();
+        try {
+          const offline = await cli(copy, ['history', 'memos/lantern.md']);
+          expect(offline.code).toBe(EXIT_FAILURE);
+          expect(offline.stderr).toMatch(
+            /^somememos history: history needs the server, which can't be reached now/,
+          );
+          const restoreOffline = await cli(copy, ['restore', 'memos/lantern.md', first]);
+          expect(restoreOffline.code).toBe(EXIT_FAILURE);
+          expect(restoreOffline.stderr).toMatch(/restore needs the server, which can't be reached/);
+        } finally {
+          await server.start();
+        }
+        // A local brain with no server still says what it needs.
+        const plain = newDir('plain-history');
+        await ok(tmp.dir, ['init', plain]);
+        const none = await cli(plain, ['history', 'memos/x.md']);
+        expect(none.stderr).toMatch(/history needs a server/);
+      });
+
+      it('sync names the notes too large to sync, which stay in the copy', async () => {
+        const copy = newDir('clone-big');
+        await ok(tmp.dir, ['clone', server.url, 'garden', copy]);
+        writeFileSync(join(copy, 'memos/huge.md'), `# Huge\n\n${'y'.repeat(2 * 1024 * 1024)}\n`);
+        await ok(copy, ['commit', '-m', 'ingest a huge note']);
+        const r = await ok(copy, ['sync']);
+        expect(r.stderr).toMatch(
+          /warning: 1 note too large to sync \(over 2 MB\) stays in this copy only: memos\/huge\.md; split it to sync/,
+        );
+        const record = await json<{ tooLarge: string[] }>(copy, ['sync']);
+        expect(record.tooLarge).toEqual(['memos/huge.md']);
+        expect(existsSync(join(copy, 'memos/huge.md'))).toBe(true);
+        rmSync(join(copy, 'memos/huge.md'));
       });
 
       it('sync in a brain with no server says how to set one', async () => {

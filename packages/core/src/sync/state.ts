@@ -14,6 +14,10 @@
 //   that base; a base with no note is a local delete (or, with the same hash
 //   at a new path, a rename); a note with no base is a local create.
 // - `lastSyncAt`: when a sync last completed, Unix seconds.
+// - `configRevision` / `configKey`: the server's shared-config revision this
+//   copy last agreed with, and `sharedConfigKey` of that config. A copy whose
+//   config no longer has that key changed it locally (and pushes it before
+//   the next sync). 0 / null: not known yet (the first sync compares).
 
 import type { MetaStore } from '../storage/types.js';
 
@@ -25,6 +29,8 @@ export interface SyncState {
   readonly pushedChangeSeq: number;
   readonly bases: Readonly<Record<string, string>>;
   readonly lastSyncAt: number | null;
+  readonly configRevision: number;
+  readonly configKey: string | null;
 }
 
 export const EMPTY_SYNC_STATE: SyncState = Object.freeze({
@@ -33,6 +39,8 @@ export const EMPTY_SYNC_STATE: SyncState = Object.freeze({
   pushedChangeSeq: 0,
   bases: Object.freeze({}),
   lastSyncAt: null,
+  configRevision: 0,
+  configKey: null,
 });
 
 const nonNegativeInteger = (value: unknown): number =>
@@ -60,6 +68,8 @@ export async function readSyncState(meta: MetaStore): Promise<SyncState> {
     pushedChangeSeq: nonNegativeInteger(value.pushedChangeSeq),
     bases,
     lastSyncAt: typeof value.lastSyncAt === 'number' ? value.lastSyncAt : null,
+    configRevision: nonNegativeInteger(value.configRevision),
+    configKey: typeof value.configKey === 'string' ? value.configKey : null,
   };
 }
 
@@ -67,6 +77,16 @@ export async function writeSyncState(meta: MetaStore, state: SyncState): Promise
   const bases: Record<string, string> = {};
   for (const path of Object.keys(state.bases).sort()) bases[path] = state.bases[path] as string;
   await meta.set(META_SYNC_STATE, JSON.stringify({ ...state, bases }));
+}
+
+/** Records the shared-config revision (and its config's key) this copy now agrees with. */
+export async function recordConfigRevision(
+  meta: MetaStore,
+  revision: number,
+  key: string,
+): Promise<void> {
+  const state = await readSyncState(meta);
+  await writeSyncState(meta, { ...state, configRevision: revision, configKey: key });
 }
 
 /** Forgets the sync state (before syncing with a different server or brain). */

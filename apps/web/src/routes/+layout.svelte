@@ -7,8 +7,10 @@
   import { page } from '$app/state';
   import { APP_VERSION } from '#lib/version.ts';
   import Icon, { type IconName } from '#lib/components/Icon.svelte';
+  import SyncIndicator from '#lib/components/SyncIndicator.svelte';
   import { applyUpdate, updateAvailable } from '#lib/brain/updates.ts';
   import { brain, host, retry } from '#lib/ui/brain.svelte.ts';
+  import { startSync, syncState } from '#lib/ui/sync.svelte.ts';
   import { shownScheme, startTheme, toggleTheme } from '#lib/ui/theme.svelte.ts';
   import { startViewportTracking } from '#lib/ui/viewport.ts';
 
@@ -34,6 +36,9 @@
 
   const editing = $derived(page.route.id?.startsWith('/edit/') ?? false);
   const memoryOnly = $derived(brain.storage?.kind === 'memory');
+  // Conflict copies from a sync: worth a line everywhere but where they are listed.
+  const conflicts = $derived(syncState.view?.connected ? syncState.view.conflicts : 0);
+  const onMore = $derived(page.url.pathname === resolve('/more'));
 
   // A new version of the app installed in the background and waiting.
   let updateReady = $state(false);
@@ -81,10 +86,12 @@
     const stopTheme = startTheme();
     const stopViewport = startViewportTracking();
     void host().catch(() => {});
+    const stopSync = startSync();
     const stopUpdates = updateAvailable.subscribe((ready) => (updateReady = ready));
     return () => {
       stopTheme();
       stopViewport();
+      stopSync();
       stopUpdates();
     };
   });
@@ -101,6 +108,7 @@
     </a>
     <small class="version">v{APP_VERSION}</small>
     <span class="spacer"></span>
+    <SyncIndicator />
     <button
       class="ghost icon theme-toggle"
       type="button"
@@ -137,6 +145,16 @@
         <button type="button" class="primary" onclick={reloadForUpdate} disabled={updating}>
           {updating ? 'Reloading…' : 'Reload'}
         </button>
+      </div>
+    {/if}
+    {#if conflicts > 0 && !onMore && !editing}
+      <div class="notice conflicts-notice" role="status" data-testid="conflicts-notice">
+        <span>
+          {conflicts === 1
+            ? 'Sync kept a note twice: it was changed here and on the server.'
+            : `Sync kept ${conflicts} notes twice: they were changed here and on the server.`}
+        </span>
+        <a class="button" href="{resolve('/more')}#sync-conflicts">Review</a>
       </div>
     {/if}
     {#if memoryOnly}
@@ -241,6 +259,7 @@
 
   .memory-warning,
   .open-error,
+  .conflicts-notice,
   .update {
     margin: 0 0 var(--space-4);
     font-size: 0.9rem;
@@ -255,7 +274,8 @@
     margin-top: var(--space-3);
   }
 
-  .update {
+  .update,
+  .conflicts-notice {
     display: flex;
     flex-wrap: wrap;
     align-items: center;

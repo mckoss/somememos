@@ -90,7 +90,10 @@ export const diaryCommand: Command = {
         date: entry.date,
         created: entry.created,
       };
-      emit(ctx, globals.json, record, (r) => brain.displayPath(r.path));
+      // The file to write: with a working folder set only by the environment
+      // (other paths are shown brain-relative there), its full path.
+      const bare = brain.remote !== null && !brain.remote.connected;
+      emit(ctx, globals.json, record, (r) => (bare ? r.file : brain.displayPath(r.path)));
       return EXIT_OK;
     });
   },

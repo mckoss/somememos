@@ -5,9 +5,9 @@
 // and an offline copy's sync side) throw a `CommandError` saying they are
 // not available in remote mode.
 
-import { type engine, storage, type sync } from '@somememos/core';
+import { type engine, storage, sync as coreSync, type sync } from '@somememos/core';
 import { CommandError } from '../brain/output.js';
-import { type RemoteClient, SYNC_TIMEOUT_MS, encodeNotePath } from './client.js';
+import { type RemoteClient, RemoteError, SYNC_TIMEOUT_MS, encodeNotePath } from './client.js';
 
 type Engine = engine.Engine;
 
@@ -50,8 +50,28 @@ export interface RemoteEngine extends Engine {
     commit: string,
     options?: { readonly message?: string | null; readonly baseHash?: string | null },
   ): Promise<engine.SaveResult>;
-  /** One sync round (`POST …/sync`), for an offline copy's `runSync`. */
+  /**
+   * One sync round (`POST …/sync`), for an offline copy's `runSync`. A 409
+   * `config-changed` becomes a `sync.ConfigChangedError`.
+   */
   sync(request: sync.SyncRequest): Promise<sync.SyncResponse>;
+  /**
+   * One change set (`POST …/changes`): every op applied, as one change
+   * record and one commit, or none (status `conflict`, with each stale file).
+   */
+  changes(request: sync.BatchRequest): Promise<sync.BatchResult>;
+  /** The brain's shared config and its revision (`GET …/config`). */
+  getConfig(): Promise<sync.ConfigView>;
+  /** Replaces the shared config (`PUT …/config`); a stale base resolves to status `conflict`. */
+  putConfig(request: sync.ConfigPutRequest): Promise<sync.ConfigPutResult>;
+}
+
+/** The config a 409 `config-changed`/`config-conflict` carries, or null. */
+function staleConfig(error: unknown, code: string): sync.ConfigView | null {
+  if (!(error instanceof RemoteError) || error.status !== 409 || error.code !== code) return null;
+  const { config, revision } = error.details as { config?: unknown; revision?: unknown };
+  if (typeof revision !== 'number' || !config || typeof config !== 'object') return null;
+  return { revision, config: config as sync.SharedConfig };
 }
 
 /** Thrown by engine methods the server does not offer. */
@@ -184,12 +204,40 @@ export function createRemoteEngine(client: RemoteClient): RemoteEngine {
         },
         resultStatuses: [409],
       }),
-    sync: (request) =>
-      client.brain('POST', 'sync', {
+    sync: async (request) => {
+      try {
+        return await client.brain<sync.SyncResponse>('POST', 'sync', {
+          body: request,
+          idempotent: true, // retries re-send the same ids (PLAN.md section 7)
+          timeoutMs: SYNC_TIMEOUT_MS,
+        });
+      } catch (error) {
+        const view = staleConfig(error, 'config-changed');
+        if (view) throw new coreSync.ConfigChangedError(view);
+        throw error;
+      }
+    },
+    changes: (request) =>
+      client.brain<sync.BatchResult>('POST', 'changes', {
         body: request,
-        idempotent: true, // retries re-send the same ids (PLAN.md section 7)
+        // Every op carries its base, so a repeated request is all `unchanged`.
+        idempotent: true,
+        resultStatuses: [409],
         timeoutMs: SYNC_TIMEOUT_MS,
       }),
+    getConfig: () => client.brain<sync.ConfigView>('GET', 'config'),
+    putConfig: async (request) => {
+      try {
+        return await client.brain<sync.ConfigPutResult>('PUT', 'config', {
+          body: request,
+          idempotent: true,
+        });
+      } catch (error) {
+        const view = staleConfig(error, 'config-conflict');
+        if (view) return { status: 'conflict', ...view };
+        throw error;
+      }
+    },
   };
   return remote;
 }

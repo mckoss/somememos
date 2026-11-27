@@ -13,6 +13,8 @@ export class HttpError extends Error {
     readonly code: string,
     message: string,
     readonly headers: Readonly<Record<string, string>> = {},
+    /** More fields for the error body (e.g. the current config of a refused config change). */
+    readonly extra: Readonly<Record<string, unknown>> = {},
   ) {
     super(message);
   }

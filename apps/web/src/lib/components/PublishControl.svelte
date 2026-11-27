@@ -1,7 +1,9 @@
 <script lang="ts">
   // The blog post publish control (PLAN.md section 8). It only asks for
   // `published: true` to be written or removed; the note's text stays the one
-  // record of whether the post is public.
+  // record of whether the post is public. With sync, it also says whether the
+  // published version has reached the server yet (`synced`).
+  import type { NoteSyncState } from '#lib/brain/host.ts';
   import Dialog from './Dialog.svelte';
   import Icon from './Icon.svelte';
 
@@ -9,25 +11,57 @@
     published,
     onchange,
     compact = false,
+    synced = 'off',
+    address = null,
   }: {
+    /** The post's public address (when the blog is on), shown as a link once it is public. */
+    address?: string | null;
     published: boolean;
     onchange: (published: boolean) => void | Promise<void>;
     compact?: boolean;
+    /** Whether this version is on the server: 'off' when this device doesn't sync. */
+    synced?: NoteSyncState;
   } = $props();
+
+  const waiting = $derived(published && synced === 'waiting');
 
   let confirmOpen = $state(false);
 </script>
 
 <div class="publish" class:compact class:live={published}>
   <div class="state">
-    <span class="badge {published ? 'published' : 'draft'}" data-testid="publish-badge">
-      {published ? 'Published' : 'Draft'}
+    <span
+      class="badge {published ? 'published' : 'draft'}"
+      class:waiting
+      data-testid="publish-badge"
+      data-sync={synced}
+    >
+      {published ? (waiting ? 'Published, waiting to sync' : 'Published') : 'Draft'}
     </span>
+    {#if published && synced === 'synced' && address}
+      <!-- The public page is server-rendered, outside the app's router: a full URL. -->
+      <!-- eslint-disable svelte/no-navigation-without-resolve -->
+      <a
+        class="public-link"
+        href={address}
+        target="_blank"
+        rel="noopener"
+        data-testid="post-address"
+      >
+        {compact ? 'Public page' : address}
+      </a>
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
+    {/if}
     {#if !compact}
       <span class="explain">
-        {#if published}
-          Waiting to be published: the post goes public when this brain syncs with the server. Sync
-          isn’t available yet, so for now it stays on this device.
+        {#if published && synced === 'synced'}
+          Public: the server has this version of the post.
+        {:else if published && synced === 'waiting'}
+          Waiting to be published: the post goes public when this version reaches the server, at the
+          next sync.
+        {:else if published}
+          Published on this device. It goes public once this device syncs with a server (More →
+          Sync).
         {:else}
           A draft is private. Publishing adds <code>published: true</code> to the front matter, which
           you can also type yourself.
@@ -50,8 +84,9 @@
     website. Links to your private notes are shown as plain text.
   </p>
   <p class="hint">
-    Sync isn’t available yet, so nothing leaves this device until it is. You can unpublish at any
-    time.
+    {synced === 'off'
+      ? 'This device doesn’t sync with a server yet, so nothing leaves it until it does.'
+      : 'It goes public at the next sync.'} You can unpublish at any time.
   </p>
   {#snippet actions(close)}
     <button type="button" onclick={close}>Cancel</button>
@@ -106,6 +141,17 @@
 
   .compact .state {
     flex: none;
+  }
+
+  .badge.waiting {
+    border-style: dashed;
+    color: var(--down);
+    border-color: var(--down);
+  }
+
+  .public-link {
+    overflow-wrap: anywhere;
+    font-size: 0.9rem;
   }
 
   .explain {

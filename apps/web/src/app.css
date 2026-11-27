@@ -229,6 +229,7 @@ button.icon {
 input[type='text'],
 input[type='search'],
 input[type='date'],
+input[type='password'],
 input:not([type]),
 select,
 textarea {

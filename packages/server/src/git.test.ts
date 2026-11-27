@@ -18,6 +18,26 @@ async function repo(): Promise<{ repo: BrainRepo; content: storage.ContentStore 
 }
 
 describe('the git content store', () => {
+  it('refuses a note whose name a folder has, or below a note, without failing', async () => {
+    const { content } = await repo();
+    await content.write('memos/plan.md', 'plan');
+    await content.write('memos/trip.md/day-one.md', 'day one');
+    for (const clash of [
+      () => content.write('memos/plan.md/sub.md', 'x'),
+      () => content.write('memos/trip.md', 'x'),
+      () => content.rename('memos/plan.md', 'memos/trip.md'),
+    ]) {
+      let error: unknown;
+      try {
+        await clash();
+      } catch (e) {
+        error = e;
+      }
+      expect(error).toMatchObject({ name: 'EngineError', code: 'exists' });
+    }
+    expect(await content.read('memos/plan.md')).toBe('plan');
+  });
+
   it('stores text byte for byte, with folders, mtimes, renames and removes', async () => {
     const { content, repo: r } = await repo();
     const text = '# Kiln\r\n\nCafé ✓ — firing log\n';

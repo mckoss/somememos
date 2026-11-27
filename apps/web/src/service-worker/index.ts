@@ -71,6 +71,8 @@ self.addEventListener('fetch', (event) => {
   if (dev || request.method !== 'GET') return;
   const target = new URL(request.url);
   if (target.origin !== scope.origin) return;
+  // Public blog pages are the server's, not the app's: never cached, never the offline shell.
+  if (target.pathname.startsWith(url('blog/'))) return;
 
   if (precached.has(target.pathname) && target.pathname !== shellPath) {
     event.respondWith((async () => (await fromCache(target.pathname)) ?? fetch(request))());

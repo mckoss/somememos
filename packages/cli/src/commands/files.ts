@@ -4,6 +4,8 @@
 // files; in remote mode the server does them, and the working folder follows
 // when its copy is untouched.
 
+import { isAbsolute } from 'node:path';
+import { markdown } from '@somememos/core';
 import {
   CommandError,
   GLOBAL_OPTIONS_HELP,
@@ -128,8 +130,12 @@ export const mvCommand: Command = {
     const message = messageOf(values);
     return withSession(ctx, brainOptions(globals), async (session) => {
       const from = resolveNotePath(session, positionals[0] as string);
-      const to = session.brainPath(positionals[1] as string);
-      if (to === null || to === '') throw new UsageError(`${positionals[1]} is outside the brain`);
+      const given = positionals[1] as string;
+      // Relative to the working directory, or brain-relative when the working
+      // directory is outside the brain (remote mode set by the environment).
+      let to = session.brainPath(given);
+      if (to === null && !isAbsolute(given)) to = markdown.normalizePath(given);
+      if (to === null || to === '') throw new UsageError(`${given} is outside the brain`);
       const remote = session.remote;
       let fromState = null;
       if (remote) {

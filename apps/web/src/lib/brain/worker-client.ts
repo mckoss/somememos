@@ -1,7 +1,13 @@
 // The page's side of the worker messages (./protocol.ts): a `Transport` that
 // sends requests to a worker and matches its responses.
 
-import { fromWireError, type RequestMessage, type Target, type WorkerMessage } from './protocol.ts';
+import {
+  fromWireError,
+  type RequestMessage,
+  type Target,
+  type WorkerEventMessage,
+  type WorkerMessage,
+} from './protocol.ts';
 
 /** Sends a request and resolves with its response's value (or rejects with its error). */
 export interface Transport {
@@ -14,7 +20,10 @@ interface Pending {
   reject(error: Error): void;
 }
 
-export function workerTransport(worker: Worker): Transport {
+export function workerTransport(
+  worker: Worker,
+  onEvent: (event: WorkerEventMessage) => void = () => undefined,
+): Transport {
   let nextId = 1;
   let closed: Error | undefined;
   const pending = new Map<number, Pending>();
@@ -26,6 +35,10 @@ export function workerTransport(worker: Worker): Transport {
 
   worker.addEventListener('message', (event: MessageEvent<WorkerMessage>) => {
     const message = event.data;
+    if (message?.type === 'event') {
+      onEvent(message);
+      return;
+    }
     if (message?.type !== 'response') return;
     const p = pending.get(message.id);
     if (!p) return;

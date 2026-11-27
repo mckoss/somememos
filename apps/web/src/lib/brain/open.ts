@@ -27,6 +27,7 @@
 // get the files and fails with `StorageBusyError` rather than diverging.
 
 import { engine as core, type storage } from '@somememos/core';
+import type { BlogSettingsView, BlogSlugCheck, SyncView } from '../sync/types.ts';
 import type {
   BrainChange,
   BrainHost,
@@ -45,9 +46,11 @@ import {
   type OpenRequest,
   type Target,
   type WireError,
+  type WorkerEventMessage,
   type WorkerStorage,
 } from './protocol.ts';
 import { workerTransport, type Transport } from './worker-client.ts';
+import { clearAllDrafts } from '../ui/storage.ts';
 
 const OWNER_LOCK = 'somememos:brain:owner';
 const TAB_LOCK_PREFIX = 'somememos:brain:tab:';
@@ -84,6 +87,7 @@ type TabMessage =
       readonly origin: string;
       readonly operation: string;
       readonly config: BrainConfig;
+      readonly sync?: SyncView;
     };
 
 interface RemoteCall {
@@ -105,6 +109,9 @@ function changeOperation(target: Target, method: string): string | null {
   if (target === 'engine') return READ_ONLY_METHODS.has(method) ? null : method;
   if (method === 'importEnd') return 'importFiles';
   if (method === 'updateConfig' || method === 'reset') return method;
+  // Sync's own status changes arrive as worker events; these change notes.
+  if (method === 'syncResolve' || method === 'syncStartOver' || method === 'syncResolveConfig')
+    return 'sync';
   return null;
 }
 
@@ -196,7 +203,7 @@ class BrainConnection {
       type: 'module',
       name: 'somememos-brain',
     });
-    const transport = workerTransport(worker);
+    const transport = workerTransport(worker, (event) => this.onWorkerEvent(event));
     const request: OpenRequest = problem
       ? { storage: 'memory', reason: memoryReason(problem) }
       : { storage: 'auto' };
@@ -216,6 +223,19 @@ class BrainConnection {
     this.setOwner(this.tabId);
     this.post({ type: 'owner', id: this.tabId });
     if (tookOver) this.emit({ source: 'this-tab', operation: 'reopen' });
+  }
+
+  /** The worker's sync status changed: tell this tab and the others. */
+  private onWorkerEvent(event: WorkerEventMessage): void {
+    if (event.config) this.config = event.config;
+    this.post({
+      type: 'changed',
+      origin: this.tabId,
+      operation: event.operation,
+      config: this.config,
+      sync: event.sync,
+    });
+    this.emit({ source: 'this-tab', operation: event.operation, sync: event.sync });
   }
 
   private fail(error: unknown): void {
@@ -283,6 +303,7 @@ class BrainConnection {
         this.emit({
           source: message.origin === this.tabId ? 'this-tab' : 'other-tab',
           operation: message.operation,
+          ...(message.sync ? { sync: message.sync } : {}),
         });
         break;
     }
@@ -462,6 +483,9 @@ function createHost(conn: BrainConnection): BrainHost {
 
     async reset() {
       await conn.call('host', 'reset', []);
+      // Unsaved editor drafts hold note text, in this origin's localStorage
+      // (shared by every tab): they go with the notes.
+      clearAllDrafts();
     },
 
     subscribe(listener) {
@@ -469,6 +493,44 @@ function createHost(conn: BrainConnection): BrainHost {
       return () => {
         conn.listeners.delete(listener);
       };
+    },
+
+    sync: {
+      probe: () => conn.call('host', 'syncProbe', []) as ReturnType<BrainHost['sync']['probe']>,
+      listBrains: (token) =>
+        conn.call('host', 'syncListBrains', [token]) as ReturnType<BrainHost['sync']['listBrains']>,
+      plan: (request) =>
+        conn.call('host', 'syncPlan', [request]) as ReturnType<BrainHost['sync']['plan']>,
+      connect: (request, confirmed = false) =>
+        conn.call('host', 'syncConnect', [request, confirmed]) as Promise<SyncView>,
+      disconnect: () => conn.call('host', 'syncDisconnect', []) as Promise<SyncView>,
+      setToken: (token) => conn.call('host', 'syncSetToken', [token]) as Promise<SyncView>,
+      status: () => conn.call('host', 'syncView', []) as Promise<SyncView>,
+      syncNow: () => conn.call('host', 'syncNow', []) as Promise<SyncView>,
+      startOver: () => conn.call('host', 'syncStartOver', []) as Promise<SyncView>,
+      hint: async (kind) => {
+        await conn.call('host', 'syncHint', [kind]);
+      },
+      conflicts: () =>
+        conn.call('host', 'syncConflicts', []) as ReturnType<BrainHost['sync']['conflicts']>,
+      resolveConflict: (path, choice) =>
+        conn.call('host', 'syncResolve', [path, choice]) as Promise<{ kept: string | null }>,
+      blogSettings: () => conn.call('host', 'syncBlogSettings', []) as Promise<BlogSettingsView>,
+      saveBlogSettings: (settings) =>
+        conn.call('host', 'syncSaveBlogSettings', [settings]) as Promise<BlogSettingsView>,
+      checkBlogSlug: (slug) =>
+        conn.call('host', 'syncCheckBlogSlug', [slug]) as Promise<BlogSlugCheck>,
+      postAddress: (path) => conn.call('host', 'syncPostAddress', [path]) as Promise<string | null>,
+      configConflict: () =>
+        conn.call('host', 'syncConfigConflict', []) as ReturnType<
+          BrainHost['sync']['configConflict']
+        >,
+      resolveConfigConflict: (choice) =>
+        conn.call('host', 'syncResolveConfig', [choice]) as Promise<SyncView>,
+      noteState: (path, hash) =>
+        conn.call('host', 'syncNoteState', [path, hash]) as ReturnType<
+          BrainHost['sync']['noteState']
+        >,
     },
   };
 }

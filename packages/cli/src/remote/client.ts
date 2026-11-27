@@ -30,6 +30,8 @@ export class RemoteError extends CommandError {
     readonly status: number,
     /** The server's error code, or a client-side one (`unreachable`, `timeout`, `bad-response`). */
     readonly code: string,
+    /** The error body's other fields (a 409's current config and revision). */
+    readonly details: Readonly<Record<string, unknown>> = {},
   ) {
     super(message);
   }
@@ -141,16 +143,18 @@ export function createRemoteClient(options: RemoteClientOptions): RemoteClient {
     for (const [key, value] of Object.entries(opts.query ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
+    // Content-Type on every request, with or without a body: SvelteKit, in
+    // front of the API, refuses a cross-site POST, PUT, PATCH or DELETE whose
+    // content type is missing or form-like ("Cross-site … form submissions
+    // are forbidden"), and a CLI request has no Origin to make it same-site.
     const headers: Record<string, string> = {
       accept: 'application/json',
+      'content-type': 'application/json',
       'x-somememos-client': clientId,
     };
     if (!opts.anonymous) headers.authorization = `Bearer ${token}`;
     let body: string | undefined;
-    if (opts.body !== undefined) {
-      headers['content-type'] = 'application/json';
-      body = JSON.stringify(opts.body);
-    }
+    if (opts.body !== undefined) body = JSON.stringify(opts.body);
     const timeoutMs = opts.timeoutMs ?? defaultTimeout;
     const idempotent = opts.idempotent ?? method === 'GET';
     let response: Response;
@@ -236,8 +240,15 @@ function toError(
   if (code === 'too-many-attempts') {
     return new RemoteError(`the server says: ${message}`, status, code);
   }
-  if (code !== '')
-    return new RemoteError(`the server refused the request: ${message || code}`, status, code);
+  if (code !== '') {
+    const { code: _c, message: _m, path: _p, ...details } = body as Record<string, unknown>;
+    return new RemoteError(
+      `the server refused the request: ${message || code}`,
+      status,
+      code,
+      details,
+    );
+  }
   if (status === 404) {
     return new RemoteError(
       `${origin} has no somememos API at that address (HTTP 404); check the server URL`,

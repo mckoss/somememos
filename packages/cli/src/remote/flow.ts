@@ -4,7 +4,7 @@
 // server's version is saved beside it as `<name>.server.md`.
 
 import { existsSync } from 'node:fs';
-import { engine, markdown } from '@somememos/core';
+import { engine, markdown, type sync } from '@somememos/core';
 import type { RemoteSession } from '../brain/session.js';
 import { pendingFiles, serverCopyPath } from './workfolder.js';
 
@@ -121,6 +121,11 @@ export interface CommitOutcome {
   readonly skipped: string[];
   /** Edited or new files left out by the path filters. */
   readonly remaining: string[];
+  /**
+   * Files sent in a change set that was refused because another file in it
+   * conflicted: nothing of it landed; they are sent again by the next commit.
+   */
+  readonly heldBack: string[];
 }
 
 /**
@@ -150,6 +155,8 @@ export async function commitFolder(
   const failed: CommitOutcome['failed'][number][] = [];
   const skipped: string[] = [];
 
+  // --- Which files go into the change set, each with its base.
+  const sending: { file: (typeof chosen)[number]; base: string | null }[] = [];
   for (const file of chosen) {
     const role = classifier.classify(file.path)?.role;
     if (role === 'excluded') {
@@ -178,68 +185,106 @@ export async function commitFolder(
       base = file.conflict === '' ? null : file.conflict;
     }
     if (base === '') base = null;
-    let result: engine.SaveResult;
-    try {
-      result = await remote.engine.saveNote(file.path, file.text, {
-        baseHash: base,
-        ...(options.message !== null ? { message: options.message } : {}),
-      });
-    } catch (error) {
-      if (engine.isEngineError(error)) {
-        failed.push({ path: file.path, code: error.code, message: error.message });
-        continue;
-      }
-      throw error;
-    }
-    const fp = folder.fingerprintOf(file.path);
-    if (result.status === 'conflict' && result.currentHash === file.hash) {
-      // A retried request that had been applied: the server has this text.
-      unchanged.push(file.path);
-      folder.update((notes) => {
-        notes[file.path] = { base: file.hash, fingerprint: fp };
+    if (role === 'source' && base !== null) {
+      failed.push({
+        path: file.path,
+        code: 'source-immutable',
+        message: `${file.path} is a source; sources are immutable once they exist`,
       });
       continue;
     }
+    sending.push({ file, base });
+  }
+
+  // --- One change set: all of it lands, as one change record, or none.
+  const heldBack: string[] = [];
+  if (sending.length > 0) {
+    let result: sync.BatchResult;
+    try {
+      result = await remote.engine.changes({
+        ...(options.message !== null ? { message: options.message } : {}),
+        ops: sending.map(({ file, base }) => ({
+          op: 'write' as const,
+          path: file.path,
+          text: file.text,
+          baseHash: base,
+        })),
+      });
+    } catch (error) {
+      if (!engine.isEngineError(error)) throw error;
+      const refused = error as engine.EngineError;
+      // Refused as a whole (a role changed on the server meanwhile): nothing landed.
+      for (const { file } of sending) {
+        if (refused.path === null || refused.path === file.path) {
+          failed.push({ path: file.path, code: refused.code, message: refused.message });
+        } else heldBack.push(file.path);
+      }
+      result = { status: 'saved', change: null, results: [] };
+    }
     if (result.status === 'conflict') {
-      if (result.currentText === null || result.currentHash === null) {
+      const stale = new Map(result.conflicts.map((c) => [c.path, c]));
+      for (const { file } of sending) {
+        const c = stale.get(file.path);
+        if (!c) {
+          heldBack.push(file.path);
+          continue;
+        }
+        if (c.currentHash === file.hash) {
+          // The server has exactly this text already.
+          const fp = folder.fingerprintOf(file.path);
+          unchanged.push(file.path);
+          folder.update((notes) => {
+            notes[file.path] = { base: file.hash, fingerprint: fp };
+          });
+          continue;
+        }
+        if (c.currentText === null || c.currentHash === null) {
+          folder.update((notes) => {
+            delete notes[file.path];
+          });
+          conflicts.push({
+            path: file.path,
+            serverCopy: null,
+            instruction: `${show(file.path)}: not committed: the server no longer has this note (deleted or renamed meanwhile); your copy is kept, and committing again adds it back`,
+          });
+          continue;
+        }
+        const copy = serverCopyPath(file.path);
+        folder.writeText(copy, c.currentText);
+        const current = c.currentHash;
         folder.update((notes) => {
-          delete notes[file.path];
+          notes[file.path] = {
+            base: file.kind === 'edited' ? file.base : '',
+            fingerprint: null,
+            conflict: current,
+          };
         });
         conflicts.push({
           path: file.path,
-          serverCopy: null,
-          instruction: `${show(file.path)}: not committed: the server no longer has this note (deleted or renamed meanwhile); your copy is kept, and committing again adds it back`,
+          serverCopy: copy,
+          instruction: `${show(file.path)}: not committed: the server has a newer version, saved as ${show(copy)}; merge it into ${show(file.path)}, delete ${show(copy)}, then commit again`,
         });
-        continue;
       }
-      const copy = serverCopyPath(file.path);
-      folder.writeText(copy, result.currentText);
-      const current = result.currentHash;
-      folder.update((notes) => {
-        notes[file.path] = {
-          base: file.kind === 'edited' ? file.base : '',
-          fingerprint: null,
-          conflict: current,
-        };
-      });
-      conflicts.push({
-        path: file.path,
-        serverCopy: copy,
-        instruction: `${show(file.path)}: not committed: the server has a newer version, saved as ${show(copy)}; merge it into ${show(file.path)}, delete ${show(copy)}, then commit again`,
-      });
-      continue;
+    } else {
+      const byPath = new Map(result.results.map((r) => [r.path, r]));
+      for (const { file } of sending) {
+        const r = byPath.get(file.path);
+        if (!r) continue;
+        const fp = folder.fingerprintOf(file.path);
+        const hash = r.hash ?? file.hash;
+        folder.update((notes) => {
+          notes[file.path] = { base: hash, fingerprint: fp };
+        });
+        if (r.status === 'unchanged') unchanged.push(file.path);
+        else
+          saved.push({
+            path: file.path,
+            hash,
+            created: file.kind === 'new' || (file.kind === 'edited' && file.base === ''),
+            change: result.change,
+          });
+      }
     }
-    folder.update((notes) => {
-      notes[file.path] = { base: result.hash, fingerprint: fp };
-    });
-    if (result.status === 'unchanged') unchanged.push(file.path);
-    else
-      saved.push({
-        path: file.path,
-        hash: result.hash,
-        created: result.created,
-        change: result.change,
-      });
   }
 
   return {
@@ -250,6 +295,7 @@ export async function commitFolder(
     failed,
     skipped,
     remaining,
+    heldBack,
   };
 }
 

@@ -4,6 +4,7 @@
 
 import { join } from 'node:path';
 import { VERSION } from '@somememos/core';
+import { MIGRATIONS } from '@somememos/pg-store';
 import { describe, expect, it } from 'vitest';
 import { FailureLimiter, hashToken, parseTokens, type Authorizer } from './auth.js';
 import { createApp } from './http.js';
@@ -20,6 +21,7 @@ import {
   testPool,
 } from './test-env.testing.js';
 
+const LATEST = MIGRATIONS.at(-1)?.version;
 const quiet = { error: () => undefined, info: () => undefined, warn: () => undefined };
 
 async function call(
@@ -81,7 +83,11 @@ describePg('the HTTP API', () => {
     expect(r.body).toMatchObject({
       version: VERSION,
       status: 'ok',
-      database: { configured: true, connected: true, migration: { current: 3, expected: 3 } },
+      database: {
+        configured: true,
+        connected: true,
+        migration: { current: LATEST, expected: LATEST },
+      },
     });
   });
 

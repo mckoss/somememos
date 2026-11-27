@@ -38,9 +38,40 @@ function withOfflineShell(inner: Adapter): Adapter {
   };
 }
 
+/**
+ * The app's content security policy (`csp` below). SvelteKit adds the hashes of the inline
+ * scripts it writes into each page. The brain worker and SQLite's
+ * WebAssembly need `worker-src 'self'` and `'wasm-unsafe-eval'`; images in
+ * notes may come from any https address, as they always could. Notes are
+ * rendered with DOMPurify (#lib/ui/markdown.ts); this is the second line.
+ * `frame-ancestors` only works as a header, which SvelteKit sends for pages
+ * it renders; hooks.server.ts adds `X-Frame-Options` as well. The public
+ * blog sets its own, stricter policy (#lib/server/blog/pages.ts).
+ */
 export default defineConfig({
   // SvelteKit 3 takes its configuration here; there is no svelte.config.js.
-  plugins: [sveltekit({ adapter: withOfflineShell(adapterNode()) })],
+  plugins: [
+    sveltekit({
+      adapter: withOfflineShell(adapterNode()),
+      csp: {
+        mode: 'hash',
+        directives: {
+          'default-src': ['self'],
+          'script-src': ['self', 'wasm-unsafe-eval'],
+          'style-src': ['self', 'unsafe-inline'],
+          'img-src': ['self', 'data:', 'blob:', 'https:'],
+          'font-src': ['self'],
+          'connect-src': ['self'],
+          'worker-src': ['self'],
+          'manifest-src': ['self'],
+          'object-src': ['none'],
+          'base-uri': ['self'],
+          'form-action': ['self'],
+          'frame-ancestors': ['none'],
+        },
+      },
+    }),
+  ],
   define,
   // The brain worker (src/lib/brain/worker.ts) is an ES module worker: it
   // imports SQLite WebAssembly, which loads its .wasm with

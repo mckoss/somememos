@@ -83,3 +83,6 @@ jobs:
 
       - name: Browser tests
         run: npm run e2e -w @somememos/web
+        env:
+          # The sync suite (apps/web/e2e/sync*.spec.ts) creates its own database in this server.
+          SOMEMEMOS_TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/somememos_test

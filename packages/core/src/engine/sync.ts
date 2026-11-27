@@ -30,6 +30,16 @@ import {
   type SyncResponse,
 } from '../sync/protocol.js';
 import { readSyncState, writeSyncState, clearSyncState, type SyncState } from '../sync/state.js';
+import {
+  ConfigChangedError,
+  ConfigConflictError,
+  configWithClient,
+  sharedConfigKey,
+  sharedConfigOf,
+  type ConfigPutRequest,
+  type ConfigPutResult,
+  type ConfigView,
+} from '../sync/config.js';
 import { addPendingRemote, type PendingRemote } from '../indexing/state.js';
 import {
   EngineError,
@@ -273,7 +283,9 @@ export function createSyncMethods(ctx: SyncContext) {
     const local = await localNotes();
     let pendingNotes = 0;
     for (const [path, hash] of local) if (state.bases[path] !== hash) pendingNotes++;
-    for (const path of Object.keys(state.bases)) if (!local.has(path)) pendingNotes++;
+    for (const path of Object.keys(state.bases)) {
+      if (!local.has(path) && accepts(path)) pendingNotes++;
+    }
     return {
       since: state.since,
       pushedEventSeq: state.pushedEventSeq,
@@ -302,8 +314,12 @@ export function createSyncMethods(ctx: SyncContext) {
 
     // --- Edits: the difference between the notes and their bases.
     const created = [...local.keys()].filter((p) => bases[p] === undefined).sort();
+    // A base whose path this config no longer accepts (a newly excluded
+    // folder, or one that lost its role) is not a delete: the note stays on
+    // this copy and on the server, unsynced, and its base is kept for the day
+    // the folder is accepted again.
     const gone = Object.keys(bases)
-      .filter((p) => !local.has(p))
+      .filter((p) => !local.has(p) && accepts(p))
       .sort();
     const changed = [...local.keys()]
       .filter((p) => bases[p] !== undefined && bases[p] !== local.get(p))
@@ -400,13 +416,24 @@ export function createSyncMethods(ctx: SyncContext) {
     const allChanges = await changesAfter(state.pushedChangeSeq);
     const changes = allChanges.slice(0, limits.maxChanges);
     if (allChanges.length > changes.length) more = true;
+    // Entries naming a path this config excludes are never sent (the cursor
+    // still moves past them): they were logged before the folder was excluded.
+    const sendable = entries.filter(
+      (e) =>
+        !isExcludedItem(classifier, e.item) &&
+        !(e.kind === 'rename' && isExcludedItem(classifier, e.to)),
+    );
+    const sendableChanges = changes.filter(
+      (c) => !c.paths.some((p) => isExcludedItem(classifier, p)),
+    );
 
     return {
       request: {
         since: state.since,
         client: config.clientId,
-        events: entries.map(toSyncEvent),
-        changes: changes.map((c) => truncateChangeMessage(toSyncChange(c))),
+        ...(state.configRevision > 0 ? { configRevision: state.configRevision } : {}),
+        events: sendable.map(toSyncEvent),
+        changes: sendableChanges.map((c) => truncateChangeMessage(toSyncChange(c))),
         edits,
       },
       cursor: {
@@ -586,6 +613,7 @@ export function createSyncMethods(ctx: SyncContext) {
     }
 
     await writeSyncState(stores.meta, {
+      ...(await readSyncState(stores.meta)),
       since: response.mutation,
       pushedEventSeq: nextEventSeq,
       pushedChangeSeq: nextChangeSeq,
@@ -625,35 +653,177 @@ export function createSyncMethods(ctx: SyncContext) {
   };
 }
 
-/** Sends one sync request and returns the server's response (over HTTP, or directly in tests). */
+/**
+ * Sends one sync request and returns the server's response (over HTTP, or
+ * directly in tests). A transport turns the server's 409 `config-changed`
+ * into a `sync.ConfigChangedError`.
+ */
 export type SyncTransport = (request: PreparedSync['request']) => Promise<SyncResponse>;
 
+/**
+ * How a copy keeps its shared config in step with the server
+ * (`sync.SharedConfig`). The host owns where its config lives and how it is
+ * replaced; the logic is `syncSharedConfig`, `adoptServerConfig` and
+ * `resolveConfigConflict`, which `runSync` calls.
+ */
+export interface SharedConfigSync {
+  /** This copy's config now. */
+  current(): BrainConfig | Promise<BrainConfig>;
+  /** This copy's sync state (`sync.readSyncState`). */
+  readState(): Promise<SyncState>;
+  /** Records the revision (and config key) this copy now agrees with (`sync.recordConfigRevision`). */
+  record(revision: number, key: string): Promise<void>;
+  /** Replaces this copy's config and re-indexes (`engine.applyConfigChange`). */
+  apply(config: BrainConfig): Promise<void>;
+  /** `GET …/config`. */
+  get(): Promise<ConfigView>;
+  /** `PUT …/config`; a 409 resolves to a result with status `conflict`. */
+  put(request: ConfigPutRequest): Promise<ConfigPutResult>;
+}
+
+/**
+ * What the config step did: nothing to do (`in-step`), sent this copy's
+ * change (`pushed`), or took the server's (`pulled`).
+ */
+export type ConfigStep = 'in-step' | 'pushed' | 'pulled';
+
+/**
+ * The config step before a sync. When this copy does not know the server's
+ * revision yet, it compares configs: equal ones are recorded, different
+ * ones are a conflict. When this copy changed its config since it last
+ * agreed with the server, the change is sent with the revision it was based
+ * on; a server that moved on meanwhile makes it a conflict. Throws
+ * `sync.ConfigConflictError`; never overwrites either side by itself.
+ */
+export async function syncSharedConfig(io: SharedConfigSync): Promise<ConfigStep> {
+  const state = await io.readState();
+  const local = await io.current();
+  const key = sharedConfigKey(local);
+  if (state.configRevision === 0 || state.configKey === null) {
+    const view = await io.get();
+    if (sharedConfigKey(view.config) !== key) {
+      throw new ConfigConflictError(sharedConfigOf(local), view);
+    }
+    await io.record(view.revision, key);
+    return 'in-step';
+  }
+  if (key === state.configKey) return 'in-step';
+  const result = await io.put({
+    baseRevision: state.configRevision,
+    config: sharedConfigOf(local),
+  });
+  if (result.status === 'conflict' && sharedConfigKey(result.config) !== key) {
+    throw new ConfigConflictError(sharedConfigOf(local), result);
+  }
+  await io.record(result.revision, key);
+  return result.status === 'saved' ? 'pushed' : 'in-step';
+}
+
+/**
+ * Takes the server's shared config after a sync round was refused with
+ * `config-changed`, unless this copy changed its own config meanwhile (then
+ * it is a `sync.ConfigConflictError`).
+ */
+export async function adoptServerConfig(io: SharedConfigSync, view: ConfigView): Promise<void> {
+  const state = await io.readState();
+  const local = await io.current();
+  const key = sharedConfigKey(local);
+  const theirs = sharedConfigKey(view.config);
+  if (theirs !== key) {
+    if (state.configKey === null || key !== state.configKey) {
+      throw new ConfigConflictError(sharedConfigOf(local), view);
+    }
+    await io.apply(configWithClient(view.config, local.clientId, "the server's config"));
+  }
+  await io.record(view.revision, theirs);
+}
+
+/**
+ * Settles a `sync.ConfigConflictError`: 'theirs' takes the server's config
+ * (`server`, from the error), 'mine' replaces the server's with this copy's.
+ * If the server changed again meanwhile, 'mine' throws a new conflict.
+ */
+export async function resolveConfigConflict(
+  io: SharedConfigSync,
+  choice: 'mine' | 'theirs',
+  server: ConfigView,
+): Promise<ConfigStep> {
+  const local = await io.current();
+  if (choice === 'theirs') {
+    const theirs = sharedConfigKey(server.config);
+    if (theirs !== sharedConfigKey(local)) {
+      await io.apply(configWithClient(server.config, local.clientId, "the server's config"));
+    }
+    await io.record(server.revision, theirs);
+    return 'pulled';
+  }
+  const key = sharedConfigKey(local);
+  const result = await io.put({ baseRevision: server.revision, config: sharedConfigOf(local) });
+  if (result.status === 'conflict' && sharedConfigKey(result.config) !== key) {
+    throw new ConfigConflictError(sharedConfigOf(local), result);
+  }
+  await io.record(result.revision, key);
+  return 'pushed';
+}
+
 export interface RunSyncResult {
-  /** Rounds made (requests sent). */
+  /** Rounds made (requests sent and applied). */
   readonly rounds: number;
   readonly mutation: number;
   readonly conflicts: SyncConflict[];
   readonly waiting: string[];
   readonly outcomes: SyncOutcome[];
+  /** Notes too large to sync (`sync.SYNC_LIMITS.maxNoteBytes`): they stay on this copy only. */
+  readonly tooLarge: string[];
+  /** What the shared-config step did; null when the sync ran without one. */
+  readonly config: ConfigStep | null;
 }
 
+/** The engine `runSync` drives: an engine, or a function returning the current one (it is replaced when the config changes). */
+export type SyncEngineSource =
+  Pick<Engine, 'prepareSync' | 'applySync'> | (() => Pick<Engine, 'prepareSync' | 'applySync'>);
+
 /**
- * Syncs until nothing is left to push or pull: `prepareSync`, `send`,
+ * Syncs until nothing is left to push or pull: with `config`, the shared
+ * config step first (`syncSharedConfig`), then `prepareSync`, `send`,
  * `applySync`, repeated while the outcome says `more` (at most `maxRounds`
- * times). Calls made on the engine meanwhile (a read, a save) run between
- * rounds; anything they change is picked up by the next round.
+ * times). A round refused with `config-changed` takes the server's config
+ * (`adoptServerConfig`) and is sent again. Calls made on the engine
+ * meanwhile (a read, a save) run between rounds; anything they change is
+ * picked up by the next round.
  */
 export async function runSync(
-  engine: Pick<Engine, 'prepareSync' | 'applySync'>,
+  engine: SyncEngineSource,
   send: SyncTransport,
-  options: PrepareSyncOptions & { readonly maxRounds?: number } = {},
+  options: PrepareSyncOptions & {
+    readonly maxRounds?: number;
+    readonly config?: SharedConfigSync;
+  } = {},
 ): Promise<RunSyncResult> {
-  const { maxRounds = 1000, ...prepare } = options;
+  const { maxRounds = 1000, config, ...prepare } = options;
+  const current = typeof engine === 'function' ? engine : () => engine;
+  let step: ConfigStep | null = config ? await syncSharedConfig(config) : null;
   const outcomes: SyncOutcome[] = [];
-  for (let round = 1; round <= maxRounds; round++) {
-    const prepared = await engine.prepareSync(prepare);
-    const response = await send(prepared.request);
-    const outcome = await engine.applySync(prepared, response);
+  const tooLarge = new Set<string>();
+  let adopted = 0;
+  let round = 0;
+  while (round < maxRounds) {
+    const prepared = await current().prepareSync(prepare);
+    for (const p of prepared.tooLarge) tooLarge.add(p);
+    let response: SyncResponse;
+    try {
+      response = await send(prepared.request);
+    } catch (error) {
+      if (config && error instanceof ConfigChangedError && adopted < 5) {
+        adopted++;
+        await adoptServerConfig(config, error.view);
+        step = 'pulled';
+        continue;
+      }
+      throw error;
+    }
+    round++;
+    const outcome = await current().applySync(prepared, response);
     outcomes.push(outcome);
     if (!outcome.more) {
       return {
@@ -662,6 +832,8 @@ export async function runSync(
         conflicts: outcomes.flatMap((o) => o.conflicts),
         waiting: outcome.waiting,
         outcomes,
+        tooLarge: [...tooLarge].sort(),
+        config: step,
       };
     }
   }

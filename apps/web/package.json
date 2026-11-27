@@ -1,6 +1,6 @@
 {
   "name": "@somememos/web",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "description": "The somememos server and PWA client (SvelteKit).",
   "license": "Apache-2.0",
@@ -14,11 +14,13 @@
     "build": "vite build",
     "preview": "vite preview",
     "start": "node build",
-    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings && tsc --noEmit -p src/service-worker/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json && tsc --noEmit -p e2e-storage/tsconfig.json",
+    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings && tsc --noEmit -p src/service-worker/tsconfig.json && tsc --noEmit -p e2e/tsconfig.json && tsc --noEmit -p e2e-storage/tsconfig.json && tsc --noEmit -p e2e-blog/tsconfig.json",
     "test": "vitest run",
     "e2e:ui": "playwright test -c playwright.config.ts --trace off",
     "e2e:storage": "playwright test -c playwright.storage.config.ts --trace off",
-    "e2e": "npm run e2e:ui && STORAGE_SKIP_BUILD=1 npm run e2e:storage"
+    "e2e:blog": "playwright test -c e2e-blog/playwright.config.ts --trace off",
+    "e2e:sync": "playwright test -c playwright.sync.config.ts --trace off",
+    "e2e": "npm run e2e:ui && STORAGE_SKIP_BUILD=1 npm run e2e:storage && npm run e2e:blog && npm run e2e:sync"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",

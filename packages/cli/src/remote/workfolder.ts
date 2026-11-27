@@ -17,6 +17,7 @@ import { CommandError } from '../brain/output.js';
 import { fingerprint, statFile, walkMarkdown } from '../indexer/walk.js';
 import { SIDECAR_DIR } from '../store/open.js';
 import { MANIFEST_FILE, writeJsonFile } from './config.js';
+import { LockTimeoutError, withFileLock } from './lock.js';
 
 export interface ManifestEntry {
   /** The content hash the note had when fetched or last committed. */
@@ -67,7 +68,7 @@ export interface WorkFolder {
   readonly root: string;
   readonly manifestPath: string;
   read(): Manifest;
-  /** Re-reads the manifest, applies `fn` to its notes, and writes it atomically. */
+  /** Under a lock file: re-reads the manifest, applies `fn` to its notes, and writes it atomically. */
   update(fn: (notes: Record<string, ManifestEntry>) => void): Manifest;
   /** The absolute path of a brain path in this folder (checked: it cannot leave the folder). */
   file(path: string): string;
@@ -188,12 +189,21 @@ export function openWorkFolder(
     manifestPath,
     read,
     update(fn) {
-      const current = read();
-      const notes = { ...current.notes };
-      fn(notes);
-      const next: Manifest = { ...current, notes: sortKeys(notes) };
-      writeJsonFile(manifestPath, next);
-      return next;
+      // Under a lock file, so two CLI processes in one folder never lose an update.
+      mkdirSync(dirname(manifestPath), { recursive: true });
+      try {
+        return withFileLock(manifestPath, () => {
+          const current = read();
+          const notes = { ...current.notes };
+          fn(notes);
+          const next: Manifest = { ...current, notes: sortKeys(notes) };
+          writeJsonFile(manifestPath, next);
+          return next;
+        });
+      } catch (error) {
+        if (error instanceof LockTimeoutError) throw new CommandError(error.message);
+        throw error;
+      }
     },
     file,
     readText,

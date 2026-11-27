@@ -18,7 +18,7 @@ import { HttpError } from './errors.js';
 type Edit = sync.SyncEdit;
 
 const HASH = /^[0-9a-f]{64}$/;
-const REQUEST_KEYS = new Set(['since', 'client', 'events', 'changes', 'edits']);
+const REQUEST_KEYS = new Set(['since', 'client', 'configRevision', 'events', 'changes', 'edits']);
 const EDIT_KEYS = new Set(['id', 'op', 'path', 'to', 'baseHash', 'text']);
 const EVENT_KEYS = new Set(['id', 'kind', 'item', 'to', 'time', 'client']);
 const CHANGE_KEYS = new Set(['id', 'time', 'client', 'message', 'op', 'paths']);
@@ -65,6 +65,16 @@ export function parseSyncRequest(
     (typeof body.client !== 'string' || !CLIENT_ID.test(body.client))
   ) {
     throw invalid('client must be a client id (letters, digits, ".", "_", ":" and "-")');
+  }
+
+  const configRevision = body.configRevision;
+  if (
+    configRevision !== undefined &&
+    (typeof configRevision !== 'number' ||
+      !Number.isSafeInteger(configRevision) ||
+      configRevision < 0)
+  ) {
+    throw invalid('configRevision must be an integer >= 0');
   }
 
   const checkNotePath = (path: unknown, where: string): string => {
@@ -189,6 +199,7 @@ export function parseSyncRequest(
   return {
     since,
     ...(typeof body.client === 'string' ? { client: body.client } : {}),
+    ...(typeof configRevision === 'number' ? { configRevision } : {}),
     events,
     changes,
     edits,
@@ -444,7 +455,21 @@ export async function readPage(
     bytes += size;
     kept.push({ mutation, note: { path: v.path, hash: v.hash, text } });
   }
-  const notes = kept.filter((k) => k.mutation <= end).map((k) => k.note);
+  // Only what this brain's config accepts now: a folder excluded after its
+  // notes were stored is never sent (its versions stay in git).
+  const classifier = markdown.createRoleClassifier(ctx.config.roles);
+  const accepts = (path: string): boolean => {
+    const role = classifier.classify(path)?.role;
+    return role !== undefined && role !== 'excluded';
+  };
+  const excluded = (item: string) => coreEngine.isExcludedItem(classifier, item);
+  const notes: sync.SyncNote[] = [];
+  for (const k of kept) {
+    if (k.mutation > end || !accepts(k.note.path)) continue;
+    const n = k.note;
+    if ('renamedTo' in n && !accepts(n.renamedTo)) notes.push({ path: n.path, deleted: true });
+    else notes.push(n);
+  }
 
   const eventRows = await ctx.query<{
     id: string;
@@ -458,24 +483,26 @@ export async function readPage(
      WHERE brain_id = $1 AND mutation > $2 AND mutation <= $3 ORDER BY mutation`,
     [id, since, end],
   );
-  const events: sync.SyncEvent[] = eventRows.map((r) =>
-    r.kind === 'rename'
-      ? {
-          id: r.id,
-          kind: 'rename',
-          item: r.item,
-          to: r.target as string,
-          time: Number(r.time),
-          client: r.client,
-        }
-      : {
-          id: r.id,
-          kind: r.kind as timescore.EventKind,
-          item: r.item,
-          time: Number(r.time),
-          client: r.client,
-        },
-  );
+  const events: sync.SyncEvent[] = eventRows
+    .filter((r) => !excluded(r.item) && !(r.target !== null && excluded(r.target)))
+    .map((r) =>
+      r.kind === 'rename'
+        ? {
+            id: r.id,
+            kind: 'rename',
+            item: r.item,
+            to: r.target as string,
+            time: Number(r.time),
+            client: r.client,
+          }
+        : {
+            id: r.id,
+            kind: r.kind as timescore.EventKind,
+            item: r.item,
+            time: Number(r.time),
+            client: r.client,
+          },
+    );
   const changeRows = await ctx.query<{
     seq: string;
     id: string;
@@ -500,13 +527,15 @@ export async function readPage(
     list.push(p.path);
     pathsOf.set(String(p.change_seq), list);
   }
-  const changes: sync.SyncChange[] = changeRows.map((r) => ({
-    id: r.id,
-    time: Number(r.time),
-    client: r.client,
-    message: r.message,
-    op: r.op,
-    paths: storage.normalizeChangePaths(pathsOf.get(String(r.seq)) ?? []),
-  }));
+  const changes: sync.SyncChange[] = changeRows
+    .map((r) => ({
+      id: r.id,
+      time: Number(r.time),
+      client: r.client,
+      message: r.message,
+      op: r.op,
+      paths: storage.normalizeChangePaths(pathsOf.get(String(r.seq)) ?? []),
+    }))
+    .filter((c) => !c.paths.some(excluded));
   return { end, more, notes, events, changes };
 }

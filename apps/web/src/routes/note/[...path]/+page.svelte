@@ -7,7 +7,10 @@
   import Icon from '#lib/components/Icon.svelte';
   import MarkdownView from '#lib/components/MarkdownView.svelte';
   import PublishControl from '#lib/components/PublishControl.svelte';
+  import type { NoteSyncState } from '#lib/brain/host.ts';
   import { brain, changed, host, skipNextRead } from '#lib/ui/brain.svelte.ts';
+  import { clearDraft } from '#lib/ui/storage.ts';
+  import { syncState } from '#lib/ui/sync.svelte.ts';
   import { errorCode, errorMessage } from '#lib/ui/errors.ts';
   import { relativeTime } from '#lib/ui/format.ts';
   import { isPublished, setPublished } from '#lib/ui/frontmatter.ts';
@@ -62,6 +65,35 @@
   const isBlog = $derived((note?.role as string | undefined) === 'blog');
   const published = $derived(note ? isPublished(note.text) : false);
 
+  // Whether this version is on the server (a blog post's badge says so).
+  let noteSynced = $state<NoteSyncState>('off');
+  $effect(() => {
+    const n = note;
+    void syncState.revision;
+    if (!n || n.role !== 'blog') return;
+    const { path: p, hash } = n;
+    void (async () => {
+      try {
+        noteSynced = await (await host()).sync.noteState(p, hash);
+      } catch {
+        noteSynced = 'off';
+      }
+    })();
+  });
+
+  // The post's public address, when the blog is on and the post is public.
+  let noteAddress = $state<string | null>(null);
+  $effect(() => {
+    const p = note?.path;
+    if (!p || !isBlog || !published || noteSynced !== 'synced') {
+      noteAddress = null;
+      return;
+    }
+    void (async () => {
+      noteAddress = await (await host()).sync.postAddress(p).catch(() => null);
+    })();
+  });
+
   // Rename
   let renameOpen = $state(false);
   let renameTo = $state('');
@@ -104,6 +136,8 @@
     try {
       const h = await host();
       await h.engine.deleteNote(path, { message: null });
+      // An unsaved draft of a deleted note would only resurrect its text.
+      clearDraft(path);
       close();
       await changed();
       await goto(resolve('/'), { replaceState: true });
@@ -177,7 +211,12 @@
     {#if actionError}<p class="notice error" role="alert">{actionError}</p>{/if}
 
     {#if isBlog}
-      <PublishControl {published} onchange={setPublishedAndSave} />
+      <PublishControl
+        {published}
+        onchange={setPublishedAndSave}
+        synced={noteSynced}
+        address={noteAddress}
+      />
     {/if}
 
     <div class="layout">

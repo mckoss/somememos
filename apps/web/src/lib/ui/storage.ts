@@ -62,3 +62,21 @@ export function saveDraft(path: string, draft: Draft): boolean {
 export function clearDraft(path: string): void {
   writeStorage('local', draftKey(path), null);
 }
+
+/**
+ * Removes every unsaved draft. Drafts hold note text, so wiping the brain
+ * from this device (reset) wipes them too. Returns how many were removed.
+ */
+export function clearAllDrafts(): number {
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key !== null && key.startsWith(draftKey(''))) keys.push(key);
+    }
+    for (const key of keys) localStorage.removeItem(key);
+    return keys.length;
+  } catch {
+    return 0;
+  }
+}

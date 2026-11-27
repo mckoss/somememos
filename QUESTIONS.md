@@ -22,3 +22,29 @@ Collected while Mike was away overnight (from 2026-11-27). None of these blocked
 
 7. **Safari on iOS and Firefox.** Only Chromium is available here, so the web app's on-device storage is untested in other browsers. It should work on Safari 16.4 or later and Firefox 114 or later.
    - *Meanwhile:* the app falls back to in-memory storage, with a visible warning, wherever on-device storage is unavailable.
+
+8. **Blog images and attachments.** Public pages show a post's text only; images and attached files are not served.
+   - *Meanwhile:* an image shows its alt text. Decide whether attachments should be served, and from where.
+
+9. **Blog addresses after a rename.** Renaming a post makes its old address return 404, because there is no redirect table.
+   - *Meanwhile:* left as is. Say if old addresses should redirect.
+
+10. **Listing blogs in `robots.txt`.** It lists the sitemap of every enabled blog, which lets anyone see which blogs exist on the server.
+    - *Meanwhile:* left as is, since blogs are meant to be found.
+
+11. **Time in caches after unpublishing.** A page can stay in a browser or proxy cache for up to a minute after its post is unpublished.
+    - *Meanwhile:* one minute. It can be shorter at the cost of more requests.
+
+12. **Folder roles across devices.** Settled overnight: a brain's shared settings, roles included, now sync, and two devices that both changed them get a choice, never a silent overwrite. Excluding a folder never deletes its notes anywhere.
+    - *Still yours to decide:* should a newly excluded folder's notes ever be removed from the server's repository? Today they never are.
+
+13. **Blog settings screen.** Settled overnight: the app has a Public blog section in More.
+
+14. **Security review follow-ups** (`docs/security-review-2026-11-27.md`). Nothing critical or high is open. Left for you:
+    - Should images in notes be limited to the app's own site? Today a note can load an image from any https site, which tells that site when you open the note.
+    - The contact line in `SECURITY.md` is a placeholder.
+    - Whether to add a strict-transport-security header once the domain is settled.
+
+15. **Exporting notes from the web app.** The app exported only the event log, although the plan says an export is the notes plus the log.
+    - *Meanwhile:* an "Export everything" zip is being added.
+

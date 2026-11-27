@@ -10,12 +10,12 @@ The server is the SvelteKit app in `apps/web`, built with `adapter-node`. One pr
 
 ## Railway setup
 
-1. **Service.** Create a service from this repository. `railway.json` selects the `Dockerfile` build (Node 22 with `git`, the whole workspace built, `node apps/web/build`) and sets the health check.
+1. **Service.** Create a service from this repository. `railway.json` selects the `Dockerfile` build (Node 22 with `git`, the whole workspace built, `node apps/web/build`) and sets the health check. The container starts as root only long enough to give the volume to the unprivileged `node` user, then runs the server as that user (`scripts/docker-start.sh`); no `RAILWAY_RUN_UID` setting is needed.
 2. **Postgres.** Add Railway's managed Postgres to the project. In the service's variables, set `DATABASE_URL` to a reference to it: `${{Postgres.DATABASE_URL}}`. Railway backs the database up.
 3. **Volume.** Attach a volume to the service, mounted at `/data` (the Dockerfile sets `SOMEMEMOS_DATA_DIR=/data`). This is where the brains' repositories live; without a volume they are lost on every deploy.
 4. **Token.** Set `SOMEMEMOS_TOKEN` (below). Every API request needs it as `Authorization: Bearer <token>`.
 5. **Proxy headers.** Set `ADDRESS_HEADER=X-Forwarded-For` and `XFF_DEPTH=1` so the server sees each client's address (failed sign-in attempts are limited per address), and `ORIGIN=https://<your domain>` so request URLs carry the public origin.
-6. **Health check.** `GET /api/health` (no token). It answers 200 with `{ version, status: "ok", database: { connected, migration: { current, expected } } }`, and 503 when the database is unreachable, migrations are pending, or the configuration is invalid (with the problems listed). A deploy whose configuration is wrong therefore fails its health check instead of going live.
+6. **Health check.** `GET /api/health` (no token). It answers 200 with `{ version, status: "ok", database: { configured, connected, migration: { current, expected } } }` (or `database: { configured: false }` when `DATABASE_URL` is unset, since the web app still works), and 503 when the database is unreachable, migrations are pending, or the configuration is invalid (with the problems listed). A deploy whose configuration is wrong therefore fails its health check instead of going live.
 7. **Create a brain.** `curl -X POST https://<domain>/api/brains -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"id":"main"}'`. Pass `"config": { "roles": { ... } }` to use folder roles other than the default layout; clients must use the same roles.
 
 Do not use the Railway CLI for any of this; the dashboard is enough, and GitHub pushes trigger deploys.
@@ -60,9 +60,12 @@ npm run build
 DATABASE_URL="$SOMEMEMOS_TEST_DATABASE_URL" \
 SOMEMEMOS_DATA_DIR="$(mktemp -d)" \
 SOMEMEMOS_TOKEN=local-dev-token-0123456789abcdef \
+ORIGIN=http://localhost:3000 \
 BODY_SIZE_LIMIT=34M PORT=3000 node apps/web/build
-curl localhost:3000/api/health
-packages/pg-store/scripts/stop-dev-postgres.sh
+curl localhost:3000/api/health                          # in another shell
+packages/pg-store/scripts/stop-dev-postgres.sh          # after stopping the server; uses $SOMEMEMOS_DEV_PG_DIR
 ```
+
+Without `ORIGIN`, adapter-node assumes HTTPS, so the public blog pages' canonical and feed links say `https://` even over plain HTTP. [server.md](server.md) describes the API and blogs.
 
 Never put a data directory that holds a real brain inside this checkout: this repository is public.
