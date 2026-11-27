@@ -293,6 +293,7 @@ export function createEngine(options: EngineOptions): Engine {
     prepareSync: (opts) => serial(() => sync.prepareSync(opts)),
     applySync: (prepared, response) => serial(() => sync.applySync(prepared, response)),
     resetSync: () => serial(() => sync.resetSync()),
+    conflictOriginals: (paths) => serial(() => sync.conflictOriginals(paths ?? [])),
 
     index: (opts = {}) => serial(() => pass(opts)),
 

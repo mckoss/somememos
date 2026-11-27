@@ -75,6 +75,9 @@ export interface SyncContext {
   readonly today: () => string;
 }
 
+/** The start of the change record message that keeps a conflict copy; the original path follows. */
+export const CONFLICT_COPY_MESSAGE = "sync conflict: kept this copy's version of ";
+
 const DEFAULT_PREPARE: Required<PrepareSyncOptions> = {
   maxEdits: 200,
   maxEditBytes: 8 * 1024 * 1024,
@@ -278,6 +281,34 @@ export function createSyncMethods(ctx: SyncContext) {
 
   const changesAfter = async (cursor: number): Promise<ChangeRecord[]> =>
     (await stores.events.changes()).filter((c) => c.seq > cursor).sort((a, b) => a.seq - b.seq);
+
+  /**
+   * The note each conflict copy belongs to: from this copy's sync state when
+   * it made the copy, else from the change record that kept it (which syncs,
+   * so a copy made on another device is known too). Copies with neither are
+   * left out; the caller may fall back to the note beside the copy.
+   */
+  const conflictOriginals = async (paths: readonly string[]): Promise<Record<string, string>> => {
+    const wanted = new Set(paths);
+    const out: Record<string, string> = {};
+    const state = await readSyncState(stores.meta);
+    for (const p of wanted) {
+      const original = state.conflictCopies[p];
+      if (original !== undefined) out[p] = original;
+    }
+    if (Object.keys(out).length < wanted.size) {
+      const records = [...(await stores.events.changes())].sort((a, b) => b.seq - a.seq);
+      for (const c of records) {
+        if (c.message === null || !c.message.startsWith(CONFLICT_COPY_MESSAGE)) continue;
+        if (c.paths.length !== 1) continue;
+        const copy = c.paths[0] as string;
+        if (wanted.has(copy) && out[copy] === undefined) {
+          out[copy] = c.message.slice(CONFLICT_COPY_MESSAGE.length);
+        }
+      }
+    }
+    return out;
+  };
 
   const syncStatus = async (): Promise<SyncStatus> => {
     const state = await readSyncState(stores.meta);
@@ -631,16 +662,21 @@ export function createSyncMethods(ctx: SyncContext) {
 
     // Each conflict file gets a change record of its own (after the cursor, so it is pushed).
     for (const file of conflictFiles) {
-      await ctx.recordChange(
-        [file.path],
-        `sync conflict: kept this copy's version of ${file.original}`,
-      );
+      await ctx.recordChange([file.path], `${CONFLICT_COPY_MESSAGE}${file.original}`);
     }
 
     // Refused names are remembered while a note is at that path.
     const keptClash: string[] = [];
     for (const p of new Set([...state.nameClash, ...nameClash])) {
       if ((await content.stat(p)) !== undefined) keptClash.push(p);
+    }
+    // Which note each conflict copy belongs to, while the copy exists.
+    const conflictCopies: Record<string, string> = {};
+    for (const [copy, original] of [
+      ...Object.entries(state.conflictCopies),
+      ...conflictFiles.map((f) => [f.path, f.original] as const),
+    ]) {
+      if ((await content.stat(copy)) !== undefined) conflictCopies[copy] = original;
     }
 
     await writeSyncState(stores.meta, {
@@ -651,6 +687,7 @@ export function createSyncMethods(ctx: SyncContext) {
       bases,
       lastSyncAt: now(),
       nameClash: keptClash,
+      conflictCopies,
     });
 
     return {
@@ -683,6 +720,7 @@ export function createSyncMethods(ctx: SyncContext) {
     prepareSync,
     applySync,
     resetSync: () => clearSyncState(stores.meta),
+    conflictOriginals,
   };
 }
 

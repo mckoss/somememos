@@ -195,6 +195,7 @@ export function createRemoteEngine(client: RemoteClient): RemoteEngine {
     prepareSync: async () => unavailable('sync', 'a working folder holds no copy to sync'),
     applySync: async () => unavailable('sync', 'a working folder holds no copy to sync'),
     resetSync: async () => unavailable('sync', 'a working folder holds no copy to sync'),
+    conflictOriginals: async () => ({}),
 
     history: (path, limit) => client.brain('GET', note(path, '/history'), { query: { limit } }),
     restore: (path, commit, options = {}) =>

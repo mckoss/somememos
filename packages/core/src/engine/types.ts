@@ -587,4 +587,12 @@ export interface Engine {
   applySync(prepared: PreparedSync, response: SyncResponse): Promise<SyncOutcome>;
   /** Forgets the sync state: the next sync starts from `since: 0` and pushes every note. */
   resetSync(): Promise<void>;
+  /**
+   * The note each of these conflict copies belongs to (copy → original),
+   * as recorded when the copy was made: in the sync state on this copy, or
+   * in the change record that kept it (synced from other devices). A copy
+   * may sit in another folder than its note (`sync.conflictCopyPath`), so
+   * its name alone cannot say. Paths with no record are left out.
+   */
+  conflictOriginals(paths: readonly string[]): Promise<Record<string, string>>;
 }

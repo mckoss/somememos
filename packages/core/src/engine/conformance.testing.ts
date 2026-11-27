@@ -1305,6 +1305,16 @@ export function describeEngineConformance(
           expect(next.request.edits.map((e) => e.path).sort()).toEqual(
             [...kept.values()].map(String).sort(),
           );
+          // Which note each copy belongs to is recorded, not guessed from its name.
+          const copies = [...kept.values()].map(String);
+          const expected = {
+            [kept.get(diary) as string]: diary,
+            [kept.get('memos/plan.md') as string]: 'memos/plan.md',
+          };
+          expect(await b.engine.conflictOriginals([...copies, 'memos/other.md'])).toEqual(expected);
+          // Without the sync state (a fresh start), the copy's change record still says.
+          await b.engine.resetSync();
+          expect(await b.engine.conflictOriginals(copies)).toEqual(expected);
         },
       );
 

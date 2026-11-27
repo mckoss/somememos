@@ -946,12 +946,16 @@ export class SyncController {
         .map((e) => e.path)
         .filter((p) => parseConflictPath(p))
         .sort();
+      // A copy may sit in another folder than its note (core's
+      // conflictCopyPath): core recorded which note it belongs to.
+      const originals = await this.deps.engine().conflictOriginals(entries);
       for (const path of entries) {
         const parsed = parseConflictPath(path);
         const mine = await content.read(path);
         if (!parsed || mine === undefined) continue;
-        const theirs = (await content.read(parsed.original)) ?? null;
-        out.push({ path, ...parsed, mine, theirs });
+        const original = originals[path] ?? parsed.original;
+        const theirs = (await content.read(original)) ?? null;
+        out.push({ path, ...parsed, original, mine, theirs });
       }
       return out;
     });
@@ -965,14 +969,16 @@ export class SyncController {
    */
   async resolve(path: unknown, choice: unknown): Promise<{ kept: string | null }> {
     if (typeof path !== 'string') throw new ConnectPlanError('No such conflict copy.');
-    const parsed = parseConflictPath(path);
-    if (!parsed) throw new ConnectPlanError('That note is not a conflict copy.');
+    const named = parseConflictPath(path);
+    if (!named) throw new ConnectPlanError('That note is not a conflict copy.');
     if (choice !== 'mine' && choice !== 'theirs' && choice !== 'both') {
       throw new ConnectPlanError('Choose mine, theirs or both.');
     }
     const result = await this.deps.queue(async () => {
       const content = this.deps.content();
       const engine = this.deps.engine();
+      const recorded = (await engine.conflictOriginals([path]))[path];
+      const parsed = { ...named, original: recorded ?? named.original };
       const mine = await content.read(path);
       if (mine === undefined) throw new ConnectPlanError('That conflict copy is gone already.');
       let kept: string | null = null;
