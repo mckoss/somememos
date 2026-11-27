@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    // The main entry is isomorphic (ESLint forbids Node built-ins outside
+    // src/node/); the Node driver and the tests need Node's types.
+    "types": ["node"],
+    "noEmit": true,
+    // Resolve @somememos/core to its TypeScript source, so type-checking works
+    // from a fresh clone without building core first.
+    "customConditions": ["source"]
+  },
+  "include": ["src"]
+}
