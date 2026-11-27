@@ -57,7 +57,15 @@ export async function poolFor(schema: string, max = 10): Promise<pg.Pool> {
     options: `-c search_path=${schema}`,
   });
   pools.push(pool);
-  await pool.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
+  try {
+    await pool.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
+  } catch (error) {
+    // Postgres does not make CREATE SCHEMA IF NOT EXISTS safe against a
+    // concurrent creator: the loser gets a duplicate-key (23505) or
+    // duplicate-schema (42P06) error. Either way the schema now exists.
+    const code = (error as { code?: string }).code;
+    if (code !== '23505' && code !== '42P06') throw error;
+  }
   return pool;
 }
 
