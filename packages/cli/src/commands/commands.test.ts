@@ -426,7 +426,12 @@ describe('diary', () => {
     expect(r.code).toBe(EXIT_OK);
     expect(r.stdout).toBe(`${expected}\n`);
     expect(readFileSync(join(dir, expected), 'utf8')).toBe(`# ${today}\n`);
+    // The new entry with only its heading is not a change of the person's to commit.
+    expect(r.stderr).not.toContain('not committed');
+    expect((await cli(['hot'])).stderr).not.toContain('not committed');
     writeFileSync(join(dir, expected), `# ${today}\n\nNotes.\n`);
+    // Once they write in it, it is.
+    expect((await cli(['hot'])).stderr).toContain('1 changed note not committed');
     const again = await json<{ created: boolean; path: string; file: string; date: string }>([
       'diary',
     ]);
@@ -535,9 +540,8 @@ describe('global behaviour', () => {
     writeNote(dir, 'memos/pear.md', '# Pear\n\nRipe.\n', NOW - 20);
     const indexed = await cli(['index']);
     expect(indexed.stderr).toBe(reminder);
-    expect((await cli(['diary'])).stderr).toBe(
-      reminder.replace('1 changed note', '2 changed notes'),
-    );
+    // A new diary entry with only its heading is not one more change to commit.
+    expect((await cli(['diary'])).stderr).toBe(reminder);
     expect((await cli(['index', '--json'])).stderr).toBe('');
     expect((await cli(['status'])).stderr).toBe('');
     const committed = await cli(['commit', '-m', 'update ripe']);

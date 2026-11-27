@@ -580,7 +580,11 @@ export function createApp(options: AppOptions): App {
         if (method === 'GET')
           return json(200, await readBrain((ctx) => ctx.engine.diaryPath(date)));
         allow('POST');
-        return json(200, await withBrain((ctx) => ctx.engine.ensureDiary(date)));
+        // The server records every file it writes: the new entry gets a change record.
+        return json(
+          200,
+          await withBrain((ctx) => ctx.engine.ensureDiary(date, { uncommitted: true })),
+        );
       }
       default:
         throw new HttpError(404, 'not-found', 'no such route');

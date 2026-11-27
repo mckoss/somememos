@@ -5,7 +5,12 @@
 
 import { runIndexPass, type IndexSummary } from '../indexing/pass.js';
 import { matchesAllClauses, parseQuery } from '../keyword/query.js';
-import { firstIndexedAt, readUncommitted, writeUncommitted } from '../indexing/state.js';
+import {
+  addPendingRemote,
+  firstIndexedAt,
+  readUncommitted,
+  writeUncommitted,
+} from '../indexing/state.js';
 import * as markdown from '../markdown/index.js';
 import { decayed } from '../ranking/decayed.js';
 import { isRankMode, rankingParamsFromConfig, type RankMode } from '../ranking/params.js';
@@ -555,11 +560,23 @@ export function createEngine(options: EngineOptions): Engine {
 
     diaryPath: (date) => serial(async () => diaryPathImpl(date)),
 
-    ensureDiary: (date) =>
+    ensureDiary: (date, options = {}) =>
       serial(async (): Promise<DiaryEntry> => {
         const { path, date: day } = diaryPathImpl(date);
         if (await content.stat(path)) return { path, date: day, created: false };
-        await content.write(path, `# ${day}\n`, { mtime: now() });
+        const stub = `# ${day}\n`;
+        if (options?.uncommitted === true) {
+          await content.write(path, stub, { mtime: now() });
+          await pass({ paths: [path] });
+          return { path, date: day, created: true };
+        }
+        // Any change already on disk is logged as usual first.
+        await pass();
+        // The generated heading is not the person's edit: it logs nothing and
+        // is not uncommitted (so no reminder names it). It is indexed like
+        // any note; the first real edit to it is uncommitted as usual.
+        await addPendingRemote(stores.meta, { [path]: await contentHash(stub) });
+        await content.write(path, stub, { mtime: now() });
         await pass({ paths: [path] });
         return { path, date: day, created: true };
       }),
