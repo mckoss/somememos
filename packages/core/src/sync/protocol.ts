@@ -101,6 +101,15 @@ export type SyncEditStatus = 'applied' | 'duplicate' | 'conflict' | 'refused';
  * - `refused`: the edit is not allowed (`code`, e.g. `source-immutable`);
  *   nothing was stored; current version as for a conflict.
  */
+/**
+ * The `refused` code for a note the server cannot store because a note and a
+ * folder would share a name (`a.md` beside `a.md/b.md`): the server keeps
+ * notes as files. A copy that gets it keeps the note on that copy only and
+ * does not send it again until its path changes (no conflict copy, which
+ * would clash the same way).
+ */
+export const NAME_CLASH = 'name-clash';
+
 export interface SyncEditResult {
   readonly id: string;
   readonly status: SyncEditStatus;

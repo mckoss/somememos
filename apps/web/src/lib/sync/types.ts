@@ -66,6 +66,8 @@ export interface SyncRunSummary {
   readonly conflicts: number;
   /** Notes too large to sync: they stay on this device only. */
   readonly tooLarge: readonly string[];
+  /** Notes the server cannot store beside a folder of the same name: on this device only. */
+  readonly nameClash: readonly string[];
 }
 
 /** Where this device stands with the server. */

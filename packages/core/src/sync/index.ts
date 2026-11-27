@@ -5,6 +5,7 @@
 // use (`Engine.applyRemote`). Isomorphic.
 
 export {
+  NAME_CLASH,
   SYNC_CLOCK_SKEW,
   SYNC_LIMITS,
   type SyncChange,

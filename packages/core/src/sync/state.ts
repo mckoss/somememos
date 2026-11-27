@@ -31,6 +31,12 @@ export interface SyncState {
   readonly lastSyncAt: number | null;
   readonly configRevision: number;
   readonly configKey: string | null;
+  /**
+   * Notes the server refused with `NAME_CLASH` (a note and a folder would
+   * share a name), sorted. They stay on this copy and are not sent again
+   * while a note is at that path; a note that moves away is forgotten here.
+   */
+  readonly nameClash: readonly string[];
 }
 
 export const EMPTY_SYNC_STATE: SyncState = Object.freeze({
@@ -41,6 +47,7 @@ export const EMPTY_SYNC_STATE: SyncState = Object.freeze({
   lastSyncAt: null,
   configRevision: 0,
   configKey: null,
+  nameClash: Object.freeze([]),
 });
 
 const nonNegativeInteger = (value: unknown): number =>
@@ -70,13 +77,17 @@ export async function readSyncState(meta: MetaStore): Promise<SyncState> {
     lastSyncAt: typeof value.lastSyncAt === 'number' ? value.lastSyncAt : null,
     configRevision: nonNegativeInteger(value.configRevision),
     configKey: typeof value.configKey === 'string' ? value.configKey : null,
+    nameClash: Array.isArray(value.nameClash)
+      ? [...new Set(value.nameClash.filter((p): p is string => typeof p === 'string'))].sort()
+      : [],
   };
 }
 
 export async function writeSyncState(meta: MetaStore, state: SyncState): Promise<void> {
   const bases: Record<string, string> = {};
   for (const path of Object.keys(state.bases).sort()) bases[path] = state.bases[path] as string;
-  await meta.set(META_SYNC_STATE, JSON.stringify({ ...state, bases }));
+  const nameClash = [...new Set(state.nameClash ?? [])].sort();
+  await meta.set(META_SYNC_STATE, JSON.stringify({ ...state, bases, nameClash }));
 }
 
 /** Records the shared-config revision (and its config's key) this copy now agrees with. */

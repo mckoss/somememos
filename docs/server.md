@@ -87,7 +87,7 @@ $ curl -X POST localhost:3000/api/brains -H "Authorization: Bearer $T" -H 'Conte
 
 ### Sync
 
-`POST /api/brains/{brain}/sync` is the whole sync protocol in one request: the client sends `since` (the last mutation number it applied), its new `events`, `changes` and `edits` (each edit with the hash it was based on), and gets back the result of each edit and everything newer than `since`. The web app and `somememos clone`/`sync` use it; the shapes are in PLAN.md section 7. A response holds at most `SOMEMEMOS_MAX_PAGE` mutations (2000) and says `"more": true` when there are more. Requests can be up to 32 MiB.
+`POST /api/brains/{brain}/sync` is the whole sync protocol in one request: the client sends `since` (the last mutation number it applied), its new `events`, `changes` and `edits` (each edit with the hash it was based on), and gets back the result of each edit and everything newer than `since`. The web app and `somememos clone`/`sync` use it; the shapes are in PLAN.md section 7. A response holds at most `SOMEMEMOS_MAX_PAGE` mutations (2000) and says `"more": true` when there are more. Requests can be up to 32 MiB. A new note whose name is a folder on the server, or that would need an existing note's name as a folder (`a.md` beside `a.md/b.md`, including two such notes in one request), is answered `refused` with code `name-clash`; the client keeps it on that device and does not send it again until it is renamed.
 
 ```
 $ curl -X POST localhost:3000/api/brains/garden/sync -H "Authorization: Bearer $T" -H 'Content-Type: application/json' -d '{"since":0,"events":[],"changes":[],"edits":[]}'

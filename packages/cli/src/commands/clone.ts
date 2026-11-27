@@ -100,8 +100,10 @@ ${GLOBAL_OPTIONS_HELP}
 Output: one summary line, then one line per conflict. With --json: {server,
 brainId, rounds, mutation, pushed: {edits, applied, duplicates, events,
 changes}, received: {notes, events, changes}, conflicts: [{path, status, code,
-conflictPath}], waiting, config: "in-step"|"pushed"|"pulled", tooLarge}.
+conflictPath}], waiting, config: "in-step"|"pushed"|"pulled", tooLarge, nameClash}.
 A note too large to sync (over 2 MB) stays in this copy, and sync names it.
+So does a note the server cannot store because a folder has the same name
+(a.md beside a.md/b.md): rename it to sync it.
 
 Examples:
   somememos sync
@@ -121,6 +123,8 @@ export interface SyncRecord {
   config: engine.ConfigStep;
   /** Notes too large to sync: they stay in this copy only. */
   tooLarge: string[];
+  /** Notes the server cannot store beside a folder of the same name: in this copy only. */
+  nameClash: string[];
 }
 
 const SYNC_MAX_MB = coreSync.SYNC_LIMITS.maxNoteBytes / (1024 * 1024);
@@ -218,6 +222,7 @@ export async function syncWithServer(
     waiting: result.waiting,
     config: result.config ?? 'in-step',
     tooLarge: result.tooLarge,
+    nameClash: result.nameClash,
   };
 }
 
@@ -362,6 +367,13 @@ export const syncCommand: Command = {
           warn(
             ctx,
             `${plural(record.tooLarge.length, 'note')} too large to sync (over ${SYNC_MAX_MB} MB) ${one ? 'stays' : 'stay'} in this copy only: ${record.tooLarge.map((p) => brain.displayPath(p)).join(', ')}; split ${one ? 'it' : 'them'} to sync`,
+          );
+        }
+        if (record.nameClash.length > 0) {
+          const one = record.nameClash.length === 1;
+          warn(
+            ctx,
+            `${plural(record.nameClash.length, 'note')} ${one ? 'shares its' : 'share their'} name with a folder on the server, so ${one ? 'it stays' : 'they stay'} in this copy only: ${record.nameClash.map((p) => brain.displayPath(p)).join(', ')}; rename ${one ? 'it' : 'them'} to sync`,
           );
         }
       }

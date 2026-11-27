@@ -20,7 +20,7 @@ Method: the route table was enumerated and every route was called without a toke
 | 4 | The app had no content security policy and could be framed | Low | Fixed (`0865d33`) |
 | 5 | The container ran the server as root | Low | Fixed (`60b4fa9`) |
 | 6 | A file or folder name over 255 bytes failed with a 500, logged the note's path, and jammed a device's sync | Low | Fixed (`7919aac`) |
-| 7 | A note sharing its name with a folder failed with a 500 and logged the note's path | Low | Fixed for save and rename (`55f7884`); sync left for the owner |
+| 7 | A note sharing its name with a folder failed with a 500 and logged the note's path | Low | Fixed for save and rename (`55f7884`) and for sync (`name-clash` refusal) |
 | 8 | HTML comments in a published post appear as visible text on the public blog | Low | Left for the owner |
 | 9 | Notes can load images from any https address | Low | Left for the owner |
 | 10 | The CLI sends its token to an `http://` server | Low | Left for the owner |
@@ -62,9 +62,11 @@ The Dockerfile ran `node` as root so it could write to a root-owned volume. It n
 
 The path rule allowed any segment length within the 1024-byte path limit. Demonstration: `PUT /api/brains/{b}/notes/memos/<300 × "x">.md` answered 500, and the server log line carried the note's full file system path; a sync carrying such a note failed as a whole, every time, so that device could never sync again. `syncPathProblem` (core, shared by server and clients) now refuses a segment over 255 UTF-8 bytes: the server answers 400 and devices leave the note out of sync, as they do for other paths sync cannot carry.
 
-### 7. A note and a folder with the same name (low, partly fixed)
+### 7. A note and a folder with the same name (low, fixed)
 
 Saving `memos/a.md/b.md` next to an existing `memos/a.md` (or `memos/a.md` where a folder `memos/a.md/` exists) answered 500 and logged the full path. The content store now refuses it as `exists` (409). **Left for the owner:** a sync that carries such a note still fails as a whole (now with 409 instead of 500), so a device holding both a note and a "folder" of the same name stays stuck. Answering `refused` for just that edit is the natural fix, but the client then keeps a conflict copy beside the note, which clashes again, and would create a new copy on every sync. It needs a protocol decision (for example a refusal code the client does not copy, or conflict copies placed outside the clashing folder).
+
+**Fixed afterwards.** The server judges such an edit (a new note, or a rename's target, that clashes with a file or folder on the server or with another new path in the same request) as `refused` with code `name-clash`, so the rest of the sync goes through. A client that gets that code makes no conflict copy: it keeps the note where it is, records the path in its sync state, leaves it out of later requests while a note is at that path, and reports it like a note too large to sync (`runSync`'s `nameClash`, the CLI's `sync` warning and JSON, the app's sync details). Renaming the note clears it. A server note that would land inside such a kept note's name is skipped on that copy (a copy that keeps files could not store it); it arrives with a sync from the start once the clash is renamed. Tested over several syncs in `packages/server/src/sync.test.ts` and through the CLI in `packages/cli/src/remote/remote.test.ts`.
 
 ### 8. HTML comments in published posts (low, left for the owner)
 
@@ -105,7 +107,7 @@ On a future multi-user server, `POST /api/brains` answers `brain-exists` for ano
 ## What the owner must decide
 
 1. ~~The lockout trade-off in finding 3.~~ Settled: throttle failures, never refuse a valid token.
-2. How sync should treat a note and folder with the same name (finding 7).
+2. ~~How sync should treat a note and folder with the same name (finding 7).~~ Settled: a `name-clash` refusal the client does not copy.
 3. Whether HTML comments in published posts should be dropped (finding 8).
 4. Whether remote images in notes are worth the tracking risk (finding 9).
 5. Whether the CLI should refuse plain `http://` servers (finding 10).

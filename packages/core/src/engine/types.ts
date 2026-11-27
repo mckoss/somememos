@@ -459,6 +459,12 @@ export interface PreparedSync {
   readonly more: boolean;
   /** Notes too large to sync (over `sync.SYNC_LIMITS.maxNoteBytes`); they stay local. */
   readonly tooLarge: string[];
+  /**
+   * Notes left out because the server refused them earlier: a note and a
+   * folder would share a name (`sync.NAME_CLASH`). They stay local until
+   * their path changes.
+   */
+  readonly nameClash: string[];
 }
 
 export interface SyncConflict {
@@ -495,6 +501,12 @@ export interface SyncOutcome {
   readonly waiting: string[];
   /** Notes and entries from the server left out (excluded, no role, or not syncable). */
   readonly skipped: number;
+  /**
+   * Notes the server refused this round because a note and a folder would
+   * share a name (`sync.NAME_CLASH`): kept on this copy only, not sent again
+   * until their path changes.
+   */
+  readonly nameClash: string[];
 }
 
 // ---------------------------------------------------------------------------

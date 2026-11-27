@@ -626,6 +626,7 @@ export class SyncController {
       conflicts: 0,
     };
     const tooLarge = new Set<string>();
+    const nameClash = new Set<string>();
     let dataChanged = false;
     let configChanged = false;
     const io = this.configIo(conn, () => {
@@ -652,6 +653,7 @@ export class SyncController {
         const prepared = await this.deps.queue(() => this.deps.engine().prepareSync());
         if (generation !== this.generation) return { ok: true };
         for (const p of prepared.tooLarge) tooLarge.add(p);
+        for (const p of prepared.nameClash) nameClash.add(p);
         let response: coreSync.SyncResponse;
         try {
           response = (await this.api(
@@ -683,6 +685,7 @@ export class SyncController {
         totals.pushed.events += outcome.pushed.events;
         totals.pushed.changes += outcome.pushed.changes;
         totals.conflicts += outcome.conflicts.length;
+        for (const p of outcome.nameClash) nameClash.add(p);
         if (
           outcome.received.notes + outcome.received.events + outcome.received.changes > 0 ||
           outcome.conflicts.length > 0 ||
@@ -716,7 +719,12 @@ export class SyncController {
       }
       this.problem = null;
       this.lastSyncAt = nowSeconds();
-      this.lastRun = { at: this.lastSyncAt, ...totals, tooLarge: [...tooLarge].sort() };
+      this.lastRun = {
+        at: this.lastSyncAt,
+        ...totals,
+        tooLarge: [...tooLarge].sort(),
+        nameClash: [...nameClash].sort(),
+      };
       return { ok: true };
     } catch (error) {
       if (error instanceof coreSync.ConfigConflictError) this.configConflict = error;

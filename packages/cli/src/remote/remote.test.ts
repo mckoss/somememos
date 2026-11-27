@@ -693,6 +693,39 @@ describePg(
         rmSync(join(copy, 'memos/huge.md'));
       });
 
+      it('sync keeps a note named like a folder on the server, and does not loop', async () => {
+        const one = newDir('clone-clash-1');
+        const two = newDir('clone-clash-2');
+        await ok(tmp.dir, ['clone', server.url, 'garden', one]);
+        await ok(tmp.dir, ['clone', server.url, 'garden', two]);
+        mkdirSync(join(one, 'memos/willow.md'), { recursive: true });
+        writeFileSync(join(one, 'memos/willow.md/catkin.md'), '# Catkin\n');
+        await ok(one, ['commit', '-m', 'ingest catkin']);
+        await ok(one, ['sync']);
+        // The other copy makes a note of that name before it has pulled the folder.
+        writeFileSync(join(two, 'memos/willow.md'), '# Willow\n');
+        await ok(two, ['commit', '-m', 'ingest willow']);
+        const r = await ok(two, ['sync']);
+        expect(r.stderr).toMatch(
+          /warning: 1 note shares its name with a folder on the server, so it stays in this copy only: memos\/willow\.md; rename it to sync/,
+        );
+        for (let i = 0; i < 3; i++) {
+          const again = await json<{ nameClash: string[]; conflicts: unknown[]; rounds: number }>(
+            two,
+            ['sync'],
+          );
+          expect(again.nameClash).toEqual(['memos/willow.md']);
+          expect(again.conflicts).toEqual([]);
+          expect(again.rounds).toBe(1);
+        }
+        expect(readFileSync(join(two, 'memos/willow.md'), 'utf8')).toBe('# Willow\n');
+        rmSync(join(two, 'memos/willow.md'));
+        rmSync(join(one, 'memos/willow.md'), { recursive: true });
+        await ok(one, ['commit', '-m', 'remove catkin']);
+        await ok(one, ['sync']);
+        await ok(two, ['sync']);
+      });
+
       it('sync in a brain with no server says how to set one', async () => {
         const dir = newDir('plain');
         await ok(tmp.dir, ['init', dir]);

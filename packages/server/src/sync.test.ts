@@ -202,6 +202,66 @@ describePg('sync', () => {
     },
   );
 
+  it(
+    'keeps a note that shares its name with a folder on the copy, without a sync loop',
+    { timeout: TIMEOUT },
+    async () => {
+      const server = await testServer();
+      await createBrain(server, 'clash');
+      const a = testClient(server, 'clash', 'phone');
+      await a.engine.index();
+      // A copy without folders can hold both; the server, which keeps files, cannot.
+      await a.engine.saveNote('memos/cedar.md', '# Cedar\n\nResin.\n');
+      await a.engine.saveNote('memos/cedar.md/bark.md', '# Bark\n\nFurrowed.\n');
+      const listing = async () => (await a.content.list()).map((e) => e.path).sort();
+      const before = await listing();
+
+      const first = await a.sync();
+      expect(first.conflicts).toEqual([]);
+      expect(first.nameClash).toEqual(['memos/cedar.md/bark.md']);
+      expect(Object.keys((await serverState(server, 'clash')).notes)).toEqual(['memos/cedar.md']);
+      // Several more syncs: nothing is sent again, no conflict copy appears.
+      for (let i = 0; i < 4; i++) {
+        server.now.tick();
+        expect((await a.engine.prepareSync()).request.edits).toEqual([]);
+        const again = await a.sync();
+        expect(again.rounds).toBe(1);
+        expect(again.conflicts).toEqual([]);
+        expect(again.nameClash).toEqual(['memos/cedar.md/bark.md']);
+        expect(await listing()).toEqual(before);
+      }
+      expect(Object.keys((await serverState(server, 'clash')).notes)).toEqual(['memos/cedar.md']);
+
+      // Another copy's folder blocks a new note of that name, through a rename too.
+      const b = testClient(server, 'clash', 'laptop');
+      await b.sync();
+      await b.engine.saveNote('memos/fir.md/needle.md', '# Needle\n');
+      await b.sync();
+      await a.sync();
+      await a.engine.saveNote('memos/spruce.md', '# Spruce\n');
+      await a.sync();
+      server.now.tick();
+      await a.engine.renameNote('memos/spruce.md', 'memos/fir.md');
+      const renamed = await a.sync();
+      expect(renamed.nameClash).toEqual(['memos/cedar.md/bark.md', 'memos/fir.md']);
+      expect(renamed.conflicts).toEqual([]);
+      expect((await a.sync()).nameClash).toEqual(['memos/cedar.md/bark.md', 'memos/fir.md']);
+      expect(Object.keys((await serverState(server, 'clash')).notes).sort()).toEqual([
+        'memos/cedar.md',
+        'memos/fir.md/needle.md',
+        'memos/spruce.md',
+      ]);
+
+      // Once its path changes, the note syncs as usual and is forgotten as a clash.
+      server.now.tick();
+      await a.engine.renameNote('memos/cedar.md/bark.md', 'memos/bark.md');
+      const moved = await a.sync();
+      expect(moved.nameClash).toEqual(['memos/fir.md']);
+      expect(moved.conflicts).toEqual([]);
+      expect(Object.keys((await serverState(server, 'clash')).notes)).toContain('memos/bark.md');
+    },
+  );
+
   it('pages a large download', { timeout: TIMEOUT }, async () => {
     const server = await testServer({ pageSize: 10 });
     await createBrain(server, 'big');

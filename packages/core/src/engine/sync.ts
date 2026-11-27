@@ -18,6 +18,7 @@ import type {
   Stores,
 } from '../storage/types.js';
 import {
+  NAME_CLASH,
   SYNC_CLOCK_SKEW,
   SYNC_LIMITS,
   conflictCopyPath,
@@ -339,10 +340,18 @@ export function createSyncMethods(ctx: SyncContext) {
       baseHash: string | null;
       hash?: string;
     }[] = [];
+    // Notes the server refused because a note and a folder would share the
+    // name stay out until their path changes (a rename onto such a path too:
+    // the old path stays as the server has it).
+    const clash = new Set(state.nameClash.filter((p) => local.has(p)));
     const renamedTo = new Set<string>();
     for (const p of gone) {
       const base = bases[p] as string;
       const to = createdByHash.get(base)?.shift();
+      if (to !== undefined && clash.has(to)) {
+        renamedTo.add(to);
+        continue;
+      }
       if (to !== undefined) {
         planned.push({ op: 'rename', path: p, to, baseHash: base });
         renamedTo.add(to);
@@ -359,7 +368,7 @@ export function createSyncMethods(ctx: SyncContext) {
       });
     }
     for (const p of created) {
-      if (!renamedTo.has(p))
+      if (!renamedTo.has(p) && !clash.has(p))
         planned.push({ op: 'write', path: p, baseHash: null, hash: local.get(p) as string });
     }
 
@@ -442,6 +451,7 @@ export function createSyncMethods(ctx: SyncContext) {
       },
       more,
       tooLarge,
+      nameClash: [...clash].sort(),
     };
   };
 
@@ -471,6 +481,7 @@ export function createSyncMethods(ctx: SyncContext) {
     const touched = new Set<string>();
     const conflicts: SyncConflict[] = [];
     const conflictFiles: { path: string; original: string }[] = [];
+    const nameClash = new Set<string>();
     let applied = 0;
     let duplicates = 0;
 
@@ -521,8 +532,15 @@ export function createSyncMethods(ctx: SyncContext) {
         }
         continue;
       }
-      // Conflict or refused: keep this copy's version beside the server's.
       const localPath = edit.op === 'rename' && edit.to !== undefined ? edit.to : edit.path;
+      if (result.status === 'refused' && result.code === NAME_CLASH) {
+        // The server cannot store a note beside a folder of the same name. A
+        // conflict copy would clash the same way, so the note just stays here,
+        // unsynced, until its path changes; nothing is written.
+        nameClash.add(localPath);
+        continue;
+      }
+      // Conflict or refused: keep this copy's version beside the server's.
       let kept: string | null = null;
       if (edit.op !== 'delete') {
         const text = await content.read(localPath);
@@ -559,8 +577,15 @@ export function createSyncMethods(ctx: SyncContext) {
     // The server's notes, unless this copy changed them since the last sync.
     const waiting: string[] = [];
     let skipped = 0;
+    // A server note below (or above) a note kept here for a name clash would
+    // need the same name as a file and a folder, which a copy that keeps
+    // files cannot store: it is left out (it arrives with a fresh sync from
+    // the start once the clash is renamed away).
+    const clashing = [...state.nameClash, ...nameClash];
+    const nestedInClash = (path: string): boolean =>
+      clashing.some((p) => path.startsWith(`${p}/`) || p.startsWith(`${path}/`));
     for (const note of response.notes ?? []) {
-      if (!accepts(note.path)) {
+      if (!accepts(note.path) || ('text' in note && nestedInClash(note.path))) {
         skipped++;
         continue;
       }
@@ -612,6 +637,12 @@ export function createSyncMethods(ctx: SyncContext) {
       );
     }
 
+    // Refused names are remembered while a note is at that path.
+    const keptClash: string[] = [];
+    for (const p of new Set([...state.nameClash, ...nameClash])) {
+      if ((await content.stat(p)) !== undefined) keptClash.push(p);
+    }
+
     await writeSyncState(stores.meta, {
       ...(await readSyncState(stores.meta)),
       since: response.mutation,
@@ -619,6 +650,7 @@ export function createSyncMethods(ctx: SyncContext) {
       pushedChangeSeq: nextChangeSeq,
       bases,
       lastSyncAt: now(),
+      nameClash: keptClash,
     });
 
     return {
@@ -641,6 +673,7 @@ export function createSyncMethods(ctx: SyncContext) {
       },
       waiting,
       skipped,
+      nameClash: [...nameClash].sort(),
     };
   };
 
@@ -775,6 +808,11 @@ export interface RunSyncResult {
   readonly outcomes: SyncOutcome[];
   /** Notes too large to sync (`sync.SYNC_LIMITS.maxNoteBytes`): they stay on this copy only. */
   readonly tooLarge: string[];
+  /**
+   * Notes the server cannot store because a note and a folder share the
+   * name (`sync.NAME_CLASH`): they stay on this copy only until renamed.
+   */
+  readonly nameClash: string[];
   /** What the shared-config step did; null when the sync ran without one. */
   readonly config: ConfigStep | null;
 }
@@ -805,11 +843,13 @@ export async function runSync(
   let step: ConfigStep | null = config ? await syncSharedConfig(config) : null;
   const outcomes: SyncOutcome[] = [];
   const tooLarge = new Set<string>();
+  const nameClash = new Set<string>();
   let adopted = 0;
   let round = 0;
   while (round < maxRounds) {
     const prepared = await current().prepareSync(prepare);
     for (const p of prepared.tooLarge) tooLarge.add(p);
+    for (const p of prepared.nameClash) nameClash.add(p);
     let response: SyncResponse;
     try {
       response = await send(prepared.request);
@@ -825,6 +865,7 @@ export async function runSync(
     round++;
     const outcome = await current().applySync(prepared, response);
     outcomes.push(outcome);
+    for (const p of outcome.nameClash) nameClash.add(p);
     if (!outcome.more) {
       return {
         rounds: round,
@@ -833,6 +874,7 @@ export async function runSync(
         waiting: outcome.waiting,
         outcomes,
         tooLarge: [...tooLarge].sort(),
+        nameClash: [...nameClash].sort(),
         config: step,
       };
     }
