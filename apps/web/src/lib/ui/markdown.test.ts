@@ -86,3 +86,19 @@ describe('splitFrontMatter', () => {
     expect(splitFrontMatter('# No\n---\n')).toEqual({ frontMatter: null, body: '# No\n---\n' });
   });
 });
+
+describe('hostile input', () => {
+  it('renders many unclosed [[ in linear time', () => {
+    // An unclosed `[[` used to search the rest of the note for `]]`.
+    for (const text of ['[a]['.repeat(100_000), '[['.repeat(200_000)]) {
+      const started = performance.now();
+      render(text);
+      expect(performance.now() - started).toBeLessThan(3000);
+    }
+  });
+
+  it('links only when the inside has no bracket or line break', () => {
+    expect(render('[[orchard]] here')).toContain('data-target="orchard"');
+    expect(render('[[a]b]] and [[x\ny]]')).not.toContain('wikilink');
+  });
+});

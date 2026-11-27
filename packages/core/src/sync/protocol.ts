@@ -170,6 +170,9 @@ export const SYNC_CLOCK_SKEW = 300;
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f]/;
 
+/** The longest file or folder name in a syncable path, in UTF-8 bytes (common file systems' limit). */
+export const MAX_SEGMENT_BYTES = 255;
+
 /**
  * Why `path` cannot be synced, or null when it can. A syncable path is a
  * normalized brain-relative markdown path: no leading `/`, no empty, `.` or
@@ -180,8 +183,12 @@ const CONTROL = /[\u0000-\u001f\u007f]/;
  */
 export function syncPathProblem(path: unknown): string | null {
   if (typeof path !== 'string' || path === '') return 'a path must be a non-empty string';
-  if (new TextEncoder().encode(path).length > SYNC_LIMITS.maxPathBytes)
-    return 'the path is too long';
+  const encoder = new TextEncoder();
+  if (encoder.encode(path).length > SYNC_LIMITS.maxPathBytes) return 'the path is too long';
+  // File systems refuse a longer file or folder name (and the server stores notes as files).
+  if (path.split('/').some((s) => encoder.encode(s).length > MAX_SEGMENT_BYTES)) {
+    return `a file or folder name in the path is longer than ${MAX_SEGMENT_BYTES} bytes`;
+  }
   if (CONTROL.test(path) || path.includes('\\'))
     return 'the path has a control character or a backslash';
   if (path.startsWith('/')) return 'the path must be relative to the brain';

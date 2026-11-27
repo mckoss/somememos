@@ -6,6 +6,7 @@ import { building } from '$app/env';
 import type { Handle, ServerInit } from '@sveltejs/kit/hooks';
 import { serverApp } from '#lib/server/app.ts';
 import { clientAddressOf, robotsTxt } from '#lib/server/blog/handler.ts';
+import { withSecurityHeaders } from '#lib/server/security-headers.ts';
 
 export const init: ServerInit = async () => {
   // The build renders the offline shell through the server; it needs no database.
@@ -14,7 +15,10 @@ export const init: ServerInit = async () => {
 };
 
 // robots.txt lets crawlers read the public blogs and nothing else (#lib/server/blog).
-export const handle: Handle = ({ event, resolve }) =>
-  event.url.pathname === '/robots.txt' && ['GET', 'HEAD'].includes(event.request.method)
-    ? robotsTxt(event.request, clientAddressOf(event))
-    : resolve(event);
+// Every response gets the standard security headers it lacks.
+export const handle: Handle = async ({ event, resolve }) =>
+  withSecurityHeaders(
+    event.url.pathname === '/robots.txt' && ['GET', 'HEAD'].includes(event.request.method)
+      ? await robotsTxt(event.request, clientAddressOf(event))
+      : await resolve(event),
+  );
