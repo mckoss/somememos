@@ -14,6 +14,8 @@ Read [PLAN.md](PLAN.md) before starting work. It holds the design, the decisions
 - **Sync sends events, never scores.** The receiver ignores an event id it already has. Never merge two score tables. A change that arrives through sync is not a new event.
 - **Never change the time epoch** (Unix seconds); event times depend on it. Changing a half-life requires rebuilding scores from the event log.
 - **Stack:** TypeScript throughout. SvelteKit for the server and PWA client (`apps/web`); a Node CLI (`packages/cli`); shared, isomorphic logic in `packages/core`, which must never import Node-only modules.
+- **Databases:** Postgres on the server, SQLite in offline clients (the CLI's local mode and the PWA). Core talks to storage through operation-level interfaces, never dialect-specific SQL.
+- **Keyword scoring lives in `packages/core`.** Never rank with a database's full-text search (FTS5, `tsvector`): ranking must be identical on every client and the server.
 - **Bundlers are fine** wherever they help (SvelteKit's Vite build, bundling the CLI). Everything is native ESM.
 - **TimeScore:** the canonical description is the blog post at https://mckoss.com/posts/timescore/. Read it before changing anything in the scoring code, and keep PLAN.md section 3 consistent with it.
 - **Versioning:** the root `package.json` version is the single source of truth. Workspace packages are private and move in lockstep. The web UI shows the version in its header.

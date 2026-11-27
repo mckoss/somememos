@@ -17,16 +17,17 @@ Goal: an empty but working workspace, with the TimeScore math proven correct.
 
 - [x] **0.1 Workspace scaffold.** Root `package.json` (private, version `0.1.0`, npm workspaces), `tsconfig.base.json`, ESLint and Prettier, `.gitignore`, Node version pinned in `engines` and `.nvmrc`.
 - [x] **0.1a Privacy guards.** `.gitignore` covers `.somememos/`, `*.sqlite` and `events.jsonl`. A CI step fails if any such file, or any file over a small size limit outside known source folders, is committed.
-- [ ] **0.1b Synthetic brain.** A seeded generator script that builds an invented brain (memos, dated entries, sources, links, a git history with renames) for tests, examples and documentation.
+- [x] **0.1b Synthetic brain.** A seeded generator script that builds an invented brain (memos, dated entries, sources, links, a git history with renames) for tests, examples and documentation.
 - [x] **0.2 `packages/core` skeleton.** Builds with `tsc` to ESM. Exports a `VERSION` read from the root `package.json` at build time.
-- [ ] **0.3 TimeScore functions.** Read the blog post first (PLAN.md section 3). Implement `eventScore`, `combine`, `addEvent`, `scoreAt`, the half-life table, and `weightedTotal(scoresByKind, weights)`.
+- [x] **0.3 TimeScore functions.** Read the blog post first (PLAN.md section 3). Implement `eventScore`, `combine`, `addEvent`, `scoreAt`, the half-life table, and `weightedTotal(scoresByKind, weights)`.
   - Unit tests against worked values from the post and its demo code.
   - Property tests (fast-check): `combine` is commutative and associative within tolerance; order is unchanged as `now` advances; two simultaneous events of value 1 add `ln 2`; weighting at read time equals weighting at record time; a future-dated event is rejected.
 - [x] **0.4 `packages/cli` skeleton.** A `somememos` binary with `--version` and `--help`, using an argument parser with no heavy dependencies (`node:util` `parseArgs` unless it proves too limited).
 - [x] **0.5 `apps/web` skeleton.** SvelteKit with `adapter-node`, one page whose header shows the version from the root `package.json`.
 - [x] **0.6 CI.** A GitHub Actions workflow that runs lint, type-check, tests and the web build on every PR and on `main`.
-- [ ] **0.7 Confirm the SQLite choice.** A spike test that opens a database with `node:sqlite` and checks: FTS5 with the `porter unicode61` tokenizer, `bm25()` with column weights, the `ln` and `exp` functions, `INSERT … ON CONFLICT`, WAL mode and a busy timeout. If any check fails, repeat with `better-sqlite3`. Record the result in PLAN.md section 9.
-- [ ] **0.8 Database interface.** Define the small `Db` interface in core (`exec`, `prepare`, `transaction`) and implement it in the CLI over the chosen driver. Core's SQL runs only through this interface, so the PWA can later supply sqlite-wasm.
+- [x] **0.7 Confirm `node:sqlite`.** A test suite that checks what the CLI's local store needs from the built-in `node:sqlite`: typed values at full precision, transactions, `INSERT … ON CONFLICT` with the `ln` and `exp` functions, WAL mode, a busy timeout, and concurrent writers in separate processes. Record the result in PLAN.md section 9. FTS5 is not required.
+- [ ] **0.8 Storage interfaces.** Define storage interfaces in core as operations (event log, scores, notes and links, term index), not SQL, so SQLite and Postgres can each implement them. Implement them for SQLite in the CLI, with a shared test suite that a Postgres implementation will also have to pass in M3.
+- [x] **0.9 Keyword scoring (core).** Tokenizer, Porter stemmer, BM25 with title, heading and body weights, an in-memory reference index, and snippets. All parameters are tunable placeholders until the experiments set them.
 
 Done when: CI is green, `npx somememos --version` prints `0.1.0`, the web skeleton shows the same version, and PLAN.md section 9 records the SQLite decision.
 
@@ -43,9 +44,9 @@ Goal: on one machine, Mike indexes his vault, imports its git history, gets usef
 
 ### Indexing
 
-- [ ] **1.5 Markdown chunker (core).** Split a note into a preamble plus one chunk per `##` heading. Extract the title (front matter `title`, else first `#` heading, else file name). Ignore headings inside code fences.
-- [ ] **1.6 Link parser (core).** Find `[[target]]`, `[[target|alias]]` and `[[target#heading]]`, skipping code fences and inline code. Resolve targets to paths with the vault's rules (read the vault's `AGENTS.md` for its link conventions before fixing these); unresolved targets are dangling links keyed by their normalized text.
-- [ ] **1.7 Keyword indexing.** `somememos index` scans the working tree (path, size, mtime, then content hash for changed files) and updates `notes`, `links` and the FTS `chunks` table. `--rebuild` deletes `index.sqlite` first.
+- [x] **1.5 Markdown chunker (core).** Split a note into a preamble plus one chunk per `##` heading. Extract the title (front matter `title`, else first `#` heading, else file name). Ignore headings inside code fences.
+- [x] **1.6 Link parser (core).** Find `[[target]]`, `[[target|alias]]` and `[[target#heading]]`, skipping code fences and inline code. Resolve targets to paths with the vault's rules (read the vault's `AGENTS.md` for its link conventions before fixing these); unresolved targets are dangling links keyed by their normalized text.
+- [ ] **1.7 Keyword indexing.** `somememos index` scans the working tree (path, size, mtime, then content hash for changed files) and updates the `notes`, `links`, `sections` and `postings` tables, using core's tokenizer. `--rebuild` deletes `index.sqlite` first.
 - [ ] **1.8 Edit detection.** During the scan, for each scored note whose content hash changed since the last pass: log an `edit` event at the file's modification time (at most now), and a `mention` event for each link target in the new version that the old version lacked. A new file counts as an edit. The very first index of a brain logs nothing, since nothing is known to have changed.
 - [ ] **1.9 Renames and dangling links.** A path that disappears while a new path appears with the same content hash is a rename: log a rename record instead of an edit. When a new note resolves a dangling target, log a rename from the dangling key to the note's path.
   - Tests use small fixture directories: an edit, a rename, a rename with an edit (treated as delete plus new note; document that), a note created after being linked, an excluded folder, and a second `index` run that must log nothing.
@@ -59,7 +60,7 @@ Goal: on one machine, Mike indexes his vault, imports its git history, gets usef
 ### Querying
 
 - [ ] **1.12 Ranking (core).** Given candidate items, their per-kind scores, weights, `α`, a half-life and a mode, return ranked results with the score components. Pure functions with no database access, so the evaluation harness can call them with any parameters.
-- [ ] **1.13 `search`.** FTS5 query built safely from the user's words (quote terms, so punctuation can't break the query syntax), `r = −bm25()` clamped, combined with activation, grouped so a note appears once with its best section. Modes `hot`, `trending`, `neglected`, `all`.
+- [ ] **1.13 `search`.** Core's keyword scoring over the stored term index gives a relevance `r` per section, combined with activation and grouped so a note appears once with its best section. Modes `hot`, `trending`, `neglected`, `all`.
 - [ ] **1.14 `hot`, `trending`, `neglected`.** Activation-only lists, including dangling links, marked as such.
 - [ ] **1.15 `read` and `commit`.** `read` prints the note and logs a `read` event at the current time. It refuses excluded paths, and reading a note that isn't a scored item prints it and logs nothing. `commit [-m message]` runs the index pass, so its edits are logged at once, and writes one change record (time, client, changed notes, message) beside the event log; it exists in local mode so agents follow the same search, read, edit, commit flow they will use against the server.
 - [ ] **1.16 Output.** Plain text by default: one result per line (path, heading, snippet), stable across runs. `--json` gives full records with score components. Exit codes 0, 1 and 2. Complete `--help` for every command.
@@ -84,7 +85,7 @@ Goal: on one machine, Mike indexes his vault, imports its git history, gets usef
   3. `edit` and `mention` weights, and `α`.
   4. Half-lives, and which of them (or what mix) drives `hot`, on orientation cases.
   5. How bursts of edits to one note should count.
-  6. Heading vs body weight in `bm25`.
+  6. Keyword scoring parameters: title, heading and body weights, `k1` and `b`, and stemming on or off.
   7. Link spreading: off, outgoing, backlinks, at a few strengths.
   8. Section-level edit attribution (from diffs in the imported history) vs note-level.
 
@@ -111,6 +112,7 @@ Done when: Claude Code and Hermes sessions on the main machine orient with `some
 Goal: the server's filesystem becomes the home of the vault, and agents on any machine use it with only the CLI and a credential.
 
 - [ ] **3.0 Design review.** Settle single-user authentication, the request API, how commits are attributed and described, and how the vault's existing repository becomes the server's. Update PLAN.md section 7 before coding.
+- [ ] **3.0a Postgres storage.** Implement core's storage interfaces for Postgres, with a brain id on every row, and run the shared storage test suite against it in CI with a Postgres service.
 - [ ] **3.1 Server storage.** One git repository per brain on the server's filesystem, the event log beside it, and one mutation counter that numbers every change. Writes to a brain are serialized, and each accepted change is exactly one git commit. Confirm how the server runs git (the `git` binary in the deploy image, or a library).
 - [ ] **3.2 Query API.** `search`, the activation lists and `status` as server routes that run the same core code as local mode.
 - [ ] **3.3 Read API and working folder.** `read` fetches a note into the working folder, records its path and hash in a manifest, and logs the read on the server. A repeated read refetches when the server is newer and the local file is untouched, and warns when both have changed.
@@ -118,14 +120,14 @@ Goal: the server's filesystem becomes the home of the vault, and agents on any m
 - [ ] **3.5 Forgotten commits.** Every remote command compares the working folder with its manifest and prints a reminder naming edited, uncommitted files. `status` lists them.
 - [ ] **3.6 Tests.** Two clients editing the same note; a commit retried after a dropped connection; a stale working folder; excluded paths refused by every route.
 - [ ] **3.7 Version history commands.** List a note's versions and restore one, served from the brain's git history. Restoring is a new commit, never a rewrite of history.
-- [ ] **3.8 Deploy.** Railway with `adapter-node`, a volume for the notes and databases, backups, and a health endpoint that reports the version.
+- [ ] **3.8 Deploy.** Railway with `adapter-node`, managed Postgres, a volume for the brains' git repositories with its own backup, and a health endpoint that reports the version.
 - [ ] **3.9 Cloud sessions.** Add the CLI install and credential to the cloud environment's setup (Mike changes the environment; give him the exact lines).
 - [ ] **3.10 Move the vault.** Load the vault's existing git repository, with its history, as the brain's repository on the server, along with the event log. Update the vault's agent instructions so agents use the CLI and no longer clone the vault.
 
 ## M4 — PWA client (outline)
 
-- [ ] **4.0 Design review.** Editor choice, sqlite-wasm with OPFS (confirm FTS5 and the VFS), and whether a person's events should be told apart from an agent's (open question 5).
-- [ ] **4.1 Local store.** The core `Db` interface over sqlite-wasm in a Web Worker.
+- [ ] **4.0 Design review.** Editor choice, sqlite-wasm with OPFS (confirm the VFS), and whether a person's events should be told apart from an agent's (open question 5).
+- [ ] **4.1 Local store.** Core's storage interfaces over sqlite-wasm in a Web Worker, passing the shared storage test suite.
 - [ ] **4.2 Offline shell.** Service worker, manifest, install to home screen.
 - [ ] **4.3 Notes.** Editor with `[[wiki-links]]`, backlinks, quick search, and version history.
 - [ ] **4.4 Activation views.** Hot, trending, neglected, and dangling links worth writing.

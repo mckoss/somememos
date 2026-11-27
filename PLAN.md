@@ -132,6 +132,8 @@ Each item keeps one log score per half-life:
 
 - **Trending (heating up):** `D = L_week − L_month`. D does not depend on `now`, so it can be indexed directly. (The demos build their "Weekly trending" lists this way.)
 - **Neglected (cooling but important):** a high year score with a low month score, for example ranked by `L_year − L_month`.
+- **Guidance from the blog post on trending.** One recent event on an otherwise quiet item is "all trend", so rank trending only among items with enough recent activity (for example the top 100 by week score), then order those by D. Dividing the ratio by its steady value (about 0.24 for week over month with daily activity) makes 1.0 mean an item's usual pace.
+- An item with no events in either half-life has no derived signal and sorts last.
 
 ## 4. Data model
 
@@ -239,10 +241,25 @@ CREATE TABLE links (                  -- from [[wiki-links]]
 );
 
 -- One row per '##' section (plus the preamble before the first heading).
-CREATE VIRTUAL TABLE chunks USING fts5(
-  path UNINDEXED, heading, body,
-  tokenize = 'porter unicode61'
+CREATE TABLE sections (
+  id          INTEGER PRIMARY KEY,
+  note_id     INTEGER NOT NULL REFERENCES notes(id),
+  heading     TEXT,
+  body        TEXT NOT NULL,
+  title_len   INTEGER NOT NULL,       -- field lengths in tokens, for BM25
+  heading_len INTEGER NOT NULL,
+  body_len    INTEGER NOT NULL
 );
+
+-- The term index: how often each term occurs in each field of each section.
+CREATE TABLE postings (
+  term       TEXT NOT NULL,
+  section_id INTEGER NOT NULL REFERENCES sections(id),
+  title_tf   INTEGER NOT NULL,
+  heading_tf INTEGER NOT NULL,
+  body_tf    INTEGER NOT NULL,
+  PRIMARY KEY (term, section_id)
+) WITHOUT ROWID;
 
 CREATE TABLE scores (
   item       TEXT NOT NULL,           -- note path, or dangling link target
@@ -258,7 +275,7 @@ CREATE TABLE meta (                   -- schema version, last event folded into 
 );
 ```
 
-Those tables are all derived and live in `index.sqlite`. The event log lives in `events.sqlite`:
+Those tables are all derived and, in an offline client, live in `index.sqlite`. The event log lives in `events.sqlite`. The server keeps the same tables in Postgres, with a brain id on every row (section 9). The schema uses only plain tables and ordinary SQL so it works in both databases.
 
 ```sql
 CREATE TABLE events (
@@ -293,7 +310,7 @@ The weighted total per item is computed in application code when a query runs. A
 
 ## 5. Ranking and search
 
-- Keyword relevance comes from FTS5 `bm25()`, which returns *lower is better*, often negative. Use `r = −bm25()`, clamped to a small positive minimum.
+- **Keyword relevance is computed in somememos's own code**, in `packages/core`, not by a database's full-text search. The server uses Postgres and offline clients use SQLite, and their built-in search engines rank differently, so relying on them would order results differently online and offline. Core tokenizes and stems the text, the database stores only a term index (which terms occur in which section, and how often), and core computes a BM25 score `r` (higher is better) with separate weights for a match in the title, the heading and the body. Ranking is therefore identical in the CLI, on the server and in the PWA, and every part of it can be tuned by experiment.
 - **Combined rank key:** `ln(r) + α · L_h`, where `h` is the chosen half-life and `L_h` is the item's weighted total across event kinds (section 4). With `α = 1` this ranks by relevance × activation.
 - **Keyword search only, for now.** No embeddings. Semantic search may come back later if an experiment shows keyword search misses notes that agents can't find by rephrasing (section 12).
 - **Time-invariance survives.** Converting `L` to "now" subtracts the same `now · ln2 / h` from every item, so the order is the same at any time. Nothing is recomputed as the clock moves.
@@ -318,13 +335,27 @@ No ranking parameter is chosen by intuition. `somememos eval` replays the brain'
   - *From imported git history:* the query is a commit's message plus any changelog text it added, and the answers are the existing notes that commit changed. The keyword index is rebuilt as of the commit's parent, so the answer isn't leaked by later text.
   - *Hand-written:* a file of questions, each with the notes that answer it. Whether the vault's changelog entries are descriptive enough to skip this is an open question (section 12).
 - **Metrics.** *Recall@k*: the share of right notes that appear in the top k. *MRR* (mean reciprocal rank): 1 divided by the position of the first right note, averaged over cases. These only compare setups offline. They never touch a score.
-- **What gets compared:** per-kind weights, `α`, half-lives and which of them drive each mode, how bursts of edits are counted, heading vs body weight in `bm25`, link spreading (off, outgoing, backlinks; strength), and note-level vs section-level scoring.
+- **What gets compared:** per-kind weights, `α`, half-lives and which of them drive each mode, how bursts of edits are counted, the keyword scoring parameters (title, heading and body weights, and BM25's `k1` and `b`), link spreading (off, outgoing, backlinks; strength), and note-level vs section-level scoring.
 - **Limits.** Imported history holds edits and mentions but no reads. The read weight can be measured once the log has collected reads from real use.
 - **Privacy.** Evaluation cases come from private notes, and this repository is public. Nothing from a real brain may reach it:
   - Case files and per-case output are written only inside the brain's own `.somememos/` directory. `eval` refuses to write anywhere inside a somememos source checkout.
   - What may be recorded here is aggregate numbers only: a metric per parameter setting, and the number of cases. No query, path, title or name, and no example drawn from a real case.
   - Tests and documentation use a synthetic brain made by a generator script, never a sample of real notes.
   - The repo's `.gitignore` covers every sidecar file, and CI fails if a database or an event log export is committed.
+
+### Keyword scoring details
+
+Implemented in `packages/core/src/keyword`. The parameter values below are **placeholders until the experiments set them**.
+
+- **Tokens:** text is lower-cased and stripped of diacritics, and a token is a run of letters and digits. `snake_case`, `kebab-case` and dotted names split at the punctuation; `camelCase` does not split. No stop words are removed.
+- **Stemming:** the Porter stemmer, on by default and switchable off. An index records whether it was built with stemming, and a query must use the same setting.
+- **Scoring:** BM25F over three fields, with an inverse document frequency that is never negative. Placeholder defaults: `k1` 1.2; `b` 0.5 for title and heading, 0.75 for body; field weights title 3, heading 2, body 1.
+- **Queries:** a section matches when it contains any query term (an option requires all of them). Quoted phrases match consecutive words within one field, which needs term positions in the index.
+- **Storage keeps counts, never scores.** Per section: the three field lengths. Per term and section: the term's frequency in each field, and its positions. Scores are computed at query time so the parameters stay tunable.
+
+### Link resolution
+
+Implemented in `packages/core/src/markdown`. A `[[target]]` resolves, in order, to: an exact path (with or without `.md`); a path relative to the linking note's folder; then a unique file name anywhere in the brain, case-insensitively. When several notes share the name, the one in the linking note's folder wins, then the shortest path. Anything else is a dangling link, keyed by the target trimmed, lower-cased and without `.md`. A link to a heading in the same note (`[[#heading]]`) is not a link. Only `##` headings written with hashes start a section.
 
 ## 6. Interfaces
 
@@ -418,7 +449,7 @@ Git is an internal detail of the server. Clients send and receive whole notes wi
 ## 8. Hosted service direction
 
 - **Where users' files live:** on the server's filesystem, one git repository per brain, with a full export always available. Git is the server's storage format, not an interface: users don't push to it, and the server does not store brains in a user's GitHub repo.
-- **One SQLite file per user** for the sidecar. It isolates users cleanly and is cheap to back up and rebuild.
+- **One Postgres database for the server**, with a brain id on every row, holding the event log, change records, scores and the term index. Each brain's notes are in its own git repository on the filesystem (section 7).
 - **The MCP server is likely the feature people pay for**: every agent a person uses shares one durable, time-aware memory.
 - **Privacy.** The server must read plaintext to index it, so client-side encryption like git-crypt doesn't carry over. Encryption at rest, a clear data policy, and possibly a self-hosted option matter from the start. A brain holds the most sensitive text a user has.
 - **Exclusions.** Folders can be excluded from indexing and scoring entirely (for example a private journal), configured in `.somememos/config.json`. The event log lists note paths in plaintext, so excluded folders must not appear there either.
@@ -446,13 +477,14 @@ apps/web          SvelteKit app: server routes (sync API, remote MCP, accounts) 
 
 ### Details to confirm at milestone 0
 
-- **SQLite on Node (CLI and server):** `node:sqlite` (built in) or `better-sqlite3`. Confirm that FTS5 and the math functions (`ln`, `exp`) are available in whichever is chosen.
-- **SQLite in the PWA:** the official `@sqlite.org/sqlite-wasm` build, persisted to OPFS from a Web Worker. Prefer the `opfs-sahpool` VFS, which (as far as we know) doesn't need cross-origin isolation (COOP/COEP headers). Confirm that FTS5 is included.
+- **Two databases, by role** (decided 2026-11-27): **Postgres on the server**, and **SQLite in offline clients** (the CLI's local mode, `somememos clone` and the PWA). Core defines storage interfaces in terms of operations (append an event, fold scores, read postings for a term), not SQL, with one implementation per database and one shared test suite run against both.
+- **SQLite on Node (the CLI):** `node:sqlite` (built in), which keeps the CLI free of native dependencies. **Confirmed on 2026-11-27** (Node 22.23, SQLite 3.54): full-precision values, transactions, the event-fold upsert with `ln` and `exp`, WAL, a busy timeout and concurrent writers in separate processes all pass (`packages/cli/src/sqlite`). Node 22 prints an experimental warning on load, which the CLI's wrapper hides. FTS5 is present but not used.
+- **SQLite in the PWA:** the official `@sqlite.org/sqlite-wasm` build, persisted to OPFS from a Web Worker. Prefer the `opfs-sahpool` VFS, which (as far as we know) doesn't need cross-origin isolation (COOP/COEP headers). FTS5 is not needed, because keyword scoring is in core.
 - **PWA plumbing:** SvelteKit's built-in service worker support (`src/service-worker.ts`) for offline caching, plus a web app manifest. Add a plugin only if needed.
-- **Deployment:** `@sveltejs/adapter-node` on Railway, with a volume for per-user SQLite files and a backup strategy for them.
+- **Deployment:** `@sveltejs/adapter-node` on Railway, with Railway's managed Postgres (which handles database backups) and a volume for the brains' git repositories, which need their own backup.
 - **MCP:** `@modelcontextprotocol/sdk`, not needed until milestone 5.
 - **CLI distribution:** bundle the CLI into one JavaScript file that needs only Node, so an agent's environment (including a cloud session's setup script) can install it in one step. This favors `node:sqlite`, which has no native dependency.
-- **Tests:** Vitest, which fits SvelteKit and also works for `core` and `cli`. Playwright for PWA smoke tests, including offline behavior. The TimeScore core needs property tests: order preserved as time advances, `combine` commutative and associative, idempotent batch replay, no double-counting across sync.
+- **Tests:** Vitest, which fits SvelteKit and also works for `core` and `cli`. Playwright for PWA smoke tests, including offline behavior. The TimeScore core needs property tests: order preserved as time advances, `combine` commutative and associative, idempotent batch replay, no double-counting across sync. From milestone 3, CI runs a Postgres service and the storage tests run against both databases.
 - **Versioning:** one app version in the root `package.json`, which is the single source of truth. Workspace packages are private and move in lockstep. The PWA shows the version in small text in the header, read from `package.json`. Start at `0.1.0`.
 
 ## 10. Milestones
