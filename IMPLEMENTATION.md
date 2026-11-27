@@ -6,6 +6,7 @@ Milestones 0 to 2 are planned in detail. Milestones 3 to 5 are outlines, and eac
 
 Conventions for every task:
 
+- **No personal data.** Nothing from a real brain goes into this repo, a commit message or a PR. See the first ground rule in `AGENTS.md`.
 - TypeScript, native ESM, tests in Vitest next to the code (`*.test.ts`).
 - `packages/core` never imports a Node-only module. It receives the database, the clock and file access as interfaces.
 - One PR per task or small group of tasks, each raising the root `package.json` version once.
@@ -15,6 +16,8 @@ Conventions for every task:
 Goal: an empty but working workspace, with the TimeScore math proven correct.
 
 - [ ] **0.1 Workspace scaffold.** Root `package.json` (private, version `0.1.0`, npm workspaces), `tsconfig.base.json`, ESLint and Prettier, `.gitignore`, Node version pinned in `engines` and `.nvmrc`.
+- [ ] **0.1a Privacy guards.** `.gitignore` covers `.somememos/`, `*.sqlite` and `events.jsonl`. A CI step fails if any such file, or any file over a small size limit outside known source folders, is committed.
+- [ ] **0.1b Synthetic brain.** A seeded generator script that builds an invented brain (memos, dated entries, sources, links, a git history with renames) for tests, examples and documentation.
 - [ ] **0.2 `packages/core` skeleton.** Builds with `tsc` to ESM. Exports a `VERSION` read from the root `package.json` at build time.
 - [ ] **0.3 TimeScore functions.** Read the blog post first (PLAN.md section 3). Implement `eventScore`, `combine`, `addEvent`, `scoreAt`, the half-life table, and `weightedTotal(scoresByKind, weights)`.
   - Unit tests against worked values from the post and its demo code.
@@ -73,9 +76,9 @@ Goal: on one machine, Mike indexes his vault, imports its git history, gets usef
   - Orientation cases: at a sampled time, the answers are the notes with events in the following day and week.
   - Search cases from imported git history: for a sampled commit, the query is its message plus any changelog text it added; the answers are the scored notes it changed that already existed. The keyword index is built from the parent commit's tree (`git ls-tree` plus `git cat-file --batch`, in an in-memory database), with no working-tree checkout.
   - Hand-written cases: a JSONL file of `{query, time?, answers}` kept in the brain.
-- [ ] **1.22 `somememos eval`.** Run a named set of parameter settings over the cases and print a table of recall@k and MRR per setting, with a `--json` form. Sampling is seeded so runs repeat. Per-case detail is shown only on request and never written outside the brain.
-- [ ] **1.22a Prepare the vault.** In `mckoss/2nd-brain` (not here), before the first import: rename `wiki/` to `memos/` and rewrite the links and instructions that name it, in one commit; add `.somememos/config.json` with the roles and exclusions; ignore the two database files in git; tidy the stray root-level note and the loose files in `raw/`. Then run `import-git`, ignoring the rename commit.
-- [ ] **1.23 First experiments on Mike's vault.** Run, in this order, and record the aggregate results and chosen defaults in PLAN.md:
+- [ ] **1.22 `somememos eval`.** Run a named set of parameter settings over the cases and print a table of recall@k and MRR per setting, with a `--json` form. Sampling is seeded so runs repeat. Per-case detail is shown only on request, written only inside the brain's `.somememos/` directory, and refused if the target is inside a somememos source checkout. The default report is aggregate numbers that are safe to paste into this repo.
+- [ ] **1.22a Prepare the vault.** In `mckoss/2nd-brain` (not here), before the first import: rename `wiki/` to `memos/` and rewrite the links and instructions that name it, in one commit; add `.somememos/config.json` with the roles and exclusions; ignore the two database files in git. Then run `import-git`, ignoring the rename commit.
+- [ ] **1.23 First experiments on Mike's vault.** Run in the vault's own directory, in this order, and record only the aggregate numbers and the chosen defaults in PLAN.md (no queries, paths, titles or examples):
   1. Check the search cases. Read a sample of generated cases to see whether they describe their tasks. If they don't, write 30 to 50 cases by hand first.
   2. Baseline: keyword only (`all` mode) vs keyword plus activation.
   3. `edit` and `mention` weights, and `α`.

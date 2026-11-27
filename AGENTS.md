@@ -4,6 +4,7 @@ Read [PLAN.md](PLAN.md) before starting work. It holds the design, the decisions
 
 ## Ground rules
 
+- **No personal data in this repo.** This repository is public, and a brain is private. Nothing taken from a real brain may be committed here or written into a commit message, PR or issue: no note text, titles, file names or paths, people's names, search queries, change messages, event logs, databases, evaluation cases or per-case results. Only aggregate numbers that name no note may be recorded (for example, recall@10 for a parameter setting). Tests and examples use invented data. Run somememos against a real brain in the brain's own directory, never from a copy inside this checkout. If you are unsure whether something reveals the brain's contents, leave it out and ask.
 - **Markdown is the content.** Never change a user's markdown except through an explicit edit operation.
 - **The event log is the source of truth for scores.** It is append-only, and every event has a unique id. Scores and the keyword index are derived data that must always be rebuildable. Search query text is not logged.
 - **Search results and activation lists are not events.** Reads through somememos (`somememos read`) are. Events are dated when the interaction happens, and future-dated events are rejected.
