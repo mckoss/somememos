@@ -9,6 +9,7 @@
   import PublishControl from '#lib/components/PublishControl.svelte';
   import type { NoteSyncState } from '#lib/brain/host.ts';
   import { brain, changed, host, skipNextRead } from '#lib/ui/brain.svelte.ts';
+  import { clearDraft } from '#lib/ui/storage.ts';
   import { syncState } from '#lib/ui/sync.svelte.ts';
   import { errorCode, errorMessage } from '#lib/ui/errors.ts';
   import { relativeTime } from '#lib/ui/format.ts';
@@ -135,6 +136,8 @@
     try {
       const h = await host();
       await h.engine.deleteNote(path, { message: null });
+      // An unsaved draft of a deleted note would only resurrect its text.
+      clearDraft(path);
       close();
       await changed();
       await goto(resolve('/'), { replaceState: true });

@@ -50,6 +50,7 @@ import {
   type WorkerStorage,
 } from './protocol.ts';
 import { workerTransport, type Transport } from './worker-client.ts';
+import { clearAllDrafts } from '../ui/storage.ts';
 
 const OWNER_LOCK = 'somememos:brain:owner';
 const TAB_LOCK_PREFIX = 'somememos:brain:tab:';
@@ -482,6 +483,9 @@ function createHost(conn: BrainConnection): BrainHost {
 
     async reset() {
       await conn.call('host', 'reset', []);
+      // Unsaved editor drafts hold note text, in this origin's localStorage
+      // (shared by every tab): they go with the notes.
+      clearAllDrafts();
     },
 
     subscribe(listener) {
