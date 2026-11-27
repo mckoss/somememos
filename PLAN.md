@@ -45,7 +45,11 @@ Embeddings may be added later as one more ranking signal (section 12), never as 
 
 ## 3. TimeScore: the algorithm
 
-TimeScore is Mike's algorithm (public domain, credit requested: "TimeScore algorithm courtesy Mike Koss"). Mike holds US Patent 8,140,541 on it and has said he won't enforce it. Reference material: <https://mckoss.com/posts/timescore/> and <https://github.com/mckoss/timescore-demos> (`site/timescore.js`, `collect/timescore.py`). The demo code is MIT-licensed; somememos carries its own implementation under Apache 2.0.
+> **Canonical description:** Mike's blog post **"TimeScore"** at <https://mckoss.com/posts/timescore/>. Read it before implementing or changing anything in this section. It explains the motivation, derives the time-invariant log form, gives the SQL update, and compares TimeScore with Reddit's and Hacker News's rankings. If this section and the post ever disagree, the post wins and this section should be fixed.
+
+TimeScore is Mike's algorithm (public domain, credit requested: "TimeScore algorithm courtesy Mike Koss"). Mike holds US Patent 8,140,541 on it and has said he won't enforce it. Working code accompanies the post at <https://github.com/mckoss/timescore-demos> (`site/timescore.js`, `collect/timescore.py`). The demo code is MIT-licensed; somememos carries its own implementation under Apache 2.0.
+
+The summary below is a condensed restatement of the post, plus the choices somememos makes on top of it (time units, half-lives, derived signals).
 
 ### Definition
 
@@ -254,7 +258,7 @@ somememos sync                       push events and edits, pull changes (milest
 
 ### MCP server
 
-A local stdio server first, later remote over HTTP with authentication. Tools:
+A local stdio server first, run as `somememos mcp` from the CLI package. Later a remote MCP endpoint served by the SvelteKit server, with authentication. Tools:
 
 - `search(query, mode?, limit?)`
 - `hot(limit?)`, `trending(limit?)`, `neglected(limit?)`
@@ -264,7 +268,7 @@ A local stdio server first, later remote over HTTP with authentication. Tools:
 
 ### Web client
 
-An offline-first web app (milestone 4): a markdown editor with `[[wiki-links]]`, backlinks and quick search, plus hot, trending and neglected views. It replaces Obsidian for Mike.
+An offline-first PWA (milestone 4), built in the same SvelteKit app as the server: a markdown editor with `[[wiki-links]]`, backlinks and quick search, plus hot, trending and neglected views. It installs to the home screen, works with no network, and syncs when it can. It replaces Obsidian for Mike.
 
 ## 7. Offline-first sync
 
@@ -300,34 +304,44 @@ The server writes `scores.tsv` and owns the canonical scores. Clients never comm
 - **Exclusions.** Folders can be excluded from indexing and scoring entirely (for example a private journal), configured in `.somememos/config.json`. Score files list note paths in plaintext, so excluded folders must not appear there either.
 - **Export:** the user's markdown plus `scores.tsv`.
 
-## 9. Proposed technical stack
+## 9. Technical stack
 
-To confirm at milestone 0. It follows Mike's existing projects: Node, native ESM without bundlers, SQLite, Railway.
+Decided by Mike on 2026-11-26:
 
-- **Language:** TypeScript, compiled with `tsc` only (no bundler). Node 22+ LTS, native ESM.
-- **Repo layout:** npm workspaces.
-  ```
-  packages/core     TimeScore math, markdown chunker, link parser, ranking, sync protocol types
-  packages/cli      the somememos command
-  packages/mcp      MCP server (uses @modelcontextprotocol/sdk)
-  packages/server   sync + hosting API
-  packages/web      offline-first web client
-  ```
-- **SQLite on Node:** `node:sqlite` (built in) or `better-sqlite3`. Choose one at milestone 0 and confirm that FTS5 and the math functions (`ln`, `exp`) are available.
-- **SQLite in the browser:** the official `@sqlite.org/sqlite-wasm` build with OPFS persistence. Confirm FTS5 is included.
-- **Server:** a small HTTP framework (Express, which Mike already uses, or Hono). Hosted on Railway with a volume for per-user SQLite files, plus a backup strategy for those files.
-- **Tests:** `node:test` or Vitest. The TimeScore core needs property tests: order preserved as time advances, `combine` commutative and associative, idempotent batch replay, no double-counting across sync.
-- **Versioning:** one app version in the root `package.json`, which is the single source of truth. Workspace packages are private and move in lockstep. The web UI shows the version in small text in the header. Start at `0.1.0`.
+- **TypeScript everywhere.** Node 22+ LTS, native ESM.
+- **SvelteKit for the server and the PWA client**, as one app. Server routes provide the sync API and, later, the remote MCP endpoint and accounts. The same app serves the offline-first PWA.
+- **A Node-based CLI**, the `somememos` command, which also runs the local stdio MCP server (`somememos mcp`).
+
+### Repo layout (npm workspaces)
+
+```
+packages/core     TimeScore math, markdown chunker, link parser, ranking, sync protocol types
+packages/cli      the somememos command (Node), including `somememos mcp`
+apps/web          SvelteKit app: server routes (sync API, remote MCP, accounts) + PWA client
+```
+
+- **`packages/core` must be isomorphic.** It runs in Node (CLI and SvelteKit server) and in the browser (PWA), so it must not import Node-only modules. Storage and file access are passed in as interfaces.
+- `packages/core` and `packages/cli` are compiled with `tsc` only, with no bundler. `apps/web` uses SvelteKit's standard Vite build; that's the one place a bundler is accepted.
+
+### Details to confirm at milestone 0
+
+- **SQLite on Node (CLI and server):** `node:sqlite` (built in) or `better-sqlite3`. Confirm that FTS5 and the math functions (`ln`, `exp`) are available in whichever is chosen.
+- **SQLite in the PWA:** the official `@sqlite.org/sqlite-wasm` build, persisted to OPFS from a Web Worker. Prefer the `opfs-sahpool` VFS, which (as far as we know) doesn't need cross-origin isolation (COOP/COEP headers). Confirm that FTS5 is included.
+- **PWA plumbing:** SvelteKit's built-in service worker support (`src/service-worker.ts`) for offline caching, plus a web app manifest. Add a plugin only if needed.
+- **Deployment:** `@sveltejs/adapter-node` on Railway, with a volume for per-user SQLite files and a backup strategy for them.
+- **MCP:** `@modelcontextprotocol/sdk`.
+- **Tests:** Vitest, which fits SvelteKit and also works for `core` and `cli`. Playwright for PWA smoke tests, including offline behavior. The TimeScore core needs property tests: order preserved as time advances, `combine` commutative and associative, idempotent batch replay, no double-counting across sync.
+- **Versioning:** one app version in the root `package.json`, which is the single source of truth. Workspace packages are private and move in lockstep. The PWA shows the version in small text in the header, read from `package.json`. Start at `0.1.0`.
 
 ## 10. Milestones
 
 Each milestone should leave something usable.
 
-- **M0 — Foundations.** npm workspace scaffold, CI (lint, type-check, tests), `packages/core` with the TimeScore functions and property tests. Confirm the SQLite driver choices (section 9).
+- **M0 — Foundations.** npm workspace scaffold (`packages/core`, `packages/cli`, and a skeleton SvelteKit `apps/web` that shows the version), CI (lint, type-check, tests), `packages/core` with the TimeScore functions and property tests checked against the blog post. Confirm the details in section 9.
 - **M1 — Local CLI.** `init`, `index`, `search`, `hot`/`trending`/`neglected`, `event`, `snapshot`, `bootstrap --from-git`. Done when Mike can index his second-brain vault, seed it from git history, and get useful hot, trending and neglected lists.
 - **M2 — MCP server, local.** stdio MCP with search/read/write/cite. Done when Mike's agents (Claude Code and Hermes) use it on the second brain instead of grep for orientation, ideally replacing the vault's `rg "^## " logs | tail -40` step.
-- **M3 — Server and sync.** Single-user server on Railway: delta score sync with idempotent batches, edit sync with base hashes and conflict files, server-owned snapshot. The CLI syncs.
-- **M4 — Web client.** Offline-first PWA with an editor, `[[wiki-links]]`, backlinks, search, and activation views. Version shown in the header. Done when Mike can stop using Obsidian entirely.
+- **M3 — Server and sync.** Single-user SvelteKit server on Railway: delta score sync with idempotent batches, edit sync with base hashes and conflict files, server-owned snapshot. The CLI syncs.
+- **M4 — PWA client.** Offline-first SvelteKit PWA with an editor, `[[wiki-links]]`, backlinks, search, and activation views, syncing through the same protocol as the CLI. Version shown in the header. Done when Mike can stop using Obsidian entirely.
 - **M5 — Hosted multi-user.** Accounts, per-user SQLite, remote MCP with authentication, privacy policy, export, and optional GitHub-repo storage. Launch at the somememos domain.
 
 ## 11. Dogfooding on Mike's vault
