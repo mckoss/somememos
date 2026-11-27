@@ -119,7 +119,7 @@ Done when Mike can import his vault into the app and use it offline for reading,
 - [x] **3.4 Sync in the app,** with conflict files, and in `somememos clone`.
 - [x] **3.5 Property tests.** Repeated pushes count nothing twice, and any interleaving of clients ends with the same events and scores everywhere.
 - [x] **3.6 Version history.** List a note's versions and restore one, as a new commit.
-- [ ] **3.7 Deploy.** Railway with `adapter-node`, managed Postgres, a volume for the git repositories with its own backup, and a health endpoint that reports the version.
+- [x] **3.7 Deploy.** Railway with `adapter-node`, managed Postgres, a volume for the git repositories with its own backup, and a health endpoint that reports the version.
 
 ## M4 — Agents everywhere (outline)
 

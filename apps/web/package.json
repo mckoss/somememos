@@ -1,6 +1,6 @@
 {
   "name": "@somememos/web",
-  "version": "0.6.2",
+  "version": "0.6.3",
   "private": true,
   "description": "The somememos server and PWA client (SvelteKit).",
   "license": "Apache-2.0",

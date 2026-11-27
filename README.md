@@ -75,7 +75,7 @@ What works, with automated tests:
 
 What has not been done or tested:
 
-- **Nothing is deployed.** The server has run only locally and in CI. The `Dockerfile` and `railway.json` are written, but **the Docker image has never been built**.
+- **The deployment is new.** The server runs on Railway (see [docs/deploy.md](docs/deploy.md)) and its health check passes, but it has not yet held a real brain, and volume backups are not scheduled.
 - **Only Chromium has been tested.** Safari 16.4+ and Firefox 114+ should work but are untested.
 - **There is no release download** of the CLI; install from a clone or build the one-file bundle.
 - **Single user only:** access is a token set in the server's environment. No accounts, no sign-in.
