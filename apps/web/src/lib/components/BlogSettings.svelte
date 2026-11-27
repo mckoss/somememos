@@ -149,6 +149,8 @@
     {#if publicUrl}
       <p class="address" data-testid="blog-address">
         <Icon name="globe" size={18} />
+        <!-- The public pages are server-rendered, outside the app's router: a full URL. -->
+        <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -->
         <span>Public at <a href={publicUrl} target="_blank" rel="noopener">{publicUrl}</a></span>
       </p>
     {/if}

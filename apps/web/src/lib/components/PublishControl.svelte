@@ -39,6 +39,8 @@
       {published ? (waiting ? 'Published, waiting to sync' : 'Published') : 'Draft'}
     </span>
     {#if published && synced === 'synced' && address}
+      <!-- The public page is server-rendered, outside the app's router: a full URL. -->
+      <!-- eslint-disable svelte/no-navigation-without-resolve -->
       <a
         class="public-link"
         href={address}
@@ -48,6 +50,7 @@
       >
         {compact ? 'Public page' : address}
       </a>
+      <!-- eslint-enable svelte/no-navigation-without-resolve -->
     {/if}
     {#if !compact}
       <span class="explain">
