@@ -186,3 +186,29 @@ export interface ConfigConflictView {
   readonly server: Readonly<Record<string, unknown>> & { readonly roles: Record<string, string[]> };
   readonly serverRevision: number;
 }
+
+/** A brain's public blog settings, as the owner edits them (`PUT /api/brains/{b}/blog`). */
+export interface BlogSettingsInput {
+  readonly enabled: boolean;
+  readonly slug: string | null;
+  readonly title: string | null;
+  readonly description: string | null;
+  readonly author: string | null;
+}
+
+/** The blog settings on the server, with the public address when the blog is on. */
+export interface BlogSettingsView extends BlogSettingsInput {
+  readonly language: string;
+  /** `/blog/{slug}/` when enabled, else null. */
+  readonly url: string | null;
+}
+
+/** Whether a public name can be used for this brain's blog. */
+export interface BlogSlugCheck {
+  readonly slug: string;
+  readonly available: boolean;
+  /** Another blog on the server has it. */
+  readonly taken: boolean;
+  /** Why it can't be used, in words; null when it can. */
+  readonly problem: string | null;
+}

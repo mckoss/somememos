@@ -80,6 +80,19 @@
     })();
   });
 
+  // The post's public address, when the blog is on and the post is public.
+  let noteAddress = $state<string | null>(null);
+  $effect(() => {
+    const p = note?.path;
+    if (!p || !isBlog || !published || noteSynced !== 'synced') {
+      noteAddress = null;
+      return;
+    }
+    void (async () => {
+      noteAddress = await (await host()).sync.postAddress(p).catch(() => null);
+    })();
+  });
+
   // Rename
   let renameOpen = $state(false);
   let renameTo = $state('');
@@ -195,7 +208,12 @@
     {#if actionError}<p class="notice error" role="alert">{actionError}</p>{/if}
 
     {#if isBlog}
-      <PublishControl {published} onchange={setPublishedAndSave} synced={noteSynced} />
+      <PublishControl
+        {published}
+        onchange={setPublishedAndSave}
+        synced={noteSynced}
+        address={noteAddress}
+      />
     {/if}
 
     <div class="layout">

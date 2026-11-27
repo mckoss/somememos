@@ -5,6 +5,9 @@
 // the implementation behind this file can change without touching the UI.
 import type { engine, indexing } from '@somememos/core';
 import type {
+  BlogSettingsInput,
+  BlogSettingsView,
+  BlogSlugCheck,
   ConfigConflictView,
   ConflictChoice,
   ConnectPlan,
@@ -128,6 +131,14 @@ export interface SyncHost {
   configConflict(): Promise<ConfigConflictView | null>;
   /** Keeps this device's settings (they replace the server's) or the server's (they replace this device's), then syncs. */
   resolveConfigConflict(choice: 'mine' | 'theirs'): Promise<SyncView>;
+  /** The brain's public blog settings on the server (connected only). */
+  blogSettings(): Promise<BlogSettingsView>;
+  /** Saves them; a public name another blog has is refused with a plain message. */
+  saveBlogSettings(settings: BlogSettingsInput): Promise<BlogSettingsView>;
+  /** Whether a public name could be used, for live validation. */
+  checkBlogSlug(slug: string): Promise<BlogSlugCheck>;
+  /** The full public address of a post at `path` when the blog is on; null otherwise or offline. */
+  postAddress(path: string): Promise<string | null>;
 }
 
 export interface BrainHost {

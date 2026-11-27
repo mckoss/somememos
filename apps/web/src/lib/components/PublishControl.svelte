@@ -12,7 +12,10 @@
     onchange,
     compact = false,
     synced = 'off',
+    address = null,
   }: {
+    /** The post's public address (when the blog is on), shown as a link once it is public. */
+    address?: string | null;
     published: boolean;
     onchange: (published: boolean) => void | Promise<void>;
     compact?: boolean;
@@ -35,6 +38,17 @@
     >
       {published ? (waiting ? 'Published, waiting to sync' : 'Published') : 'Draft'}
     </span>
+    {#if published && synced === 'synced' && address}
+      <a
+        class="public-link"
+        href={address}
+        target="_blank"
+        rel="noopener"
+        data-testid="post-address"
+      >
+        {compact ? 'Public page' : address}
+      </a>
+    {/if}
     {#if !compact}
       <span class="explain">
         {#if published && synced === 'synced'}
@@ -130,6 +144,11 @@
     border-style: dashed;
     color: var(--down);
     border-color: var(--down);
+  }
+
+  .public-link {
+    overflow-wrap: anywhere;
+    font-size: 0.9rem;
   }
 
   .explain {

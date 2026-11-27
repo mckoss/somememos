@@ -34,6 +34,9 @@ import {
   type Timers,
 } from '../sync/schedule.ts';
 import type {
+  BlogSettingsInput,
+  BlogSettingsView,
+  BlogSlugCheck,
   ConfigConflictView,
   ConnectPlan,
   ConnectRequest,
@@ -966,6 +969,88 @@ export class SyncController {
     });
     this.noteChange('change');
     return result;
+  }
+
+  // --- The public blog (the owner's settings on the server) ---------------------
+
+  private connected(): Connection {
+    if (!this.conn) throw new ConnectPlanError('This device isn’t connected to a server.');
+    return this.conn;
+  }
+
+  /** The brain's blog settings on the server. */
+  async blogSettings(): Promise<BlogSettingsView> {
+    const conn = this.connected();
+    try {
+      return (await this.api(
+        conn.token,
+        'GET',
+        `/brains/${enc(conn.brainId)}/blog`,
+      )) as BlogSettingsView;
+    } catch (error) {
+      throw this.connectError(error);
+    }
+  }
+
+  /** Replaces the blog settings. A public name another blog has is refused in words. */
+  async saveBlogSettings(input: unknown): Promise<BlogSettingsView> {
+    const conn = this.connected();
+    const s = (input ?? {}) as Partial<BlogSettingsInput>;
+    const body: BlogSettingsInput = {
+      enabled: s.enabled === true,
+      slug: typeof s.slug === 'string' && s.slug.trim() !== '' ? s.slug.trim() : null,
+      title: typeof s.title === 'string' ? s.title : null,
+      description: typeof s.description === 'string' ? s.description : null,
+      author: typeof s.author === 'string' ? s.author : null,
+    };
+    try {
+      return (await this.api(
+        conn.token,
+        'PUT',
+        `/brains/${enc(conn.brainId)}/blog`,
+        body,
+      )) as BlogSettingsView;
+    } catch (error) {
+      if (error instanceof SyncHttpError && error.code === 'slug-taken') {
+        throw new ConnectPlanError(
+          `Another blog on this server already uses the name “${body.slug}”. Choose a different one.`,
+        );
+      }
+      if (error instanceof SyncHttpError && error.status === 400) {
+        throw new ConnectPlanError(`The server refused these settings: ${error.message}.`);
+      }
+      throw this.connectError(error);
+    }
+  }
+
+  /** Whether a public name could be this brain's blog's (valid, not reserved, not taken). */
+  async checkBlogSlug(slug: unknown): Promise<BlogSlugCheck> {
+    const conn = this.connected();
+    const s = typeof slug === 'string' ? slug : '';
+    try {
+      return (await this.api(
+        conn.token,
+        'GET',
+        `/brains/${enc(conn.brainId)}/blog/slug?slug=${enc(s)}`,
+      )) as BlogSlugCheck;
+    } catch (error) {
+      throw this.connectError(error);
+    }
+  }
+
+  /** The public address of a post at `path` when the blog is on (null otherwise, or offline). */
+  async postAddress(path: unknown): Promise<string | null> {
+    if (!this.conn || typeof path !== 'string') return null;
+    try {
+      const r = (await this.api(
+        this.conn.token,
+        'GET',
+        `/brains/${enc(this.conn.brainId)}/blog/address?path=${enc(path)}`,
+      )) as { url?: unknown };
+      return typeof r.url === 'string' ? `${this.deps.origin}${r.url}` : null;
+    } catch {
+      return null;
+    }
   }
 
   /** Whether the server has this exact version (`hash`) of a note. */

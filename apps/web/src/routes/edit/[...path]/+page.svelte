@@ -73,6 +73,19 @@
     !syncState.view?.connected ? 'off' : dirty || isNew ? 'waiting' : savedSynced,
   );
 
+  // The post's public address, when the blog is on and the saved version is public.
+  let postAddress = $state<string | null>(null);
+  $effect(() => {
+    const p = base?.path;
+    if (!p || !isBlog || !published || noteSynced !== 'synced') {
+      postAddress = null;
+      return;
+    }
+    void (async () => {
+      postAddress = await (await host()).sync.postAddress(p).catch(() => null);
+    })();
+  });
+
   // Load the note (without logging a read: opening the editor is not reading).
   let request = 0;
   $effect(() => {
@@ -396,7 +409,13 @@
           }}
         />
         {#if isBlog}
-          <PublishControl {published} onchange={togglePublish} compact synced={noteSynced} />
+          <PublishControl
+            {published}
+            onchange={togglePublish}
+            compact
+            synced={noteSynced}
+            address={postAddress}
+          />
         {/if}
       </div>
       {#if restoredAt}

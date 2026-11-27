@@ -12,6 +12,9 @@ import type {
   ServerAvailability,
   SyncConflictView,
   ConfigConflictView,
+  BlogSettingsInput,
+  BlogSettingsView,
+  BlogSlugCheck,
   SyncView,
 } from '../sync/types.ts';
 import type { ImportFile } from './host.ts';
@@ -113,6 +116,10 @@ export interface HostCalls {
   syncResolve(path: string, choice: ConflictChoice): { kept: string | null };
   syncNoteState(path: string, hash: string): NoteSyncState;
   syncConfigConflict(): ConfigConflictView | null;
+  syncBlogSettings(): BlogSettingsView;
+  syncSaveBlogSettings(settings: BlogSettingsInput): BlogSettingsView;
+  syncCheckBlogSlug(slug: string): BlogSlugCheck;
+  syncPostAddress(path: string): string | null;
   syncResolveConfig(choice: 'mine' | 'theirs'): SyncView;
 }
 

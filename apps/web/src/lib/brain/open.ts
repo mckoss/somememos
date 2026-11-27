@@ -27,7 +27,7 @@
 // get the files and fails with `StorageBusyError` rather than diverging.
 
 import { engine as core, type storage } from '@somememos/core';
-import type { SyncView } from '../sync/types.ts';
+import type { BlogSettingsView, BlogSlugCheck, SyncView } from '../sync/types.ts';
 import type {
   BrainChange,
   BrainHost,
@@ -511,6 +511,12 @@ function createHost(conn: BrainConnection): BrainHost {
         conn.call('host', 'syncConflicts', []) as ReturnType<BrainHost['sync']['conflicts']>,
       resolveConflict: (path, choice) =>
         conn.call('host', 'syncResolve', [path, choice]) as Promise<{ kept: string | null }>,
+      blogSettings: () => conn.call('host', 'syncBlogSettings', []) as Promise<BlogSettingsView>,
+      saveBlogSettings: (settings) =>
+        conn.call('host', 'syncSaveBlogSettings', [settings]) as Promise<BlogSettingsView>,
+      checkBlogSlug: (slug) =>
+        conn.call('host', 'syncCheckBlogSlug', [slug]) as Promise<BlogSlugCheck>,
+      postAddress: (path) => conn.call('host', 'syncPostAddress', [path]) as Promise<string | null>,
       configConflict: () =>
         conn.call('host', 'syncConfigConflict', []) as ReturnType<
           BrainHost['sync']['configConflict']

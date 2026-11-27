@@ -2,6 +2,7 @@
   import type { engine } from '@somememos/core';
   import { resolve } from '$app/paths';
   import type { ConfigConflictView } from '#lib/brain/host.ts';
+  import BlogSettings from '#lib/components/BlogSettings.svelte';
   import ConfigConflict from '#lib/components/ConfigConflict.svelte';
   import Dialog from '#lib/components/Dialog.svelte';
   import Icon from '#lib/components/Icon.svelte';
@@ -206,6 +207,7 @@
 <nav class="jump" aria-label="On this page">
   <a href="#import">Import</a>
   <a href="#sync">Sync</a>
+  {#if syncState.view?.connected}<a href="#blog">Blog</a>{/if}
   <a href="#roles">Folder roles</a>
   <a href="#storage">Storage</a>
   <a href="#log">Event log</a>
@@ -224,6 +226,13 @@
     <h2 id="sync-h">Sync</h2>
     <SyncPanel />
   </section>
+
+  {#if syncState.view?.connected}
+    <section id="blog" class="card" aria-labelledby="blog-h">
+      <h2 id="blog-h">Public blog</h2>
+      <BlogSettings />
+    </section>
+  {/if}
 
   <section id="roles" class="card" aria-labelledby="roles-h">
     <h2 id="roles-h">Folder roles</h2>

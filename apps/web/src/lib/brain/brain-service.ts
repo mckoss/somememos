@@ -290,6 +290,14 @@ export async function openBrainService(
         return sync.resolve(args[0], args[1]);
       case 'syncNoteState':
         return sync.noteState(args[0], args[1]);
+      case 'syncBlogSettings':
+        return sync.blogSettings();
+      case 'syncSaveBlogSettings':
+        return sync.saveBlogSettings(args[0]);
+      case 'syncCheckBlogSlug':
+        return sync.checkBlogSlug(args[0]);
+      case 'syncPostAddress':
+        return sync.postAddress(args[0]);
       case 'syncConfigConflict':
         return Promise.resolve(sync.configConflictView());
       case 'syncResolveConfig':

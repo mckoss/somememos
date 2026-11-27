@@ -28,6 +28,8 @@
 //   POST   /api/brains/{b}/diary  { date? }                      → DiaryEntry
 //   GET    /api/brains/{b}/blog                                  → BlogSettingsView
 //   PUT    /api/brains/{b}/blog   BlogSettings                   → BlogSettingsView (409 slug-taken)
+//   GET    /api/brains/{b}/blog/slug?slug=                       → { slug, available, taken, problem }
+//   GET    /api/brains/{b}/blog/address?path=                    → { url } (null unless the blog is on and path is a post)
 //
 // The public blog pages themselves are not here: `App.blogs` (./blog.ts)
 // serves their data and apps/web renders them under /blog.
@@ -51,6 +53,7 @@ import pg from 'pg';
 import { FailureLimiter, tokenAuthorizer, type Authorizer } from './auth.js';
 import { PublicBlogs } from './blog.js';
 import { parseBlogSettings, readBlogSettings, writeBlogSettings } from './blog-settings.js';
+import { checkBlogSlug, postAddress } from './blog-owner.js';
 import { BrainError, BrainService, CLIENT_ID, type BrainContext } from './brains.js';
 import { loadServerConfig, type ServerConfig } from './config.js';
 import { ENGINE_ERROR_STATUS, HttpError } from './errors.js';
@@ -371,6 +374,16 @@ export function createApp(options: AppOptions): App {
       if (method === 'GET') return json(200, await readBrain((ctx) => readSharedConfig(ctx)));
       const put = parseConfigPut(await readJson(request, SMALL_BODY));
       return json(200, await withBrain((ctx) => putSharedConfig(ctx, put)));
+    }
+
+    if (action === 'blog' && tail.length === 1 && (tail[0] === 'slug' || tail[0] === 'address')) {
+      // The owner's slug check and a post's public address (./blog-owner.ts).
+      allow('GET');
+      await svc.get(owner, brainId);
+      if (tail[0] === 'slug') {
+        return json(200, await checkBlogSlug(svc.pool, brainId, params.get('slug') ?? ''));
+      }
+      return json(200, await postAddress(svc.pool, brainId, params.get('path') ?? ''));
     }
 
     if (action === 'blog' && tail.length === 0) {
