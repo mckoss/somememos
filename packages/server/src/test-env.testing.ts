@@ -11,9 +11,9 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { engine as coreEngine, storage, type sync } from '@somememos/core';
+import { engine as coreEngine, storage, sync as coreSync, type sync } from '@somememos/core';
 import pg from 'pg';
-import { afterAll, describe, it } from 'vitest';
+import { afterAll, describe, expect, it } from 'vitest';
 import { FailureLimiter, parseTokens } from './auth.js';
 import type { ServerConfig } from './config.js';
 import { createApp, type App } from './http.js';
@@ -192,6 +192,12 @@ export function testClient(
   const send = async (request: sync.SyncRequest): Promise<sync.SyncResponse> => {
     const r = await server.request('POST', `/api/brains/${brainId}/sync`, request);
     if (r.status !== 200) throw new Error(`sync failed: ${r.status} ${JSON.stringify(r.body)}`);
+    // Every response the tests see has exactly the shape core's schema
+    // describes: it passes, and the schema drops nothing from it (no field
+    // the schema does not know), so the server and the clients cannot drift.
+    const checked = coreSync.parseWith(coreSync.SyncResponseSchema, r.body);
+    if (!checked.ok) throw new Error(`bad sync response: ${coreSync.issueMessage(checked.issue)}`);
+    expect(checked.value).toStrictEqual(r.body);
     return r.body as sync.SyncResponse;
   };
   return {

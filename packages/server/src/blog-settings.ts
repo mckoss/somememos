@@ -4,8 +4,11 @@
 // names the blog in its public addresses (`/blog/{slug}/`); it is unique
 // across the server and is never the brain id.
 
+import { sync } from '@somememos/core';
 import type pg from 'pg';
+import * as v from 'valibot';
 import { HttpError } from './errors.js';
+import { aboutTheBody, fieldCodes, parseRequest, type ErrorCode } from './requests.js';
 
 export interface BlogSettings {
   /** True when the owner has turned the public blog on. */
@@ -91,8 +94,10 @@ export const RESERVED_BLOG_SLUGS: ReadonlySet<string> = new Set([
   'www',
 ]);
 
-const LIMITS = { title: 120, description: 300, author: 100 } as const;
+/** The longest title, description and author, in characters. */
+export const BLOG_LIMITS = { title: 120, description: 300, author: 100 } as const;
 const LANGUAGE = /^[a-z]{2,3}(?:-[A-Za-z0-9]{1,8})*$/;
+const LANGUAGE_MESSAGE = 'must be a language tag such as "en" or "pt-BR"';
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f\u2028\u2029]/;
 
@@ -106,68 +111,66 @@ export function blogSlugProblem(slug: unknown): string | null {
   return null;
 }
 
-function text(body: Record<string, unknown>, name: keyof typeof LIMITS): string | null {
-  const v = body[name];
-  if (v === undefined || v === null) return null;
-  if (typeof v !== 'string')
-    throw new HttpError(400, 'invalid-argument', `${name} must be a string`);
-  const t = v.trim();
-  if (t === '') return null;
-  if (t.length > LIMITS[name]) {
-    throw new HttpError(
-      400,
-      'invalid-argument',
-      `${name} is longer than ${LIMITS[name]} characters`,
-    );
-  }
-  if (CONTROL.test(t)) {
-    throw new HttpError(400, 'invalid-argument', `${name} must be one line of plain text`);
-  }
-  return t;
+/** One line of plain text, trimmed; empty is null. */
+const blogText = (name: keyof typeof BLOG_LIMITS) =>
+  v.pipe(
+    v.nullish(v.string('must be a string')),
+    v.transform((value) => value?.trim() || null),
+    v.check(
+      (t) => t === null || t.length <= BLOG_LIMITS[name],
+      `is longer than ${BLOG_LIMITS[name]} characters`,
+    ),
+    v.check((t) => t === null || !CONTROL.test(t), 'must be one line of plain text'),
+  );
+
+/**
+ * A `PUT` body: the complete new settings (omitted optional fields become
+ * empty). Its errors: `invalid-request` for the body, `invalid-slug` for the
+ * slug, `invalid-argument` for the rest.
+ */
+export const BlogSettingsBody = sync.jsonObject(
+  v.strictObject({
+    enabled: v.boolean('must be true or false'),
+    slug: v.pipe(
+      v.nullish(v.unknown()),
+      v.transform((value) => (value === '' || value === undefined ? null : value)),
+      v.rawCheck<unknown>(({ dataset, addIssue }) => {
+        const problem = dataset.value === null ? null : blogSlugProblem(dataset.value);
+        if (problem) addIssue({ message: problem });
+      }),
+      v.transform((value) => value as string | null),
+    ),
+    title: blogText('title'),
+    description: blogText('description'),
+    author: blogText('author'),
+    language: v.pipe(
+      v.nullish(v.string(LANGUAGE_MESSAGE)),
+      v.transform((value) => value || DEFAULT_BLOG_SETTINGS.language),
+      v.regex(LANGUAGE, LANGUAGE_MESSAGE),
+    ),
+  }),
+);
+
+function blogCodes(issue: sync.Issue): ErrorCode {
+  if (issue.path?.[0]?.key === 'slug' && !aboutTheBody(issue)) return [400, 'invalid-slug'];
+  return fieldCodes()(issue);
 }
 
-/** Validates a `PUT` body: the complete new settings (omitted optional fields become empty). */
+/** Validates a `PUT` body (`BlogSettingsBody`, then: an enabled blog needs a slug and a title). */
 export function parseBlogSettings(value: unknown): BlogSettings {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) {
-    throw new HttpError(400, 'invalid-request', 'the body must be a JSON object');
-  }
-  const body = value as Record<string, unknown>;
-  const known = new Set(['enabled', 'slug', 'title', 'description', 'author', 'language']);
-  for (const key of Object.keys(body)) {
-    if (!known.has(key)) throw new HttpError(400, 'invalid-request', `unknown field "${key}"`);
-  }
-  if (typeof body.enabled !== 'boolean') {
-    throw new HttpError(400, 'invalid-argument', 'enabled must be true or false');
-  }
-  let slug: string | null = null;
-  if (body.slug !== undefined && body.slug !== null && body.slug !== '') {
-    const problem = blogSlugProblem(body.slug);
-    if (problem) throw new HttpError(400, 'invalid-slug', problem);
-    slug = body.slug as string;
-  }
-  const title = text(body, 'title');
-  let language = DEFAULT_BLOG_SETTINGS.language;
-  if (body.language !== undefined && body.language !== null && body.language !== '') {
-    if (typeof body.language !== 'string' || !LANGUAGE.test(body.language)) {
-      throw new HttpError(
-        400,
-        'invalid-argument',
-        'language must be a language tag such as "en" or "pt-BR"',
-      );
-    }
-    language = body.language;
-  }
-  if (body.enabled && (slug === null || title === null)) {
+  const s = parseRequest(BlogSettingsBody, value, blogCodes, 'the settings');
+  const settings: BlogSettings = {
+    enabled: s.enabled,
+    slug: s.slug ?? null,
+    title: s.title ?? null,
+    description: s.description ?? null,
+    author: s.author ?? null,
+    language: s.language ?? DEFAULT_BLOG_SETTINGS.language,
+  };
+  if (settings.enabled && (settings.slug === null || settings.title === null)) {
     throw new HttpError(400, 'invalid-argument', 'a blog needs a slug and a title to be turned on');
   }
-  return {
-    enabled: body.enabled,
-    slug,
-    title,
-    description: text(body, 'description'),
-    author: text(body, 'author'),
-    language,
-  };
+  return settings;
 }
 
 interface Row {

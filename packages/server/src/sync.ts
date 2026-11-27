@@ -12,199 +12,72 @@
 
 import { engine as coreEngine, markdown, storage, sync, timescore } from '@somememos/core';
 import type { BrainContext } from './brains.js';
-import { CLIENT_ID } from './brains.js';
 import { HttpError } from './errors.js';
+import { parseRequest, syncCodes } from './requests.js';
 import { folderClash } from './git-content.js';
 
 type Edit = sync.SyncEdit;
 
-const HASH = /^[0-9a-f]{64}$/;
-const REQUEST_KEYS = new Set(['since', 'client', 'configRevision', 'events', 'changes', 'edits']);
-const EDIT_KEYS = new Set(['id', 'op', 'path', 'to', 'baseHash', 'text']);
-const EVENT_KEYS = new Set(['id', 'kind', 'item', 'to', 'time', 'client']);
-const CHANGE_KEYS = new Set(['id', 'time', 'client', 'message', 'op', 'paths']);
-
-const invalid = (message: string, code = 'invalid-request'): HttpError =>
-  new HttpError(400, code, message);
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function onlyKeys(value: Record<string, unknown>, allowed: Set<string>, where: string): void {
-  for (const key of Object.keys(value)) {
-    if (!allowed.has(key)) throw invalid(`${where}: unknown field "${key}"`);
-  }
-}
-
-function array(value: unknown, name: string, max: number): unknown[] {
-  if (value === undefined) return [];
-  if (!Array.isArray(value)) throw invalid(`${name} must be an array`);
-  if (value.length > max) throw invalid(`at most ${max} ${name} per request`, 'too-large');
-  return value;
-}
-
 /**
- * Validates a sync request for a brain with `classifier`'s roles. Throws an
- * `HttpError` (400 or 413) naming the problem, never a path; nothing is
- * changed by an invalid request.
+ * Validates a sync request for a brain with `classifier`'s roles: its shape
+ * and limits (`sync.SyncRequestSchema`, errors as `syncCodes` maps them),
+ * then what needs the brain or the clock. Throws an `HttpError` (400, 403,
+ * 413 or 422) naming the problem, never a path; nothing is changed by an
+ * invalid request.
  */
 export function parseSyncRequest(
   body: unknown,
   classifier: markdown.RoleClassifier,
   now: number,
 ): sync.SyncRequest {
-  if (!isObject(body)) throw invalid('the request must be a JSON object');
-  onlyKeys(body, REQUEST_KEYS, 'request');
-  const limits = sync.SYNC_LIMITS;
-  const since = body.since;
-  if (typeof since !== 'number' || !Number.isSafeInteger(since) || since < 0) {
-    throw invalid('since must be an integer >= 0');
-  }
-  if (
-    body.client !== undefined &&
-    (typeof body.client !== 'string' || !CLIENT_ID.test(body.client))
-  ) {
-    throw invalid('client must be a client id (letters, digits, ".", "_", ":" and "-")');
-  }
+  const request = parseRequest(sync.SyncRequestSchema, body, syncCodes);
+  const invalid = (message: string, code = 'invalid-request') => new HttpError(400, code, message);
 
-  const configRevision = body.configRevision;
-  if (
-    configRevision !== undefined &&
-    (typeof configRevision !== 'number' ||
-      !Number.isSafeInteger(configRevision) ||
-      configRevision < 0)
-  ) {
-    throw invalid('configRevision must be an integer >= 0');
-  }
-
-  const checkNotePath = (path: unknown, where: string): string => {
-    const problem = sync.syncPathProblem(path);
-    if (problem !== null) throw invalid(`${where}: ${problem}`, 'invalid-path');
-    const role = classifier.classify(path as string)?.role;
-    if (role === 'excluded')
-      throw new HttpError(403, 'excluded', `${where}: that path is excluded`);
-    if (role === undefined)
+  // Edits: distinct ids and paths, and every path accepted by the brain's roles.
+  const role = (path: string, where: string): void => {
+    const r = classifier.classify(path)?.role;
+    if (r === 'excluded') throw new HttpError(403, 'excluded', `${where}: that path is excluded`);
+    if (r === undefined) {
       throw invalid(`${where}: the path has no role in this brain's config`, 'no-role');
-    return path as string;
+    }
   };
-
-  const edits: Edit[] = [];
   const ids = new Set<string>();
   const paths = new Set<string>();
-  const usePath = (path: string, where: string) => {
-    if (paths.has(path)) throw invalid(`${where}: a path may appear in only one edit per request`);
-    paths.add(path);
-  };
-  array(body.edits, 'edits', limits.maxEdits).forEach((raw, i) => {
+  request.edits.forEach((edit, i) => {
     const where = `edit ${i + 1}`;
-    if (!isObject(raw)) throw invalid(`${where} must be an object`);
-    onlyKeys(raw, EDIT_KEYS, where);
-    const { id, op, baseHash, text, to } = raw;
-    if (typeof id !== 'string' || id === '' || id.length > limits.maxEditIdLength) {
-      throw invalid(`${where}: id must be a string of 1 to ${limits.maxEditIdLength} characters`);
-    }
-    if (ids.has(id)) throw invalid(`${where}: duplicate id`);
-    ids.add(id);
-    if (op !== 'write' && op !== 'delete' && op !== 'rename') {
-      throw invalid(`${where}: op must be "write", "delete" or "rename"`);
-    }
-    const path = checkNotePath(raw.path, where);
-    usePath(path, where);
-    if (baseHash !== null && (typeof baseHash !== 'string' || !HASH.test(baseHash))) {
-      throw invalid(`${where}: baseHash must be null or a SHA-256 hex hash`);
-    }
-    if (op !== 'write' && baseHash === null) throw invalid(`${where}: a ${op} needs a baseHash`);
-    if (op === 'write') {
-      if (typeof text !== 'string') throw invalid(`${where}: a write needs text`);
-      if (storage.utf8Length(text) > limits.maxNoteBytes) {
-        throw new HttpError(
-          413,
-          'too-large',
-          `${where}: the note is larger than ${limits.maxNoteBytes} bytes`,
-        );
-      }
-      if (to !== undefined) throw invalid(`${where}: only a rename has "to"`);
-      edits.push({ id, op, path, baseHash: baseHash as string | null, text });
-    } else if (op === 'rename') {
-      if (text !== undefined) throw invalid(`${where}: only a write has text`);
-      const target = checkNotePath(to, `${where} (to)`);
-      if (target === path) throw invalid(`${where}: a rename must change the path`);
-      usePath(target, where);
-      edits.push({ id, op, path, to: target, baseHash: baseHash as string });
-    } else {
-      if (text !== undefined || to !== undefined)
-        throw invalid(`${where}: a delete has no text or "to"`);
-      edits.push({ id, op, path, baseHash: baseHash as string });
+    if (ids.has(edit.id)) throw invalid(`${where}: duplicate id`);
+    ids.add(edit.id);
+    for (const path of edit.op === 'rename' ? [edit.path, edit.to] : [edit.path]) {
+      role(path, where);
+      if (paths.has(path))
+        throw invalid(`${where}: a path may appear in only one edit per request`);
+      paths.add(path);
     }
   });
 
+  // Log entries and change records: not ahead of this clock, and naming no excluded path.
   const at = now + sync.SYNC_CLOCK_SKEW;
-  const excludedItem = (item: string) => coreEngine.isExcludedItem(classifier, item);
-  const checkEntry = (fn: () => void, where: string) => {
-    try {
-      fn();
-    } catch (error) {
-      if (error instanceof timescore.FutureEventError) {
-        throw new HttpError(
-          422,
-          'future-event',
-          `${where} is dated in the future; is this device's clock right?`,
-        );
-      }
-      throw invalid(`${where}: ${(error as Error).message}`, 'invalid-event');
-    }
-  };
-
-  const events: sync.SyncEvent[] = [];
-  array(body.events, 'events', limits.maxEvents).forEach((raw, i) => {
-    const where = `event ${i + 1}`;
-    if (!isObject(raw)) throw invalid(`${where} must be an object`);
-    onlyKeys(raw, EVENT_KEYS, where);
-    const e = raw as unknown as sync.SyncEvent;
-    if (e.kind !== 'rename' && 'to' in raw) throw invalid(`${where}: only a rename has "to"`);
-    checkEntry(() => storage.assertValidLogInput(e as storage.LogInput, at), where);
-    if (excludedItem(e.item) || (e.kind === 'rename' && excludedItem(e.to))) {
-      throw new HttpError(403, 'excluded', `${where} names an excluded path`);
-    }
-    events.push(
-      e.kind === 'rename'
-        ? { id: e.id, kind: 'rename', item: e.item, to: e.to, time: e.time, client: e.client }
-        : { id: e.id, kind: e.kind, item: e.item, time: e.time, client: e.client },
+  const future = (where: string) =>
+    new HttpError(
+      422,
+      'future-event',
+      `${where} is dated in the future; is this device's clock right?`,
     );
-  });
-
-  const changes: sync.SyncChange[] = [];
-  array(body.changes, 'changes', limits.maxChanges).forEach((raw, i) => {
-    const where = `change ${i + 1}`;
-    if (!isObject(raw)) throw invalid(`${where} must be an object`);
-    onlyKeys(raw, CHANGE_KEYS, where);
-    const c = {
-      id: raw.id,
-      time: raw.time,
-      client: raw.client,
-      message: raw.message ?? null,
-      op: raw.op ?? null,
-      paths: raw.paths ?? [],
-    } as storage.ChangeInput;
-    if (typeof c.message === 'string' && c.message.length > limits.maxMessageLength) {
-      throw invalid(`${where}: the message is longer than ${limits.maxMessageLength} characters`);
-    }
-    checkEntry(() => storage.assertValidChangeInput(c, at), where);
-    if (c.paths.some((p) => excludedItem(p))) {
+  const excluded = (item: string) => coreEngine.isExcludedItem(classifier, item);
+  request.events.forEach((e, i) => {
+    const where = `event ${i + 1}`;
+    if (e.time > at) throw future(where);
+    if (excluded(e.item) || (e.kind === 'rename' && excluded(e.to))) {
       throw new HttpError(403, 'excluded', `${where} names an excluded path`);
     }
-    changes.push({ ...c, paths: [...c.paths] });
   });
-
-  return {
-    since,
-    ...(typeof body.client === 'string' ? { client: body.client } : {}),
-    ...(typeof configRevision === 'number' ? { configRevision } : {}),
-    events,
-    changes,
-    edits,
-  };
+  request.changes.forEach((c, i) => {
+    const where = `change ${i + 1}`;
+    if (c.time > at) throw future(where);
+    if (c.paths.some(excluded))
+      throw new HttpError(403, 'excluded', `${where} names an excluded path`);
+  });
+  return request;
 }
 
 interface Judged {
@@ -296,7 +169,8 @@ async function judge(
 }
 
 /** The paths an edit touches. */
-const editPaths = (edit: Edit): string[] => (edit.to ? [edit.path, edit.to] : [edit.path]);
+const editPaths = (edit: Edit): string[] =>
+  edit.op === 'rename' ? [edit.path, edit.to] : [edit.path];
 
 /** Text in one response page, at most (beyond the first note). */
 export const PAGE_TEXT_BYTES = 16 * 1024 * 1024;

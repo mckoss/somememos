@@ -458,762 +458,914 @@ describePg('the HTTP API', () => {
     ).toEqual(['memos/ok.md']);
   });
 
-  it('pins every route’s accepted and refused inputs; a refused request changes nothing', async () => {
-    const server = await testServer();
-    await createBrain(server, 'pins');
-    const a = testClient(server, 'pins', 'phone');
-    await a.engine.index();
-    await a.engine.saveNote('memos/ok.md', '# Ok\n');
-    await a.sync();
-    const b = '/api/brains/pins';
-    const dir = join(server.dataDir, 'brains', 'pins');
-    const before = (await server.request('GET', b)).body.mutation;
-    const commits = (await runGit(dir, ['rev-list', '--count', 'HEAD'])).trim();
-    const okHash = (await server.request('GET', `${b}/notes/memos/ok.md?record=false`)).body.hash;
-    const hash = '0'.repeat(64);
-    const now = server.now();
-    const write = { op: 'write', path: 'memos/new.md', text: '# New\n', baseHash: null };
-    const edit = { id: 'e1', ...write };
-    const event = { id: 'v1', kind: 'read', item: 'memos/ok.md', time: now, client: 'c' };
-    const change = { id: 'c1', time: now, client: 'c', message: null, op: null, paths: [] };
-    const sync = (extra: object) => ({ since: 0, ...extra });
-    const big = 'x'.repeat(2 * 1024 * 1024 + 1);
-    const deep = (n: number) => `${'['.repeat(n)}${']'.repeat(n)}`;
+  it(
+    'pins every route’s accepted and refused inputs; a refused request changes nothing',
+    { timeout: 60_000 },
+    async () => {
+      const server = await testServer();
+      await createBrain(server, 'pins');
+      const a = testClient(server, 'pins', 'phone');
+      await a.engine.index();
+      await a.engine.saveNote('memos/ok.md', '# Ok\n');
+      await a.sync();
+      const b = '/api/brains/pins';
+      const dir = join(server.dataDir, 'brains', 'pins');
+      const before = (await server.request('GET', b)).body.mutation;
+      const commits = (await runGit(dir, ['rev-list', '--count', 'HEAD'])).trim();
+      const okHash = (await server.request('GET', `${b}/notes/memos/ok.md?record=false`)).body.hash;
+      const hash = '0'.repeat(64);
+      const now = server.now();
+      const write = { op: 'write', path: 'memos/new.md', text: '# New\n', baseHash: null };
+      const edit = { id: 'e1', ...write };
+      const event = { id: 'v1', kind: 'read', item: 'memos/ok.md', time: now, client: 'c' };
+      const change = { id: 'c1', time: now, client: 'c', message: null, op: null, paths: [] };
+      const sync = (extra: object) => ({ since: 0, ...extra });
+      const big = 'x'.repeat(2 * 1024 * 1024 + 1);
+      const deep = (n: number) => `${'['.repeat(n)}${']'.repeat(n)}`;
 
-    // [method, path, body (a string is sent as raw JSON text), status, code]
-    type Case = [string, string, unknown, number, string];
-    const raw = (text: string) => ({ raw: text });
-    const cases: Case[] = [
-      // POST /api/brains
-      ['POST', '/api/brains', 'x', 400, 'invalid-request'],
-      ['POST', '/api/brains', [], 400, 'invalid-request'],
-      ['POST', '/api/brains', null, 400, 'invalid-request'],
-      ['POST', '/api/brains', { id: 'fresh', extra: 1 }, 400, 'invalid-request'],
-      ['POST', '/api/brains', raw('{"id":"fresh","__proto__":{"x":1}}'), 400, 'invalid-request'],
-      ['POST', '/api/brains', raw('{"id":"fresh","constructor":{}}'), 400, 'invalid-request'],
-      ['POST', '/api/brains', {}, 400, 'invalid-brain-id'],
-      ['POST', '/api/brains', { id: 5 }, 400, 'invalid-brain-id'],
-      ['POST', '/api/brains', { id: 'Bad_Id' }, 400, 'invalid-brain-id'],
-      ['POST', '/api/brains', { id: 'a'.repeat(64) }, 400, 'invalid-brain-id'],
-      ['POST', '/api/brains', { id: '-lead' }, 400, 'invalid-brain-id'],
-      ['POST', '/api/brains', { id: 'pins' }, 409, 'brain-exists'],
-      ['POST', '/api/brains', { id: 'fresh', config: { clientId: 'x' } }, 400, 'invalid-config'],
-      [
-        'POST',
-        '/api/brains',
-        { id: 'fresh', config: { roles: { memo: 5 } } },
-        400,
-        'invalid-config',
-      ],
-      ['POST', '/api/brains', { id: 'fresh', config: [] }, 400, 'invalid-config'],
-      ['POST', '/api/brains', { id: 'fresh', config: 'x' }, 400, 'invalid-config'],
-      ['POST', '/api/brains', { id: 'fresh', config: { frob: 1 } }, 400, 'invalid-config'],
-      [
-        'POST',
-        '/api/brains',
-        raw(`{"id":"fresh","config":{"roles":${deep(5000)}}}`),
-        400,
-        'invalid-config',
-      ],
+      // [method, path, body (a string is sent as raw JSON text), status, code]
+      type Case = [string, string, unknown, number, string];
+      const raw = (text: string) => ({ raw: text });
+      const cases: Case[] = [
+        // POST /api/brains
+        ['POST', '/api/brains', 'x', 400, 'invalid-request'],
+        ['POST', '/api/brains', [], 400, 'invalid-request'],
+        ['POST', '/api/brains', null, 400, 'invalid-request'],
+        ['POST', '/api/brains', { id: 'fresh', extra: 1 }, 400, 'invalid-request'],
+        ['POST', '/api/brains', raw('{"id":"fresh","__proto__":{"x":1}}'), 400, 'invalid-request'],
+        ['POST', '/api/brains', raw('{"id":"fresh","constructor":{}}'), 400, 'invalid-request'],
+        ['POST', '/api/brains', {}, 400, 'invalid-brain-id'],
+        ['POST', '/api/brains', { id: 5 }, 400, 'invalid-brain-id'],
+        ['POST', '/api/brains', { id: 'Bad_Id' }, 400, 'invalid-brain-id'],
+        ['POST', '/api/brains', { id: 'a'.repeat(64) }, 400, 'invalid-brain-id'],
+        ['POST', '/api/brains', { id: '-lead' }, 400, 'invalid-brain-id'],
+        ['POST', '/api/brains', { id: 'pins' }, 409, 'brain-exists'],
+        ['POST', '/api/brains', { id: 'fresh', config: { clientId: 'x' } }, 400, 'invalid-config'],
+        [
+          'POST',
+          '/api/brains',
+          { id: 'fresh', config: { roles: { memo: 5 } } },
+          400,
+          'invalid-config',
+        ],
+        ['POST', '/api/brains', { id: 'fresh', config: [] }, 400, 'invalid-config'],
+        ['POST', '/api/brains', { id: 'fresh', config: 'x' }, 400, 'invalid-config'],
+        ['POST', '/api/brains', { id: 'fresh', config: { frob: 1 } }, 400, 'invalid-config'],
+        [
+          'POST',
+          '/api/brains',
+          raw(`{"id":"fresh","config":{"roles":${deep(5000)}}}`),
+          400,
+          'invalid-config',
+        ],
 
-      // PUT …/config
-      ['PUT', `${b}/config`, 'x', 400, 'invalid-request'],
-      ['PUT', `${b}/config`, [], 400, 'invalid-request'],
-      ['PUT', `${b}/config`, { baseRevision: 1, config: {}, x: 1 }, 400, 'invalid-request'],
-      [
-        'PUT',
-        `${b}/config`,
-        raw('{"baseRevision":1,"config":{},"__proto__":{}}'),
-        400,
-        'invalid-request',
-      ],
-      ['PUT', `${b}/config`, { baseRevision: -1, config: {} }, 400, 'invalid-argument'],
-      ['PUT', `${b}/config`, { baseRevision: 1.5, config: {} }, 400, 'invalid-argument'],
-      ['PUT', `${b}/config`, { baseRevision: '1', config: {} }, 400, 'invalid-argument'],
-      ['PUT', `${b}/config`, { baseRevision: 2 ** 53, config: {} }, 400, 'invalid-argument'],
-      ['PUT', `${b}/config`, raw('{"baseRevision":1e400,"config":{}}'), 400, 'invalid-argument'],
-      ['PUT', `${b}/config`, { config: {} }, 400, 'invalid-argument'],
-      ['PUT', `${b}/config`, { baseRevision: 1 }, 400, 'invalid-argument'],
-      ['PUT', `${b}/config`, { baseRevision: 1, config: null }, 400, 'invalid-argument'],
-      ['PUT', `${b}/config`, { baseRevision: 1, config: { clientId: 'x' } }, 400, 'invalid-config'],
-      ['PUT', `${b}/config`, { baseRevision: 1, config: { roles: 'x' } }, 400, 'invalid-config'],
-      ['PUT', `${b}/config`, { baseRevision: 1, config: [] }, 400, 'invalid-config'],
+        // PUT …/config
+        ['PUT', `${b}/config`, 'x', 400, 'invalid-request'],
+        ['PUT', `${b}/config`, [], 400, 'invalid-request'],
+        ['PUT', `${b}/config`, { baseRevision: 1, config: {}, x: 1 }, 400, 'invalid-request'],
+        [
+          'PUT',
+          `${b}/config`,
+          raw('{"baseRevision":1,"config":{},"__proto__":{}}'),
+          400,
+          'invalid-request',
+        ],
+        ['PUT', `${b}/config`, { baseRevision: -1, config: {} }, 400, 'invalid-argument'],
+        ['PUT', `${b}/config`, { baseRevision: 1.5, config: {} }, 400, 'invalid-argument'],
+        ['PUT', `${b}/config`, { baseRevision: '1', config: {} }, 400, 'invalid-argument'],
+        ['PUT', `${b}/config`, { baseRevision: 2 ** 53, config: {} }, 400, 'invalid-argument'],
+        ['PUT', `${b}/config`, raw('{"baseRevision":1e400,"config":{}}'), 400, 'invalid-argument'],
+        ['PUT', `${b}/config`, { config: {} }, 400, 'invalid-argument'],
+        ['PUT', `${b}/config`, { baseRevision: 1 }, 400, 'invalid-argument'],
+        ['PUT', `${b}/config`, { baseRevision: 1, config: null }, 400, 'invalid-argument'],
+        [
+          'PUT',
+          `${b}/config`,
+          { baseRevision: 1, config: { clientId: 'x' } },
+          400,
+          'invalid-config',
+        ],
+        ['PUT', `${b}/config`, { baseRevision: 1, config: { roles: 'x' } }, 400, 'invalid-config'],
+        ['PUT', `${b}/config`, { baseRevision: 1, config: [] }, 400, 'invalid-config'],
 
-      // PUT …/blog
-      ['PUT', `${b}/blog`, 'x', 400, 'invalid-request'],
-      ['PUT', `${b}/blog`, [], 400, 'invalid-request'],
-      ['PUT', `${b}/blog`, { enabled: false, x: 1 }, 400, 'invalid-request'],
-      ['PUT', `${b}/blog`, raw('{"enabled":false,"constructor":1}'), 400, 'invalid-request'],
-      ['PUT', `${b}/blog`, {}, 400, 'invalid-argument'],
-      ['PUT', `${b}/blog`, { enabled: 'yes' }, 400, 'invalid-argument'],
-      ['PUT', `${b}/blog`, { enabled: 1 }, 400, 'invalid-argument'],
-      ['PUT', `${b}/blog`, { enabled: false, slug: 'A' }, 400, 'invalid-slug'],
-      ['PUT', `${b}/blog`, { enabled: false, slug: 'api' }, 400, 'invalid-slug'],
-      ['PUT', `${b}/blog`, { enabled: false, slug: 5 }, 400, 'invalid-slug'],
-      ['PUT', `${b}/blog`, { enabled: false, slug: 'a--b' }, 400, 'invalid-slug'],
-      ['PUT', `${b}/blog`, { enabled: false, slug: 'a'.repeat(41) }, 400, 'invalid-slug'],
-      ['PUT', `${b}/blog`, { enabled: false, title: 5 }, 400, 'invalid-argument'],
-      ['PUT', `${b}/blog`, { enabled: false, title: 'x'.repeat(121) }, 400, 'invalid-argument'],
-      ['PUT', `${b}/blog`, { enabled: false, title: 'a\nb' }, 400, 'invalid-argument'],
-      ['PUT', `${b}/blog`, { enabled: false, title: 'a b' }, 400, 'invalid-argument'],
-      [
-        'PUT',
-        `${b}/blog`,
-        { enabled: false, description: 'x'.repeat(301) },
-        400,
-        'invalid-argument',
-      ],
-      ['PUT', `${b}/blog`, { enabled: false, author: 'x'.repeat(101) }, 400, 'invalid-argument'],
-      ['PUT', `${b}/blog`, { enabled: false, author: ['x'] }, 400, 'invalid-argument'],
-      ['PUT', `${b}/blog`, { enabled: false, language: 'english' }, 400, 'invalid-argument'],
-      ['PUT', `${b}/blog`, { enabled: false, language: 5 }, 400, 'invalid-argument'],
-      ['PUT', `${b}/blog`, { enabled: true, slug: 'my-blog' }, 400, 'invalid-argument'],
-      ['PUT', `${b}/blog`, { enabled: true, title: 'T' }, 400, 'invalid-argument'],
-      [
-        'PUT',
-        `${b}/blog`,
-        { enabled: true, slug: 'my-blog', title: '   ' },
-        400,
-        'invalid-argument',
-      ],
-      ['GET', `${b}/blog/address`, undefined, 400, 'invalid-path'],
-      ['GET', `${b}/blog/address?path=..%2Fx.md`, undefined, 400, 'invalid-path'],
+        // PUT …/blog
+        ['PUT', `${b}/blog`, 'x', 400, 'invalid-request'],
+        ['PUT', `${b}/blog`, [], 400, 'invalid-request'],
+        ['PUT', `${b}/blog`, { enabled: false, x: 1 }, 400, 'invalid-request'],
+        ['PUT', `${b}/blog`, raw('{"enabled":false,"constructor":1}'), 400, 'invalid-request'],
+        ['PUT', `${b}/blog`, {}, 400, 'invalid-argument'],
+        ['PUT', `${b}/blog`, { enabled: 'yes' }, 400, 'invalid-argument'],
+        ['PUT', `${b}/blog`, { enabled: 1 }, 400, 'invalid-argument'],
+        ['PUT', `${b}/blog`, { enabled: false, slug: 'A' }, 400, 'invalid-slug'],
+        ['PUT', `${b}/blog`, { enabled: false, slug: 'api' }, 400, 'invalid-slug'],
+        ['PUT', `${b}/blog`, { enabled: false, slug: 5 }, 400, 'invalid-slug'],
+        ['PUT', `${b}/blog`, { enabled: false, slug: 'a--b' }, 400, 'invalid-slug'],
+        ['PUT', `${b}/blog`, { enabled: false, slug: 'a'.repeat(41) }, 400, 'invalid-slug'],
+        ['PUT', `${b}/blog`, { enabled: false, title: 5 }, 400, 'invalid-argument'],
+        ['PUT', `${b}/blog`, { enabled: false, title: 'x'.repeat(121) }, 400, 'invalid-argument'],
+        ['PUT', `${b}/blog`, { enabled: false, title: 'a\nb' }, 400, 'invalid-argument'],
+        ['PUT', `${b}/blog`, { enabled: false, title: 'a b' }, 400, 'invalid-argument'],
+        [
+          'PUT',
+          `${b}/blog`,
+          { enabled: false, description: 'x'.repeat(301) },
+          400,
+          'invalid-argument',
+        ],
+        ['PUT', `${b}/blog`, { enabled: false, author: 'x'.repeat(101) }, 400, 'invalid-argument'],
+        ['PUT', `${b}/blog`, { enabled: false, author: ['x'] }, 400, 'invalid-argument'],
+        ['PUT', `${b}/blog`, { enabled: false, language: 'english' }, 400, 'invalid-argument'],
+        ['PUT', `${b}/blog`, { enabled: false, language: 5 }, 400, 'invalid-argument'],
+        ['PUT', `${b}/blog`, { enabled: true, slug: 'my-blog' }, 400, 'invalid-argument'],
+        ['PUT', `${b}/blog`, { enabled: true, title: 'T' }, 400, 'invalid-argument'],
+        [
+          'PUT',
+          `${b}/blog`,
+          { enabled: true, slug: 'my-blog', title: '   ' },
+          400,
+          'invalid-argument',
+        ],
+        ['GET', `${b}/blog/address`, undefined, 400, 'invalid-path'],
+        ['GET', `${b}/blog/address?path=..%2Fx.md`, undefined, 400, 'invalid-path'],
 
-      // POST …/changes
-      ['POST', `${b}/changes`, 'x', 400, 'invalid-request'],
-      ['POST', `${b}/changes`, {}, 400, 'invalid-request'],
-      ['POST', `${b}/changes`, { ops: [] }, 400, 'invalid-request'],
-      ['POST', `${b}/changes`, { ops: {} }, 400, 'invalid-request'],
-      ['POST', `${b}/changes`, { ops: [write], x: 1 }, 400, 'invalid-request'],
-      [
-        'POST',
-        `${b}/changes`,
-        raw(`{"ops":[${JSON.stringify(write)}],"__proto__":{}}`),
-        400,
-        'invalid-request',
-      ],
-      ['POST', `${b}/changes`, { message: 5, ops: [write] }, 400, 'invalid-request'],
-      [
-        'POST',
-        `${b}/changes`,
-        { message: 'x'.repeat(20_001), ops: [write] },
-        400,
-        'invalid-request',
-      ],
-      ['POST', `${b}/changes`, { ops: Array(1001).fill(0) }, 413, 'too-large'],
-      ['POST', `${b}/changes`, { ops: [5] }, 400, 'invalid-request'],
-      ['POST', `${b}/changes`, { ops: [[write]] }, 400, 'invalid-request'],
-      ['POST', `${b}/changes`, { ops: [{ ...write, op: 'frob' }] }, 400, 'invalid-request'],
-      ['POST', `${b}/changes`, { ops: [{ ...write, text: undefined }] }, 400, 'invalid-request'],
-      ['POST', `${b}/changes`, { ops: [{ ...write, text: 5 }] }, 400, 'invalid-request'],
-      ['POST', `${b}/changes`, { ops: [{ ...write, text: big }] }, 413, 'too-large'],
-      ['POST', `${b}/changes`, { ops: [{ ...write, to: 'memos/b.md' }] }, 400, 'invalid-request'],
-      ['POST', `${b}/changes`, { ops: [{ ...write, baseHash: 'abc' }] }, 400, 'invalid-request'],
-      [
-        'POST',
-        `${b}/changes`,
-        { ops: [{ ...write, baseHash: undefined }] },
-        400,
-        'invalid-request',
-      ],
-      ['POST', `${b}/changes`, { ops: [{ ...write, extra: 1 }] }, 400, 'invalid-request'],
-      ['POST', `${b}/changes`, { ops: [{ ...write, path: '../x.md' }] }, 400, 'invalid-path'],
-      ['POST', `${b}/changes`, { ops: [{ ...write, path: 5 }] }, 400, 'invalid-path'],
-      ['POST', `${b}/changes`, { ops: [{ ...write, path: undefined }] }, 400, 'invalid-path'],
-      ['POST', `${b}/changes`, { ops: [write, write] }, 400, 'invalid-request'],
-      [
-        'POST',
-        `${b}/changes`,
-        { ops: [{ op: 'delete', path: 'memos/ok.md', baseHash: null }] },
-        400,
-        'invalid-request',
-      ],
-      [
-        'POST',
-        `${b}/changes`,
-        { ops: [{ op: 'delete', path: 'memos/ok.md', baseHash: hash, text: '' }] },
-        400,
-        'invalid-request',
-      ],
-      [
-        'POST',
-        `${b}/changes`,
-        { ops: [{ op: 'delete', path: 'memos/ok.md', baseHash: hash, to: 'memos/b.md' }] },
-        400,
-        'invalid-request',
-      ],
-      [
-        'POST',
-        `${b}/changes`,
-        { ops: [{ op: 'rename', path: 'memos/ok.md', baseHash: hash }] },
-        400,
-        'invalid-path',
-      ],
-      [
-        'POST',
-        `${b}/changes`,
-        { ops: [{ op: 'rename', path: 'memos/ok.md', to: 'memos/ok.md', baseHash: hash }] },
-        400,
-        'invalid-request',
-      ],
-      ['POST', `${b}/changes`, { ops: [{ ...write, path: 'private/x.md' }] }, 403, 'excluded'],
-      ['POST', `${b}/changes`, { ops: [{ ...write, path: 'elsewhere/x.md' }] }, 404, 'not-found'],
+        // POST …/changes
+        ['POST', `${b}/changes`, 'x', 400, 'invalid-request'],
+        ['POST', `${b}/changes`, {}, 400, 'invalid-request'],
+        ['POST', `${b}/changes`, { ops: [] }, 400, 'invalid-request'],
+        ['POST', `${b}/changes`, { ops: {} }, 400, 'invalid-request'],
+        ['POST', `${b}/changes`, { ops: [write], x: 1 }, 400, 'invalid-request'],
+        [
+          'POST',
+          `${b}/changes`,
+          raw(`{"ops":[${JSON.stringify(write)}],"__proto__":{}}`),
+          400,
+          'invalid-request',
+        ],
+        ['POST', `${b}/changes`, { message: 5, ops: [write] }, 400, 'invalid-request'],
+        [
+          'POST',
+          `${b}/changes`,
+          { message: 'x'.repeat(20_001), ops: [write] },
+          400,
+          'invalid-request',
+        ],
+        ['POST', `${b}/changes`, { ops: Array(1001).fill(0) }, 413, 'too-large'],
+        ['POST', `${b}/changes`, { ops: [5] }, 400, 'invalid-request'],
+        ['POST', `${b}/changes`, { ops: [[write]] }, 400, 'invalid-request'],
+        ['POST', `${b}/changes`, { ops: [{ ...write, op: 'frob' }] }, 400, 'invalid-request'],
+        ['POST', `${b}/changes`, { ops: [{ ...write, text: undefined }] }, 400, 'invalid-request'],
+        ['POST', `${b}/changes`, { ops: [{ ...write, text: 5 }] }, 400, 'invalid-request'],
+        ['POST', `${b}/changes`, { ops: [{ ...write, text: big }] }, 413, 'too-large'],
+        ['POST', `${b}/changes`, { ops: [{ ...write, to: 'memos/b.md' }] }, 400, 'invalid-request'],
+        ['POST', `${b}/changes`, { ops: [{ ...write, baseHash: 'abc' }] }, 400, 'invalid-request'],
+        [
+          'POST',
+          `${b}/changes`,
+          { ops: [{ ...write, baseHash: undefined }] },
+          400,
+          'invalid-request',
+        ],
+        ['POST', `${b}/changes`, { ops: [{ ...write, extra: 1 }] }, 400, 'invalid-request'],
+        ['POST', `${b}/changes`, { ops: [{ ...write, path: '../x.md' }] }, 400, 'invalid-path'],
+        ['POST', `${b}/changes`, { ops: [{ ...write, path: 5 }] }, 400, 'invalid-path'],
+        ['POST', `${b}/changes`, { ops: [{ ...write, path: undefined }] }, 400, 'invalid-path'],
+        ['POST', `${b}/changes`, { ops: [write, write] }, 400, 'invalid-request'],
+        [
+          'POST',
+          `${b}/changes`,
+          { ops: [{ op: 'delete', path: 'memos/ok.md', baseHash: null }] },
+          400,
+          'invalid-request',
+        ],
+        [
+          'POST',
+          `${b}/changes`,
+          { ops: [{ op: 'delete', path: 'memos/ok.md', baseHash: hash, text: '' }] },
+          400,
+          'invalid-request',
+        ],
+        [
+          'POST',
+          `${b}/changes`,
+          { ops: [{ op: 'delete', path: 'memos/ok.md', baseHash: hash, to: 'memos/b.md' }] },
+          400,
+          'invalid-request',
+        ],
+        [
+          'POST',
+          `${b}/changes`,
+          { ops: [{ op: 'rename', path: 'memos/ok.md', baseHash: hash }] },
+          400,
+          'invalid-path',
+        ],
+        [
+          'POST',
+          `${b}/changes`,
+          { ops: [{ op: 'rename', path: 'memos/ok.md', to: 'memos/ok.md', baseHash: hash }] },
+          400,
+          'invalid-request',
+        ],
+        ['POST', `${b}/changes`, { ops: [{ ...write, path: 'private/x.md' }] }, 403, 'excluded'],
+        ['POST', `${b}/changes`, { ops: [{ ...write, path: 'elsewhere/x.md' }] }, 404, 'not-found'],
 
-      // POST …/sync
-      ['POST', `${b}/sync`, 'x', 400, 'invalid-request'],
-      ['POST', `${b}/sync`, [], 400, 'invalid-request'],
-      ['POST', `${b}/sync`, {}, 400, 'invalid-request'],
-      ['POST', `${b}/sync`, { since: '0' }, 400, 'invalid-request'],
-      ['POST', `${b}/sync`, { since: 1.5 }, 400, 'invalid-request'],
-      ['POST', `${b}/sync`, { since: 2 ** 53 }, 400, 'invalid-request'],
-      ['POST', `${b}/sync`, raw('{"since":1e400}'), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, { since: null }, 400, 'invalid-request'],
-      ['POST', `${b}/sync`, sync({ client: 'bad id!' }), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, sync({ client: 5 }), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, sync({ client: 'x'.repeat(101) }), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, sync({ configRevision: -1 }), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, sync({ configRevision: '1' }), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, sync({ events: {} }), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, sync({ edits: 'x' }), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, sync({ changes: null }), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, sync({ events: Array(20_001).fill(0) }), 400, 'too-large'],
-      ['POST', `${b}/sync`, sync({ changes: Array(5001).fill(0) }), 400, 'too-large'],
-      ['POST', `${b}/sync`, sync({ edits: Array(1001).fill(0) }), 400, 'too-large'],
-      ['POST', `${b}/sync`, raw('{"since":0,"__proto__":{"edits":[]}}'), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, raw(`{"since":0,"edits":[${deep(10_000)}]}`), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, sync({ edits: [5] }), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, sync({ edits: [{ ...edit, id: '' }] }), 400, 'invalid-request'],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ edits: [{ ...edit, id: 'x'.repeat(129) }] }),
-        400,
-        'invalid-request',
-      ],
-      ['POST', `${b}/sync`, sync({ edits: [{ ...edit, id: 5 }] }), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, sync({ edits: [{ ...edit, op: 'frob' }] }), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, sync({ edits: [{ ...edit, op: undefined }] }), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, sync({ edits: [{ ...edit, extra: 1 }] }), 400, 'invalid-request'],
-      [
-        'POST',
-        `${b}/sync`,
-        raw(
-          `{"since":0,"edits":[{"id":"e1","op":"write","path":"memos/n.md","baseHash":null,"text":"","constructor":1}]}`,
-        ),
-        400,
-        'invalid-request',
-      ],
-      ['POST', `${b}/sync`, sync({ edits: [{ ...edit, path: undefined }] }), 400, 'invalid-path'],
-      ['POST', `${b}/sync`, sync({ edits: [{ ...edit, path: 5 }] }), 400, 'invalid-path'],
-      ['POST', `${b}/sync`, sync({ edits: [{ ...edit, path: '' }] }), 400, 'invalid-path'],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ edits: [{ ...edit, path: 'memos/a\u0000.md' }] }),
-        400,
-        'invalid-path',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ edits: [{ ...edit, path: 'memos/a\\b.md' }] }),
-        400,
-        'invalid-path',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ edits: [{ ...edit, path: 'memos/é.md' }] }),
-        400,
-        'invalid-path',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ edits: [{ ...edit, path: `memos/${'x'.repeat(256)}.md` }] }),
-        400,
-        'invalid-path',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ edits: [{ ...edit, path: `memos/${'abcdefgh/'.repeat(120)}x.md` }] }),
-        400,
-        'invalid-path',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ edits: [{ ...edit, path: 'memos//x.md' }] }),
-        400,
-        'invalid-path',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ edits: [{ ...edit, path: 'memos/./x.md' }] }),
-        400,
-        'invalid-path',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ edits: [{ ...edit, path: 'memos/.hidden.md' }] }),
-        400,
-        'invalid-path',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ edits: [{ ...edit, baseHash: undefined }] }),
-        400,
-        'invalid-request',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ edits: [{ ...edit, baseHash: 'A'.repeat(64) }] }),
-        400,
-        'invalid-request',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ edits: [{ ...edit, text: undefined }] }),
-        400,
-        'invalid-request',
-      ],
-      ['POST', `${b}/sync`, sync({ edits: [{ ...edit, text: 5 }] }), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, sync({ edits: [{ ...edit, text: big }] }), 413, 'too-large'],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ edits: [{ ...edit, to: 'memos/b.md' }] }),
-        400,
-        'invalid-request',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({
-          edits: [{ id: 'd', op: 'delete', path: 'memos/ok.md', baseHash: okHash, text: '' }],
-        }),
-        400,
-        'invalid-request',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({
-          edits: [
-            { id: 'd', op: 'delete', path: 'memos/ok.md', baseHash: okHash, to: 'memos/b.md' },
-          ],
-        }),
-        400,
-        'invalid-request',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ edits: [{ id: 'r', op: 'rename', path: 'memos/ok.md', baseHash: okHash }] }),
-        400,
-        'invalid-path',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({
-          edits: [{ id: 'r', op: 'rename', path: 'memos/ok.md', to: 'memos/b.md', baseHash: null }],
-        }),
-        400,
-        'invalid-request',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({
-          edits: [
-            {
-              id: 'r',
-              op: 'rename',
-              path: 'memos/ok.md',
-              to: 'memos/b.md',
-              baseHash: okHash,
-              text: '',
-            },
-          ],
-        }),
-        400,
-        'invalid-request',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({
-          edits: [
-            { id: 'r', op: 'rename', path: 'memos/ok.md', to: 'private/b.md', baseHash: okHash },
-          ],
-        }),
-        403,
-        'excluded',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({
-          edits: [
-            { id: 'r', op: 'rename', path: 'memos/ok.md', to: 'memos/new.md', baseHash: okHash },
-            edit,
-          ],
-        }),
-        400,
-        'invalid-request',
-      ],
-      ['POST', `${b}/sync`, sync({ events: [5] }), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, sync({ events: [{ ...event, extra: 1 }] }), 400, 'invalid-request'],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ events: [{ ...event, to: 'memos/b.md' }] }),
-        400,
-        'invalid-request',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        raw(`{"since":0,"events":[${JSON.stringify(event).slice(0, -1)},"__proto__":{}}]}`),
-        400,
-        'invalid-request',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ events: [{ ...event, kind: undefined }] }),
-        400,
-        'invalid-event',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ events: [{ ...event, kind: 'toString' }] }),
-        400,
-        'invalid-event',
-      ],
-      ['POST', `${b}/sync`, sync({ events: [{ ...event, kind: 'rename' }] }), 400, 'invalid-event'],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ events: [{ ...event, kind: 'rename', to: 'memos/ok.md' }] }),
-        400,
-        'invalid-event',
-      ],
-      ['POST', `${b}/sync`, sync({ events: [{ ...event, id: '' }] }), 400, 'invalid-event'],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ events: [{ ...event, id: 'x'.repeat(201) }] }),
-        400,
-        'invalid-event',
-      ],
-      ['POST', `${b}/sync`, sync({ events: [{ ...event, id: undefined }] }), 400, 'invalid-event'],
-      ['POST', `${b}/sync`, sync({ events: [{ ...event, time: 1.5 }] }), 400, 'invalid-event'],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ events: [{ ...event, time: String(now) }] }),
-        400,
-        'invalid-event',
-      ],
-      ['POST', `${b}/sync`, sync({ events: [{ ...event, time: 2 ** 53 }] }), 422, 'future-event'],
-      ['POST', `${b}/sync`, sync({ events: [{ ...event, item: '' }] }), 400, 'invalid-event'],
-      ['POST', `${b}/sync`, sync({ events: [{ ...event, client: 5 }] }), 400, 'invalid-event'],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ events: [{ ...event, time: now + 10_000 }] }),
-        422,
-        'future-event',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ events: [{ ...event, item: 'private/x.md' }] }),
-        403,
-        'excluded',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ events: [{ ...event, kind: 'rename', to: 'private/x.md' }] }),
-        403,
-        'excluded',
-      ],
-      ['POST', `${b}/sync`, sync({ changes: [5] }), 400, 'invalid-request'],
-      ['POST', `${b}/sync`, sync({ changes: [{ ...change, extra: 1 }] }), 400, 'invalid-request'],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ changes: [{ ...change, message: 'x'.repeat(20_001) }] }),
-        400,
-        'invalid-request',
-      ],
-      ['POST', `${b}/sync`, sync({ changes: [{ ...change, message: 5 }] }), 400, 'invalid-event'],
-      ['POST', `${b}/sync`, sync({ changes: [{ ...change, op: '' }] }), 400, 'invalid-event'],
-      ['POST', `${b}/sync`, sync({ changes: [{ ...change, op: 5 }] }), 400, 'invalid-event'],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ changes: [{ ...change, paths: 'memos/ok.md' }] }),
-        400,
-        'invalid-event',
-      ],
-      ['POST', `${b}/sync`, sync({ changes: [{ ...change, paths: [5] }] }), 400, 'invalid-event'],
-      ['POST', `${b}/sync`, sync({ changes: [{ ...change, paths: [''] }] }), 400, 'invalid-event'],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ changes: [{ ...change, id: undefined }] }),
-        400,
-        'invalid-event',
-      ],
-      ['POST', `${b}/sync`, sync({ changes: [{ ...change, client: '' }] }), 400, 'invalid-event'],
-      ['POST', `${b}/sync`, sync({ changes: [{ ...change, time: -0.5 }] }), 400, 'invalid-event'],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ changes: [{ ...change, time: now + 10_000 }] }),
-        422,
-        'future-event',
-      ],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ changes: [{ ...change, paths: ['private/x.md'] }] }),
-        403,
-        'excluded',
-      ],
-      ['POST', `${b}/sync`, sync({ configRevision: 99 }), 409, 'config-changed'],
+        // POST …/sync
+        ['POST', `${b}/sync`, 'x', 400, 'invalid-request'],
+        ['POST', `${b}/sync`, [], 400, 'invalid-request'],
+        ['POST', `${b}/sync`, {}, 400, 'invalid-request'],
+        ['POST', `${b}/sync`, { since: '0' }, 400, 'invalid-request'],
+        ['POST', `${b}/sync`, { since: 1.5 }, 400, 'invalid-request'],
+        ['POST', `${b}/sync`, { since: 2 ** 53 }, 400, 'invalid-request'],
+        ['POST', `${b}/sync`, raw('{"since":1e400}'), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, { since: null }, 400, 'invalid-request'],
+        ['POST', `${b}/sync`, sync({ client: 'bad id!' }), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, sync({ client: 5 }), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, sync({ client: 'x'.repeat(101) }), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, sync({ configRevision: -1 }), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, sync({ configRevision: '1' }), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, sync({ events: {} }), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, sync({ edits: 'x' }), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, sync({ changes: null }), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, sync({ events: Array(20_001).fill(0) }), 400, 'too-large'],
+        ['POST', `${b}/sync`, sync({ changes: Array(5001).fill(0) }), 400, 'too-large'],
+        ['POST', `${b}/sync`, sync({ edits: Array(1001).fill(0) }), 400, 'too-large'],
+        ['POST', `${b}/sync`, raw('{"since":0,"__proto__":{"edits":[]}}'), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, raw(`{"since":0,"edits":[${deep(10_000)}]}`), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, sync({ edits: [5] }), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, sync({ edits: [[]] }), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, sync({ events: [[]] }), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, sync({ changes: [[]] }), 400, 'invalid-request'],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ changes: [{ ...change, paths: [[]] }] }),
+          400,
+          'invalid-event',
+        ],
+        ['POST', `${b}/sync`, sync({ edits: [{ ...edit, id: '' }] }), 400, 'invalid-request'],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ edits: [{ ...edit, id: 'x'.repeat(129) }] }),
+          400,
+          'invalid-request',
+        ],
+        ['POST', `${b}/sync`, sync({ edits: [{ ...edit, id: 5 }] }), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, sync({ edits: [{ ...edit, op: 'frob' }] }), 400, 'invalid-request'],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ edits: [{ ...edit, op: undefined }] }),
+          400,
+          'invalid-request',
+        ],
+        ['POST', `${b}/sync`, sync({ edits: [{ ...edit, extra: 1 }] }), 400, 'invalid-request'],
+        [
+          'POST',
+          `${b}/sync`,
+          raw(
+            `{"since":0,"edits":[{"id":"e1","op":"write","path":"memos/n.md","baseHash":null,"text":"","constructor":1}]}`,
+          ),
+          400,
+          'invalid-request',
+        ],
+        ['POST', `${b}/sync`, sync({ edits: [{ ...edit, path: undefined }] }), 400, 'invalid-path'],
+        ['POST', `${b}/sync`, sync({ edits: [{ ...edit, path: 5 }] }), 400, 'invalid-path'],
+        ['POST', `${b}/sync`, sync({ edits: [{ ...edit, path: '' }] }), 400, 'invalid-path'],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ edits: [{ ...edit, path: 'memos/a\u0000.md' }] }),
+          400,
+          'invalid-path',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ edits: [{ ...edit, path: 'memos/a\\b.md' }] }),
+          400,
+          'invalid-path',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ edits: [{ ...edit, path: 'memos/é.md' }] }),
+          400,
+          'invalid-path',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ edits: [{ ...edit, path: `memos/${'x'.repeat(256)}.md` }] }),
+          400,
+          'invalid-path',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ edits: [{ ...edit, path: `memos/${'abcdefgh/'.repeat(120)}x.md` }] }),
+          400,
+          'invalid-path',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ edits: [{ ...edit, path: 'memos//x.md' }] }),
+          400,
+          'invalid-path',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ edits: [{ ...edit, path: 'memos/./x.md' }] }),
+          400,
+          'invalid-path',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ edits: [{ ...edit, path: 'memos/.hidden.md' }] }),
+          400,
+          'invalid-path',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ edits: [{ ...edit, baseHash: undefined }] }),
+          400,
+          'invalid-request',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ edits: [{ ...edit, baseHash: 'A'.repeat(64) }] }),
+          400,
+          'invalid-request',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ edits: [{ ...edit, text: undefined }] }),
+          400,
+          'invalid-request',
+        ],
+        ['POST', `${b}/sync`, sync({ edits: [{ ...edit, text: 5 }] }), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, sync({ edits: [{ ...edit, text: big }] }), 413, 'too-large'],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ edits: [{ ...edit, to: 'memos/b.md' }] }),
+          400,
+          'invalid-request',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({
+            edits: [{ id: 'd', op: 'delete', path: 'memos/ok.md', baseHash: okHash, text: '' }],
+          }),
+          400,
+          'invalid-request',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({
+            edits: [
+              { id: 'd', op: 'delete', path: 'memos/ok.md', baseHash: okHash, to: 'memos/b.md' },
+            ],
+          }),
+          400,
+          'invalid-request',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ edits: [{ id: 'r', op: 'rename', path: 'memos/ok.md', baseHash: okHash }] }),
+          400,
+          'invalid-path',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({
+            edits: [
+              { id: 'r', op: 'rename', path: 'memos/ok.md', to: 'memos/b.md', baseHash: null },
+            ],
+          }),
+          400,
+          'invalid-request',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({
+            edits: [
+              {
+                id: 'r',
+                op: 'rename',
+                path: 'memos/ok.md',
+                to: 'memos/b.md',
+                baseHash: okHash,
+                text: '',
+              },
+            ],
+          }),
+          400,
+          'invalid-request',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({
+            edits: [
+              { id: 'r', op: 'rename', path: 'memos/ok.md', to: 'private/b.md', baseHash: okHash },
+            ],
+          }),
+          403,
+          'excluded',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({
+            edits: [
+              { id: 'r', op: 'rename', path: 'memos/ok.md', to: 'memos/new.md', baseHash: okHash },
+              edit,
+            ],
+          }),
+          400,
+          'invalid-request',
+        ],
+        ['POST', `${b}/sync`, sync({ events: [5] }), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, sync({ events: [{ ...event, extra: 1 }] }), 400, 'invalid-request'],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ events: [{ ...event, to: 'memos/b.md' }] }),
+          400,
+          'invalid-request',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          raw(`{"since":0,"events":[${JSON.stringify(event).slice(0, -1)},"__proto__":{}}]}`),
+          400,
+          'invalid-request',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ events: [{ ...event, kind: undefined }] }),
+          400,
+          'invalid-event',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ events: [{ ...event, kind: 'toString' }] }),
+          400,
+          'invalid-event',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ events: [{ ...event, kind: 'rename' }] }),
+          400,
+          'invalid-event',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ events: [{ ...event, kind: 'rename', to: 'memos/ok.md' }] }),
+          400,
+          'invalid-event',
+        ],
+        ['POST', `${b}/sync`, sync({ events: [{ ...event, id: '' }] }), 400, 'invalid-event'],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ events: [{ ...event, id: 'x'.repeat(201) }] }),
+          400,
+          'invalid-event',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ events: [{ ...event, id: undefined }] }),
+          400,
+          'invalid-event',
+        ],
+        ['POST', `${b}/sync`, sync({ events: [{ ...event, time: 1.5 }] }), 400, 'invalid-event'],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ events: [{ ...event, time: String(now) }] }),
+          400,
+          'invalid-event',
+        ],
+        ['POST', `${b}/sync`, sync({ events: [{ ...event, item: '' }] }), 400, 'invalid-event'],
+        ['POST', `${b}/sync`, sync({ events: [{ ...event, client: 5 }] }), 400, 'invalid-event'],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ events: [{ ...event, time: now + 10_000 }] }),
+          422,
+          'future-event',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ events: [{ ...event, item: 'private/x.md' }] }),
+          403,
+          'excluded',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ events: [{ ...event, kind: 'rename', to: 'private/x.md' }] }),
+          403,
+          'excluded',
+        ],
+        ['POST', `${b}/sync`, sync({ changes: [5] }), 400, 'invalid-request'],
+        ['POST', `${b}/sync`, sync({ changes: [{ ...change, extra: 1 }] }), 400, 'invalid-request'],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ changes: [{ ...change, message: 'x'.repeat(20_001) }] }),
+          400,
+          'invalid-request',
+        ],
+        ['POST', `${b}/sync`, sync({ changes: [{ ...change, message: 5 }] }), 400, 'invalid-event'],
+        ['POST', `${b}/sync`, sync({ changes: [{ ...change, op: '' }] }), 400, 'invalid-event'],
+        ['POST', `${b}/sync`, sync({ changes: [{ ...change, op: 5 }] }), 400, 'invalid-event'],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ changes: [{ ...change, paths: 'memos/ok.md' }] }),
+          400,
+          'invalid-event',
+        ],
+        ['POST', `${b}/sync`, sync({ changes: [{ ...change, paths: [5] }] }), 400, 'invalid-event'],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ changes: [{ ...change, paths: [''] }] }),
+          400,
+          'invalid-event',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ changes: [{ ...change, id: undefined }] }),
+          400,
+          'invalid-event',
+        ],
+        ['POST', `${b}/sync`, sync({ changes: [{ ...change, client: '' }] }), 400, 'invalid-event'],
+        ['POST', `${b}/sync`, sync({ changes: [{ ...change, time: -0.5 }] }), 400, 'invalid-event'],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ changes: [{ ...change, time: now + 10_000 }] }),
+          422,
+          'future-event',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ changes: [{ ...change, paths: ['private/x.md'] }] }),
+          403,
+          'excluded',
+        ],
+        ['POST', `${b}/sync`, sync({ configRevision: 99 }), 409, 'config-changed'],
 
-      // Notes: path parameters, query strings and bodies
-      ['GET', `${b}/notes/memos%2F..%2Fx.md`, undefined, 400, 'invalid-path'],
-      ['GET', `${b}/notes/memos/x.txt`, undefined, 400, 'invalid-path'],
-      ['GET', `${b}/notes/memos/%ZZ.md`, undefined, 400, 'invalid-path'],
-      ['GET', `${b}/notes/memos/a%00.md`, undefined, 400, 'invalid-path'],
-      ['GET', `${b}/notes/.git/config.md`, undefined, 400, 'invalid-path'],
-      ['GET', `${b}/notes/private/x.md?record=false`, undefined, 403, 'excluded'],
-      ['GET', `${b}/notes/memos/ok.md?record=maybe`, undefined, 400, 'invalid-argument'],
-      ['PUT', `${b}/notes/memos/ok.md`, 'x', 400, 'invalid-request'],
-      ['PUT', `${b}/notes/memos/ok.md`, [], 400, 'invalid-request'],
-      ['PUT', `${b}/notes/memos/ok.md`, {}, 400, 'invalid-argument'],
-      ['PUT', `${b}/notes/memos/ok.md`, { text: 5 }, 400, 'invalid-argument'],
-      ['PUT', `${b}/notes/memos/ok.md`, { text: 'x', baseHash: 'abc' }, 400, 'invalid-argument'],
-      ['PUT', `${b}/notes/memos/ok.md`, { text: 'x', baseHash: 5 }, 400, 'invalid-argument'],
-      ['PUT', `${b}/notes/memos/ok.md`, { text: 'x', message: 5 }, 400, 'invalid-argument'],
-      [
-        'PUT',
-        `${b}/notes/memos/ok.md`,
-        { text: 'x', message: 'x'.repeat(20_001) },
-        400,
-        'invalid-argument',
-      ],
-      ['PUT', `${b}/notes/memos/ok.md`, { text: big }, 413, 'too-large'],
-      ['PUT', `${b}/notes/memos/ok.md`, { text: 'x', baseHash: hash }, 409, 'conflict'],
-      ['PUT', `${b}/notes/private/x.md`, { text: 'x' }, 403, 'excluded'],
-      ['PUT', `${b}/notes/sources/s.md`, 'x', 400, 'invalid-request'],
-      ['DELETE', `${b}/notes/memos/gone.md`, undefined, 404, 'not-found'],
-      ['GET', `${b}/notes/memos/ok.md/history?limit=0`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/notes/memos/ok.md/history?limit=1001`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/notes/memos/ok.md/history?limit=x`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/notes/memos/../history`, undefined, 400, 'invalid-path'],
-      ['GET', `${b}/notes/memos/ok.md/versions?hash=abc`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/notes/memos/ok.md/versions`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/notes/memos/ok.md/versions?hash=${hash}`, undefined, 404, 'not-found'],
-      ['GET', `${b}/notes/memos/ok.md/versions/zz`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/notes/memos/ok.md/versions/${'0'.repeat(40)}`, undefined, 404, 'not-found'],
-      ['GET', `${b}/notes/private/x.md/history`, undefined, 403, 'excluded'],
-      ['POST', `${b}/notes/memos/ok.md/restore`, 'x', 400, 'invalid-request'],
-      ['POST', `${b}/notes/memos/ok.md/restore`, {}, 400, 'invalid-argument'],
-      ['POST', `${b}/notes/memos/ok.md/restore`, { commit: 5 }, 400, 'invalid-argument'],
-      ['POST', `${b}/notes/memos/ok.md/restore`, { commit: 'zz' }, 400, 'invalid-argument'],
-      [
-        'POST',
-        `${b}/notes/memos/ok.md/restore`,
-        { commit: '0'.repeat(40), baseHash: 'x' },
-        400,
-        'invalid-argument',
-      ],
-      [
-        'POST',
-        `${b}/notes/memos/ok.md/restore`,
-        { commit: '0'.repeat(40), message: 5 },
-        400,
-        'invalid-argument',
-      ],
-      ['POST', `${b}/notes/memos/ok.md/restore`, { commit: '0'.repeat(40) }, 404, 'not-found'],
+        // Notes: path parameters, query strings and bodies
+        ['GET', `${b}/notes/memos%2F..%2Fx.md`, undefined, 400, 'invalid-path'],
+        ['GET', `${b}/notes/memos/x.txt`, undefined, 400, 'invalid-path'],
+        ['GET', `${b}/notes/memos/%ZZ.md`, undefined, 400, 'invalid-path'],
+        ['GET', `${b}/notes/memos/a%00.md`, undefined, 400, 'invalid-path'],
+        ['GET', `${b}/notes/.git/config.md`, undefined, 400, 'invalid-path'],
+        ['GET', `${b}/notes/private/x.md?record=false`, undefined, 403, 'excluded'],
+        ['GET', `${b}/notes/memos/ok.md?record=maybe`, undefined, 400, 'invalid-argument'],
+        ['PUT', `${b}/notes/memos/ok.md`, 'x', 400, 'invalid-request'],
+        ['PUT', `${b}/notes/memos/ok.md`, [], 400, 'invalid-request'],
+        ['PUT', `${b}/notes/memos/ok.md`, {}, 400, 'invalid-argument'],
+        ['PUT', `${b}/notes/memos/ok.md`, { text: 5 }, 400, 'invalid-argument'],
+        ['PUT', `${b}/notes/memos/ok.md`, { text: 'x', baseHash: 'abc' }, 400, 'invalid-argument'],
+        ['PUT', `${b}/notes/memos/ok.md`, { text: 'x', baseHash: 5 }, 400, 'invalid-argument'],
+        ['PUT', `${b}/notes/memos/ok.md`, { text: 'x', message: 5 }, 400, 'invalid-argument'],
+        [
+          'PUT',
+          `${b}/notes/memos/ok.md`,
+          { text: 'x', message: 'x'.repeat(20_001) },
+          400,
+          'invalid-argument',
+        ],
+        ['PUT', `${b}/notes/memos/ok.md`, { text: big }, 413, 'too-large'],
+        ['PUT', `${b}/notes/memos/ok.md`, { text: 'x', baseHash: hash }, 409, 'conflict'],
+        ['PUT', `${b}/notes/private/x.md`, { text: 'x' }, 403, 'excluded'],
+        ['PUT', `${b}/notes/sources/s.md`, 'x', 400, 'invalid-request'],
+        ['DELETE', `${b}/notes/memos/gone.md`, undefined, 404, 'not-found'],
+        ['GET', `${b}/notes/memos/ok.md/history?limit=0`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/notes/memos/ok.md/history?limit=1001`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/notes/memos/ok.md/history?limit=x`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/notes/memos/../history`, undefined, 400, 'invalid-path'],
+        ['GET', `${b}/notes/memos/ok.md/versions?hash=abc`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/notes/memos/ok.md/versions`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/notes/memos/ok.md/versions?hash=${hash}`, undefined, 404, 'not-found'],
+        ['GET', `${b}/notes/memos/ok.md/versions/zz`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/notes/memos/ok.md/versions/${'0'.repeat(40)}`, undefined, 404, 'not-found'],
+        ['GET', `${b}/notes/private/x.md/history`, undefined, 403, 'excluded'],
+        ['POST', `${b}/notes/memos/ok.md/restore`, 'x', 400, 'invalid-request'],
+        ['POST', `${b}/notes/memos/ok.md/restore`, {}, 400, 'invalid-argument'],
+        ['POST', `${b}/notes/memos/ok.md/restore`, { commit: 5 }, 400, 'invalid-argument'],
+        ['POST', `${b}/notes/memos/ok.md/restore`, { commit: 'zz' }, 400, 'invalid-argument'],
+        [
+          'POST',
+          `${b}/notes/memos/ok.md/restore`,
+          { commit: '0'.repeat(40), baseHash: 'x' },
+          400,
+          'invalid-argument',
+        ],
+        [
+          'POST',
+          `${b}/notes/memos/ok.md/restore`,
+          { commit: '0'.repeat(40), message: 5 },
+          400,
+          'invalid-argument',
+        ],
+        ['POST', `${b}/notes/memos/ok.md/restore`, { commit: '0'.repeat(40) }, 404, 'not-found'],
 
-      // Rename, search, list, log, diary
-      ['POST', `${b}/rename`, 'x', 400, 'invalid-request'],
-      ['POST', `${b}/rename`, {}, 400, 'invalid-path'],
-      ['POST', `${b}/rename`, { from: '../x.md', to: 'memos/b.md' }, 400, 'invalid-path'],
-      ['POST', `${b}/rename`, { from: 'memos/ok.md' }, 400, 'invalid-path'],
-      ['POST', `${b}/rename`, { from: 'memos/ok.md', to: 5 }, 400, 'invalid-path'],
-      [
-        'POST',
-        `${b}/rename`,
-        { from: 'memos/ok.md', to: 'memos/b.md', message: 5 },
-        400,
-        'invalid-argument',
-      ],
-      ['POST', `${b}/rename`, { from: 'memos/ok.md', to: 'private/b.md' }, 403, 'excluded'],
-      ['POST', `${b}/rename`, { from: 'memos/gone.md', to: 'memos/b.md' }, 404, 'not-found'],
-      ['GET', `${b}/search?q=x&mode=frob`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/search?q=x&limit=abc`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/search?q=x&limit=1.5`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/search?q=x&limit=${2 ** 53}`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/list?mode=frob`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/list?limit=x`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/log?path=..%2Fx.md`, undefined, 400, 'invalid-path'],
-      ['GET', `${b}/log?since=x`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/log?until=1.5`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/log?limit=x`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/log?all=maybe`, undefined, 400, 'invalid-argument'],
-      ['POST', `${b}/diary`, 'x', 400, 'invalid-request'],
-      ['POST', `${b}/diary`, [], 400, 'invalid-request'],
-      ['POST', `${b}/diary`, { date: 5 }, 400, 'invalid-argument'],
-      ['POST', `${b}/diary`, { date: 'x'.repeat(20_001) }, 400, 'invalid-argument'],
-      ['POST', `${b}/diary`, { date: 'someday' }, 400, 'invalid-argument'],
-      ['GET', `${b}/diary?date=someday`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/diary?date=`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/search?q=x&since=`, undefined, 400, 'invalid-argument'],
-      ['GET', `${b}/frobnicate`, undefined, 404, 'not-found'],
-      ['GET', `${b}/status/x`, undefined, 404, 'not-found'],
-      ['PATCH', `${b}/notes/memos/ok.md`, undefined, 405, 'method-not-allowed'],
-    ];
-    const send = async (method: string, path: string, body: unknown) => {
-      if (body !== null && typeof body === 'object' && 'raw' in body) {
+        // Rename, search, list, log, diary
+        ['POST', `${b}/rename`, 'x', 400, 'invalid-request'],
+        ['POST', `${b}/rename`, {}, 400, 'invalid-path'],
+        ['POST', `${b}/rename`, { from: '../x.md', to: 'memos/b.md' }, 400, 'invalid-path'],
+        ['POST', `${b}/rename`, { from: 'memos/ok.md' }, 400, 'invalid-path'],
+        ['POST', `${b}/rename`, { from: 'memos/ok.md', to: 5 }, 400, 'invalid-path'],
+        [
+          'POST',
+          `${b}/rename`,
+          { from: 'memos/ok.md', to: 'memos/b.md', message: 5 },
+          400,
+          'invalid-argument',
+        ],
+        ['POST', `${b}/rename`, { from: 'memos/ok.md', to: 'private/b.md' }, 403, 'excluded'],
+        ['POST', `${b}/rename`, { from: 'memos/gone.md', to: 'memos/b.md' }, 404, 'not-found'],
+        ['GET', `${b}/search?q=x&mode=frob`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/search?q=x&limit=abc`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/search?q=x&limit=1.5`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/search?q=x&limit=${2 ** 53}`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/list?mode=frob`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/list?limit=x`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/log?path=..%2Fx.md`, undefined, 400, 'invalid-path'],
+        ['GET', `${b}/log?since=x`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/log?until=1.5`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/log?limit=x`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/log?all=maybe`, undefined, 400, 'invalid-argument'],
+        ['POST', `${b}/diary`, 'x', 400, 'invalid-request'],
+        ['POST', `${b}/diary`, [], 400, 'invalid-request'],
+        ['POST', `${b}/diary`, { date: 5 }, 400, 'invalid-argument'],
+        ['POST', `${b}/diary`, { date: 'x'.repeat(20_001) }, 400, 'invalid-argument'],
+        ['POST', `${b}/diary`, { date: 'someday' }, 400, 'invalid-argument'],
+        ['GET', `${b}/diary?date=someday`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/diary?date=`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/search?q=x&since=`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/frobnicate`, undefined, 404, 'not-found'],
+        ['GET', `${b}/status/x`, undefined, 404, 'not-found'],
+        ['PATCH', `${b}/notes/memos/ok.md`, undefined, 405, 'method-not-allowed'],
+      ];
+      const send = async (method: string, path: string, body: unknown) => {
+        if (body !== null && typeof body === 'object' && 'raw' in body) {
+          const r = await server.app.handle(
+            new Request(`http://somememos.test${path}`, {
+              method,
+              headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+              body: (body as { raw: string }).raw,
+            }),
+          );
+          return { status: r.status, body: await r.json() };
+        }
+        return server.request(method, path, body);
+      };
+      const failures: string[] = [];
+      for (const [method, path, body, status, code] of cases) {
+        const r = await send(method, path, body);
+        const got = [r.status, r.body?.error?.code ?? r.body?.status];
+        if (got[0] !== status || got[1] !== code) {
+          failures.push(
+            `${method} ${path} ${JSON.stringify(body)?.slice(0, 100)}: got ${got.join(' ')}, want ${status} ${code}`,
+          );
+        }
+        // Never an excluded path (the config a 409 carries names the folder only).
+        const text = JSON.stringify(r.body);
+        expect(text, `${method} ${path}`).not.toMatch(/private\/[a-z]/);
+        expect(text, `${method} ${path}`).not.toContain(TOKEN);
+      }
+      expect(failures).toEqual([]);
+
+      for (const [text, type, status, code] of [
+        ['{"since":0,', 'application/json', 400, 'invalid-json'],
+        ['', 'application/json', 400, 'invalid-json'],
+        ['{"since":0}', 'text/plain', 415, 'unsupported-media-type'],
+      ] as const) {
         const r = await server.app.handle(
-          new Request(`http://somememos.test${path}`, {
-            method,
-            headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
-            body: (body as { raw: string }).raw,
+          new Request(`http://somememos.test${b}/sync`, {
+            method: 'POST',
+            headers: { authorization: `Bearer ${TOKEN}`, 'content-type': type },
+            body: text,
           }),
         );
-        return { status: r.status, body: await r.json() };
+        const body = (await r.json()) as { error: { code: string } };
+        expect([r.status, body.error.code]).toEqual([status, code]);
       }
-      return server.request(method, path, body);
-    };
-    const failures: string[] = [];
-    for (const [method, path, body, status, code] of cases) {
-      const r = await send(method, path, body);
-      const got = [r.status, r.body?.error?.code ?? r.body?.status];
-      if (got[0] !== status || got[1] !== code) {
-        failures.push(
-          `${method} ${path} ${JSON.stringify(body)?.slice(0, 100)}: got ${got.join(' ')}, want ${status} ${code}`,
-        );
-      }
-      // Never an excluded path (the config a 409 carries names the folder only).
-      const text = JSON.stringify(r.body);
-      expect(text, `${method} ${path}`).not.toMatch(/private\/[a-z]/);
-      expect(text, `${method} ${path}`).not.toContain(TOKEN);
-    }
-    expect(failures).toEqual([]);
 
-    for (const [text, type, status, code] of [
-      ['{"since":0,', 'application/json', 400, 'invalid-json'],
-      ['', 'application/json', 400, 'invalid-json'],
-      ['{"since":0}', 'text/plain', 415, 'unsupported-media-type'],
-    ] as const) {
-      const r = await server.app.handle(
+      expect((await server.request('GET', b)).body.mutation).toBe(before);
+      expect((await runGit(dir, ['rev-list', '--count', 'HEAD'])).trim()).toBe(commits);
+      expect(
+        (await server.request('GET', '/api/brains')).body.brains.map((x: { id: string }) => x.id),
+      ).toEqual(['pins']);
+      expect((await server.request('GET', `${b}/blog`)).body.enabled).toBe(false);
+      expect((await server.request('GET', `${b}/config`)).body.revision).toBe(1);
+      expect(
+        (await server.request('GET', `${b}/titles`)).body.notes.map(
+          (n: { path: string }) => n.path,
+        ),
+      ).toEqual(['memos/ok.md']);
+
+      // Accepted inputs at the edges (these may change the brain).
+      const accepted: [string, string, unknown, number][] = [
+        ['GET', `${b}/search?q=&limit=&mode=`, undefined, 200],
+        ['GET', `${b}/search?q=x&limit=5&mode=trending&unknown=1`, undefined, 200],
+        ['GET', `${b}/list?mode=all&limit=1`, undefined, 200],
+        [
+          'GET',
+          `${b}/log?path=memos%2Fok.md&since=0&until=${now}&limit=5&all=1&op=update&q=x`,
+          undefined,
+          200,
+        ],
+        ['GET', `${b}/log?all=false&since=-5`, undefined, 200],
+        ['GET', `${b}/notes/memos/ok.md?record=0`, undefined, 200],
+        ['GET', `${b}/notes/memos/ok.md?record=`, undefined, 200],
+        ['GET', `${b}/notes/memos/ok.md/history?limit=1000`, undefined, 200],
+        ['GET', `${b}/notes/memos/ok.md/history?limit=`, undefined, 200],
+        ['GET', `${b}/notes/memos/ok.md/versions?hash=${okHash}`, undefined, 200],
+        ['GET', `${b}/blog/slug?slug=A`, undefined, 200],
+        ['GET', `${b}/blog/slug`, undefined, 200],
+        ['GET', `${b}/blog/address?path=memos%2Fok.md`, undefined, 200],
+        ['GET', `${b}/diary?date=2026-11-27`, undefined, 200],
+        ['PUT', `${b}/blog`, { enabled: false }, 200],
+        [
+          'PUT',
+          `${b}/blog`,
+          { enabled: false, slug: '', title: '  ', language: '', author: null },
+          200,
+        ],
+        [
+          'PUT',
+          `${b}/blog`,
+          { enabled: true, slug: 'my-blog', title: ' T ', language: 'pt-BR' },
+          200,
+        ],
+        ['POST', `${b}/sync`, { since: 0 }, 200],
+        ['POST', `${b}/sync`, { since: -0, client: 'a.b:c-d_E9', configRevision: 1 }, 200],
+        ['POST', `${b}/sync`, sync({ events: [], changes: [], edits: [] }), 200],
+        ['POST', `${b}/sync`, sync({ changes: [{ id: 'c2', time: now, client: 'c' }] }), 200],
+        [
+          'POST',
+          `${b}/sync`,
+          sync({ changes: [{ ...change, id: 'c3', message: 'x'.repeat(20_000) }] }),
+          200,
+        ],
+        ['POST', `${b}/sync`, sync({ events: [{ ...event, id: 'v2', time: now + 300 }] }), 200],
+        ['POST', `${b}/sync`, sync({ events: [{ ...event, id: 'x'.repeat(200), time: -1 }] }), 200],
+        ['POST', `${b}/sync`, sync({ edits: [{ ...edit, path: 'memos/café.md', text: '' }] }), 200],
+        [
+          'PUT',
+          `${b}/notes/memos/edge.md`,
+          { text: 'x'.repeat(2 * 1024 * 1024), message: null },
+          200,
+        ],
+        ['PUT', `${b}/notes/memos/edge.md`, { text: 'y', baseHash: null }, 409],
+        [
+          'POST',
+          `${b}/changes`,
+          { message: null, ops: [{ ...write, path: 'memos/batch.md' }] },
+          200,
+        ],
+        ['POST', `${b}/diary`, {}, 200],
+        ['POST', `${b}/diary`, { date: null }, 200],
+        ['PUT', `${b}/config`, { baseRevision: 0, config: {} }, 409],
+        ['POST', '/api/brains', { id: 'a'.repeat(63) }, 201],
+        ['POST', '/api/brains', { id: 'with-config', config: null }, 201],
+      ];
+      const wrong: string[] = [];
+      for (const [method, path, body, status] of accepted) {
+        const r = await send(method, path, body);
+        if (r.status !== status) {
+          wrong.push(`${method} ${path}: got ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
+        }
+      }
+      expect(wrong).toEqual([]);
+    },
+  );
+
+  it(
+    'refuses what it used to accept before its inputs had schemas',
+    { timeout: 60_000 },
+    async () => {
+      // Each of these was accepted (or failed with a 500) before the request schemas.
+      const server = await testServer();
+      await createBrain(server, 'tight');
+      const a = testClient(server, 'tight', 'phone');
+      await a.engine.index();
+      await a.engine.saveNote('memos/ok.md', '# Ok\n');
+      await a.sync();
+      const b = '/api/brains/tight';
+      const dir = join(server.dataDir, 'brains', 'tight');
+      const before = (await server.request('GET', b)).body.mutation;
+      const commits = (await runGit(dir, ['rev-list', '--count', 'HEAD'])).trim();
+      const okHash = (await server.request('GET', `${b}/notes/memos/ok.md?record=false`)).body.hash;
+      const lone = 'memos/\ud800.md';
+      const cases: [string, string, unknown, number, string][] = [
+        [
+          'PUT',
+          `${b}/notes/memos/ok.md`,
+          { text: 'x', baseHash: okHash, extra: 1 },
+          400,
+          'invalid-request',
+        ],
+        [
+          'POST',
+          `${b}/rename`,
+          { from: 'memos/ok.md', to: 'memos/b.md', extra: 1 },
+          400,
+          'invalid-request',
+        ],
+        [
+          'POST',
+          `${b}/notes/memos/ok.md/restore`,
+          { commit: '0'.repeat(40), extra: 1 },
+          400,
+          'invalid-request',
+        ],
+        ['POST', `${b}/diary`, { extra: 1 }, 400, 'invalid-request'],
+        [
+          'DELETE',
+          `${b}/notes/memos/ok.md?message=${'x'.repeat(20_001)}`,
+          undefined,
+          400,
+          'invalid-argument',
+        ],
+        ['GET', `${b}/search?q=x&limit=0x10`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/list?limit=1e3`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/log?since=%205`, undefined, 400, 'invalid-argument'],
+        ['GET', `${b}/notes/memos/ok.md/history?limit=0b11`, undefined, 400, 'invalid-argument'],
+        ['POST', `${b}/rename`, { from: 'memos/ok.md', to: lone }, 400, 'invalid-path'],
+        [
+          'POST',
+          `${b}/sync`,
+          { since: 0, edits: [{ id: 'e', op: 'write', path: lone, baseHash: null, text: '' }] },
+          400,
+          'invalid-path',
+        ],
+        [
+          'POST',
+          `${b}/changes`,
+          { ops: [{ op: 'write', path: lone, baseHash: null, text: '' }] },
+          400,
+          'invalid-path',
+        ],
+        [
+          'POST',
+          `${b}/sync`,
+          {
+            since: 0,
+            events: [{ id: 'v', kind: 'read', item: 'memos/ok.md', time: 2 ** 53, client: 'c' }],
+          },
+          400,
+          'invalid-event',
+        ],
+      ];
+      const failures: string[] = [];
+      for (const [method, path, body, status, code] of cases) {
+        const r = await server.request(method, path, body);
+        if (r.status !== status || r.body?.error?.code !== code) {
+          failures.push(`${method} ${path.slice(0, 80)}: got ${r.status} ${r.body?.error?.code}`);
+        }
+      }
+      expect(failures).toEqual([]);
+      const notUtf8 = await server.app.handle(
         new Request(`http://somememos.test${b}/sync`, {
           method: 'POST',
-          headers: { authorization: `Bearer ${TOKEN}`, 'content-type': type },
-          body: text,
+          headers: { authorization: `Bearer ${TOKEN}`, 'content-type': 'application/json' },
+          body: new Uint8Array([0x7b, 0x22, 0xff, 0x22, 0x3a, 0x30, 0x7d]),
         }),
       );
-      expect([r.status, (await r.json()).error.code]).toEqual([status, code]);
-    }
-
-    expect((await server.request('GET', b)).body.mutation).toBe(before);
-    expect((await runGit(dir, ['rev-list', '--count', 'HEAD'])).trim()).toBe(commits);
-    expect(
-      (await server.request('GET', '/api/brains')).body.brains.map((x: { id: string }) => x.id),
-    ).toEqual(['pins']);
-    expect((await server.request('GET', `${b}/blog`)).body.enabled).toBe(false);
-    expect((await server.request('GET', `${b}/config`)).body.revision).toBe(1);
-    expect(
-      (await server.request('GET', `${b}/titles`)).body.notes.map((n: { path: string }) => n.path),
-    ).toEqual(['memos/ok.md']);
-
-    // Accepted inputs at the edges (these may change the brain).
-    const accepted: [string, string, unknown, number][] = [
-      ['GET', `${b}/search?q=&limit=&mode=`, undefined, 200],
-      ['GET', `${b}/search?q=x&limit=5&mode=trending&unknown=1`, undefined, 200],
-      ['GET', `${b}/list?mode=all&limit=1`, undefined, 200],
-      [
-        'GET',
-        `${b}/log?path=memos%2Fok.md&since=0&until=${now}&limit=5&all=1&op=update&q=x`,
-        undefined,
-        200,
-      ],
-      ['GET', `${b}/log?all=false&since=-5`, undefined, 200],
-      ['GET', `${b}/notes/memos/ok.md?record=0`, undefined, 200],
-      ['GET', `${b}/notes/memos/ok.md?record=`, undefined, 200],
-      ['GET', `${b}/notes/memos/ok.md/history?limit=1000`, undefined, 200],
-      ['GET', `${b}/notes/memos/ok.md/history?limit=`, undefined, 200],
-      ['GET', `${b}/notes/memos/ok.md/versions?hash=${okHash}`, undefined, 200],
-      ['GET', `${b}/blog/slug?slug=A`, undefined, 200],
-      ['GET', `${b}/blog/slug`, undefined, 200],
-      ['GET', `${b}/blog/address?path=memos%2Fok.md`, undefined, 200],
-      ['GET', `${b}/diary?date=2026-11-27`, undefined, 200],
-      ['PUT', `${b}/blog`, { enabled: false }, 200],
-      [
-        'PUT',
-        `${b}/blog`,
-        { enabled: false, slug: '', title: '  ', language: '', author: null },
-        200,
-      ],
-      [
-        'PUT',
-        `${b}/blog`,
-        { enabled: true, slug: 'my-blog', title: ' T ', language: 'pt-BR' },
-        200,
-      ],
-      ['POST', `${b}/sync`, { since: 0 }, 200],
-      ['POST', `${b}/sync`, { since: -0, client: 'a.b:c-d_E9', configRevision: 1 }, 200],
-      ['POST', `${b}/sync`, sync({ events: [], changes: [], edits: [] }), 200],
-      ['POST', `${b}/sync`, sync({ changes: [{ id: 'c2', time: now, client: 'c' }] }), 200],
-      [
-        'POST',
-        `${b}/sync`,
-        sync({ changes: [{ ...change, id: 'c3', message: 'x'.repeat(20_000) }] }),
-        200,
-      ],
-      ['POST', `${b}/sync`, sync({ events: [{ ...event, id: 'v2', time: now + 300 }] }), 200],
-      ['POST', `${b}/sync`, sync({ events: [{ ...event, id: 'x'.repeat(200), time: -1 }] }), 200],
-      ['POST', `${b}/sync`, sync({ edits: [{ ...edit, path: 'memos/café.md', text: '' }] }), 200],
-      [
-        'PUT',
-        `${b}/notes/memos/edge.md`,
-        { text: 'x'.repeat(2 * 1024 * 1024), message: null },
-        200,
-      ],
-      ['PUT', `${b}/notes/memos/edge.md`, { text: 'y', baseHash: null }, 409],
-      ['POST', `${b}/changes`, { message: null, ops: [{ ...write, path: 'memos/batch.md' }] }, 200],
-      ['POST', `${b}/diary`, {}, 200],
-      ['POST', `${b}/diary`, { date: null }, 200],
-      ['PUT', `${b}/config`, { baseRevision: 0, config: {} }, 409],
-      ['POST', '/api/brains', { id: 'a'.repeat(63) }, 201],
-      ['POST', '/api/brains', { id: 'with-config', config: null }, 201],
-    ];
-    const wrong: string[] = [];
-    for (const [method, path, body, status] of accepted) {
-      const r = await send(method, path, body);
-      if (r.status !== status) {
-        wrong.push(`${method} ${path}: got ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
-      }
-    }
-    expect(wrong).toEqual([]);
-  });
+      const refused = (await notUtf8.json()) as { error: { code: string } };
+      expect([notUtf8.status, refused.error.code]).toEqual([400, 'invalid-json']);
+      expect((await server.request('GET', b)).body.mutation).toBe(before);
+      expect((await runGit(dir, ['rev-list', '--count', 'HEAD'])).trim()).toBe(commits);
+    },
+  );
 
   it('maps the engine one-to-one over HTTP, with history, past versions and restore', async () => {
     const server = await testServer();

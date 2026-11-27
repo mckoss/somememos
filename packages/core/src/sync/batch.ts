@@ -2,32 +2,18 @@
 // several writes, deletes and renames, each with the hash it was based on,
 // applied all together or not at all, as one change record, one git commit
 // and one range of mutation numbers. The CLI's remote `commit` sends one.
-// Plain JSON shapes, shared by the server and its clients.
+// Plain JSON shapes, shared by the server and its clients; the request's
+// schema is in ./schema.ts.
 
+import type * as v from 'valibot';
 import type { ChangeRecord } from '../storage/types.js';
+import type { BatchOpSchema, BatchRequestSchema } from './schema.js';
 
-export type BatchOp =
-  | {
-      readonly op: 'write';
-      readonly path: string;
-      readonly text: string;
-      /** The hash the edit was made against; null: a new note (none may exist). */
-      readonly baseHash: string | null;
-    }
-  | { readonly op: 'delete'; readonly path: string; readonly baseHash: string }
-  | {
-      readonly op: 'rename';
-      readonly path: string;
-      readonly to: string;
-      /** The hash of `path`; `to` must not exist. */
-      readonly baseHash: string;
-    };
+/** One op of a change set (`BatchOpSchema`, ./schema.ts). */
+export type BatchOp = v.InferOutput<typeof BatchOpSchema>;
 
-export interface BatchRequest {
-  /** The change record's message (the reason); optional. */
-  readonly message?: string | null;
-  readonly ops: readonly BatchOp[];
-}
+/** A change set (`BatchRequestSchema`). */
+export type BatchRequest = v.InferOutput<typeof BatchRequestSchema>;
 
 export interface BatchOpResult {
   readonly op: BatchOp['op'];

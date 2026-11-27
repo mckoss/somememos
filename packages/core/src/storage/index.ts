@@ -96,6 +96,7 @@ export {
 } from './memory.js';
 export {
   type BrainConfig,
+  CLIENT_ID,
   CONFIG_VERSION,
   ConfigError,
   defaultBrainConfig,

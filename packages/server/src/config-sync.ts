@@ -20,6 +20,7 @@ import { engine as coreEngine, markdown, storage, sync } from '@somememos/core';
 import type { BrainContext, StoredConfig } from './brains.js';
 import { parseStoredConfig } from './brains.js';
 import { HttpError } from './errors.js';
+import { fieldCodes, parseRequest } from './requests.js';
 
 /** The brain's shared config and its revision. */
 export async function readSharedConfig(ctx: BrainContext): Promise<sync.ConfigView> {
@@ -54,25 +55,10 @@ export async function checkSyncConfigRevision(
   if (view.revision !== revision) throw staleError('config-changed', view);
 }
 
-/** Validates a `PUT …/config` body. */
+/** Validates a `PUT …/config` body (`sync.ConfigPutRequestSchema`, then `parseStoredConfig`). */
 export function parseConfigPut(body: unknown): { baseRevision: number; config: StoredConfig } {
-  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
-    throw new HttpError(400, 'invalid-request', 'the body must be a JSON object');
-  }
-  const b = body as Record<string, unknown>;
-  for (const key of Object.keys(b)) {
-    if (key !== 'baseRevision' && key !== 'config') {
-      throw new HttpError(400, 'invalid-request', `unknown field "${key}"`);
-    }
-  }
-  const base = b.baseRevision;
-  if (typeof base !== 'number' || !Number.isSafeInteger(base) || base < 0) {
-    throw new HttpError(400, 'invalid-argument', 'baseRevision must be an integer >= 0');
-  }
-  if (b.config === undefined || b.config === null) {
-    throw new HttpError(400, 'invalid-argument', 'config is required');
-  }
-  return { baseRevision: base, config: parseStoredConfig(b.config) };
+  const put = parseRequest(sync.ConfigPutRequestSchema, body, fieldCodes());
+  return { baseRevision: put.baseRevision, config: parseStoredConfig(put.config) };
 }
 
 const accepted = (classifier: markdown.RoleClassifier, path: string): boolean => {

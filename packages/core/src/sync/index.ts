@@ -2,7 +2,8 @@
 // request and response shapes, limits and path rule, and an offline copy's
 // sync state. The engine implements a copy's side (`Engine.prepareSync`,
 // `Engine.applySync`, `engine.runSync`) and the store-as-is step both sides
-// use (`Engine.applyRemote`). Isomorphic.
+// use (`Engine.applyRemote`). The wire shapes are valibot schemas
+// (./schema.ts) the types are inferred from. Isomorphic.
 
 export {
   NAME_CLASH,
@@ -23,6 +24,31 @@ export {
   syncPathProblem,
   truncateChangeMessage,
 } from './protocol.js';
+export {
+  BatchOpSchema,
+  BatchRequestSchema,
+  CHECKS,
+  ClientIdSchema,
+  ConfigPutRequestSchema,
+  HashSchema,
+  type Issue,
+  MessageSchema,
+  NotePathSchema,
+  NoteTextSchema,
+  type Parsed,
+  SyncChangeSchema,
+  SyncEditResultSchema,
+  SyncEditSchema,
+  SyncEventSchema,
+  SyncNoteSchema,
+  SyncRequestSchema,
+  SyncResponseSchema,
+  fitsUtf8,
+  issueLocation,
+  jsonObject,
+  issueMessage,
+  parseWith,
+} from './schema.js';
 export {
   EMPTY_SYNC_STATE,
   META_SYNC_STATE,

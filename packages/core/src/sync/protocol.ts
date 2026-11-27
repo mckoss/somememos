@@ -5,102 +5,49 @@
 // `somememos clone`) builds its requests with it through the engine
 // (`Engine.prepareSync` / `Engine.applySync`).
 //
-// Everything here is plain JSON data.
+// Everything here is plain JSON data; the schemas that check it are in
+// ./schema.ts.
 
 import { baseName, isMarkdownPath, normalizePath } from '../markdown/paths.js';
 import type { FolderRolesConfig } from '../markdown/roles.js';
-import type { EventKind } from '../timescore/kinds.js';
+import type * as v from 'valibot';
+import type {
+  SyncChangeSchema,
+  SyncEditResultSchema,
+  SyncEditSchema,
+  SyncEventSchema,
+  SyncNoteSchema,
+  SyncRequestSchema,
+  SyncResponseSchema,
+} from './schema.js';
 
 // ---------------------------------------------------------------------------
-// Log entries and change records on the wire
+// The shapes on the wire, inferred from their schemas (./schema.ts), which
+// document each field.
 
 /** An event or rename record as sync sends it: `storage.LogInput` without `seq`. */
-export type SyncEvent =
-  | {
-      readonly id: string;
-      readonly kind: EventKind;
-      readonly item: string;
-      readonly time: number;
-      readonly client: string;
-    }
-  | {
-      readonly id: string;
-      readonly kind: 'rename';
-      readonly item: string;
-      /** The new item. */
-      readonly to: string;
-      readonly time: number;
-      readonly client: string;
-    };
+export type SyncEvent = v.InferOutput<typeof SyncEventSchema>;
 
 /** A change record as sync sends it: `storage.ChangeInput`. */
-export interface SyncChange {
-  readonly id: string;
-  readonly time: number;
-  readonly client: string;
-  readonly message: string | null;
-  readonly op: string | null;
-  readonly paths: readonly string[];
-}
+export type SyncChange = v.InferOutput<typeof SyncChangeSchema>;
 
-// ---------------------------------------------------------------------------
-// The request
+/** One note change pushed by an offline copy (`SyncEditSchema`). */
+export type SyncEdit = v.InferOutput<typeof SyncEditSchema>;
+export type SyncEditOp = SyncEdit['op'];
 
-export type SyncEditOp = 'write' | 'delete' | 'rename';
+/** `POST /api/brains/{brain}/sync` (`SyncRequestSchema`). */
+export type SyncRequest = v.InferOutput<typeof SyncRequestSchema>;
 
-/**
- * One note change pushed by an offline copy. Applied by the server only when
- * `baseHash` is the note's current hash there (`null`: the note must not
- * exist; a create). For `rename`, `baseHash` is the hash of `path`, and `to`
- * must not exist.
- */
-export interface SyncEdit {
-  /** Unique within the request; results are matched by it. */
-  readonly id: string;
-  readonly op: SyncEditOp;
-  readonly path: string;
-  /** `rename` only: the new path. */
-  readonly to?: string;
-  /** The hash the edit was made against; null means "create". Never null for delete and rename. */
-  readonly baseHash: string | null;
-  /** `write` only: the note's new text. */
-  readonly text?: string;
-}
+/** One result per pushed edit (`SyncEditResultSchema`). */
+export type SyncEditResult = v.InferOutput<typeof SyncEditResultSchema>;
+export type SyncEditStatus = SyncEditResult['status'];
 
-export interface SyncRequest {
-  /** The last server mutation number this copy has applied (0 for none). */
-  readonly since: number;
-  /** The id of the client sending this (`BrainConfig.clientId`): the author of edits no change record names. */
-  readonly client?: string;
-  /**
-   * The shared-config revision this copy has (./config.ts). When given and
-   * not the server's, the server applies nothing and answers 409
-   * `config-changed` with its config and revision, so no copy pushes or
-   * applies notes under roles the brain no longer has. Older copies leave it
-   * out and sync as before.
-   */
-  readonly configRevision?: number;
-  /** Log entries this copy logged (or received from elsewhere and has not pushed). */
-  readonly events: readonly SyncEvent[];
-  readonly changes: readonly SyncChange[];
-  readonly edits: readonly SyncEdit[];
-}
+/** A note's state after the response's window (`SyncNoteSchema`). */
+export type SyncNote = v.InferOutput<typeof SyncNoteSchema>;
 
-// ---------------------------------------------------------------------------
-// The response
+/** The answer to a sync request (`SyncResponseSchema`). */
+export type SyncResponse = v.InferOutput<typeof SyncResponseSchema>;
 
-export type SyncEditStatus = 'applied' | 'duplicate' | 'conflict' | 'refused';
-
-/**
- * - `applied`: stored; `hash` is the note's new hash (absent for a delete).
- * - `duplicate`: the server already holds exactly this result (a retried
- *   request, or the same change made twice); `hash` as for applied.
- * - `conflict`: the note changed on the server since `baseHash`; nothing was
- *   stored. `currentHash`/`currentText` are the server's version of `path`
- *   (null when it has none).
- * - `refused`: the edit is not allowed (`code`, e.g. `source-immutable`);
- *   nothing was stored; current version as for a conflict.
- */
 /**
  * The `refused` code for a note the server cannot store because a note and a
  * folder would share a name (`a.md` beside `a.md/b.md`): the server keeps
@@ -109,43 +56,6 @@ export type SyncEditStatus = 'applied' | 'duplicate' | 'conflict' | 'refused';
  * would clash the same way).
  */
 export const NAME_CLASH = 'name-clash';
-
-export interface SyncEditResult {
-  readonly id: string;
-  readonly status: SyncEditStatus;
-  readonly hash?: string | null;
-  readonly currentHash?: string | null;
-  readonly currentText?: string | null;
-  /** `refused` only. */
-  readonly code?: string;
-}
-
-/**
- * A note's state after the response's window. A rename shows as
- * `{ path: from, renamedTo }` plus the new path's full entry; a receiver may
- * treat `renamedTo` exactly like `deleted`.
- */
-export type SyncNote =
-  | { readonly path: string; readonly hash: string; readonly text: string }
-  | { readonly path: string; readonly deleted: true }
-  | { readonly path: string; readonly renamedTo: string };
-
-export interface SyncResponse {
-  /**
-   * The server's mutation number this response brings the copy up to: store
-   * it as the next `since`. Less than the server's counter while `more`.
-   */
-  readonly mutation: number;
-  /** True when more changes remain after `mutation`: repeat the request with it. */
-  readonly more: boolean;
-  /** One per pushed edit, in request order. */
-  readonly results: readonly SyncEditResult[];
-  /** Notes changed, deleted or renamed after `since` (through `mutation`), in mutation order. */
-  readonly notes: readonly SyncNote[];
-  /** Log entries and change records after `since` (through `mutation`), from any client. */
-  readonly events: readonly SyncEvent[];
-  readonly changes: readonly SyncChange[];
-}
 
 // ---------------------------------------------------------------------------
 // Limits (the server refuses a request over them; `prepareSync` stays under them)
@@ -178,6 +88,7 @@ export const SYNC_CLOCK_SKEW = 300;
 
 // eslint-disable-next-line no-control-regex
 const CONTROL = /[\u0000-\u001f\u007f]/;
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
 
 /** The longest file or folder name in a syncable path, in UTF-8 bytes (common file systems' limit). */
 export const MAX_SEGMENT_BYTES = 255;
@@ -186,7 +97,8 @@ export const MAX_SEGMENT_BYTES = 255;
  * Why `path` cannot be synced, or null when it can. A syncable path is a
  * normalized brain-relative markdown path: no leading `/`, no empty, `.` or
  * `..` segment, no segment starting with `.` (dot folders such as `.git` and
- * `.somememos` are never content), no backslash or control character, at
+ * `.somememos` are never content), no backslash or control character, no
+ * lone surrogate, at
  * most `SYNC_LIMITS.maxPathBytes` bytes, ending in `.md`. Roles are checked
  * separately. The message never repeats the path.
  */
@@ -200,6 +112,8 @@ export function syncPathProblem(path: unknown): string | null {
   }
   if (CONTROL.test(path) || path.includes('\\'))
     return 'the path has a control character or a backslash';
+  // A lone surrogate has no UTF-8 form: the file would get another name.
+  if (LONE_SURROGATE.test(path)) return 'the path is not valid Unicode';
   if (path.startsWith('/')) return 'the path must be relative to the brain';
   const segments = path.split('/');
   if (segments.some((s) => s === '' || s === '.' || s === '..')) {

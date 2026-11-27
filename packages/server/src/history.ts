@@ -6,7 +6,6 @@
 
 import { HttpError } from './errors.js';
 import type { BrainContext } from './brains.js';
-import { isCommitId } from './git.js';
 
 export interface NoteVersion {
   /** The path the note had in this version. */
@@ -110,13 +109,15 @@ export interface PastVersion {
   readonly text: string;
 }
 
-/** The text of `path` as `commit` stored it; 404 unless that commit made a version of it. */
+/**
+ * The text of `path` as `commit` stored it; 404 unless that commit made a
+ * version of it. The caller has checked `commit` (`CommitIdSchema`).
+ */
 export async function pastVersion(
   ctx: BrainContext,
   path: string,
   commit: string,
 ): Promise<PastVersion> {
-  if (!isCommitId(commit)) throw new HttpError(400, 'invalid-argument', 'not a commit id');
   const rows = await ctx.query<{ hash: string | null }>(
     `SELECT hash FROM note_versions WHERE brain_id = $1 AND path = $2 AND commit = $3`,
     [ctx.brainId, path, commit],

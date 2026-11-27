@@ -4,6 +4,8 @@
 // `GET`/`PUT /api/brains/{brain}/config` and the `configRevision` field of a
 // sync request (./protocol.ts). Isomorphic, plain JSON.
 
+import type * as v from 'valibot';
+import type { ConfigPutRequestSchema } from './schema.js';
 import {
   ConfigError,
   parseBrainConfig,
@@ -21,9 +23,12 @@ export interface ConfigView {
   readonly config: SharedConfig;
 }
 
-/** `PUT /api/brains/{brain}/config`: replace the shared config, if it is still at `baseRevision`. */
-export interface ConfigPutRequest {
-  readonly baseRevision: number;
+/**
+ * `PUT /api/brains/{brain}/config`: replace the shared config, if it is still
+ * at `baseRevision` (`ConfigPutRequestSchema`; the config is checked by
+ * `parseBrainConfig`).
+ */
+export interface ConfigPutRequest extends v.InferOutput<typeof ConfigPutRequestSchema> {
   readonly config: SharedConfig;
 }
 
