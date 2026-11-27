@@ -11,21 +11,21 @@ Status key: `[x]` merged to `main` with CI green, `[~]` in progress, `[ ]` not s
 ## Web app, local first (milestone 2)
 
 - [~] On-device brain: SQLite in the browser on a worker, persistent storage, engine in the worker, folder import, service worker and manifest
-- [~] Web UI: app shell for phone and desktop, search with rank breakdowns, hot / trending / neglected views, note view, CodeMirror editor with live preview, blog publish control, import and settings
+- [~] (built, committed to the branch) Web UI: app shell for phone and desktop, search with rank breakdowns, hot / trending / neglected views, note view, CodeMirror editor with live preview, blog publish control, import and settings
 - [ ] Join the two: UI running on the on-device brain, browser tests in `npm run check` and CI
 - [ ] Review screenshots at phone and desktop sizes and fix what looks wrong
 - [ ] Release as v0.3.0
 
 ## CLI (milestone 1)
 
-- [~] `search`, `hot`, `trending`, `neglected`, `read`, `log`, `export`, `import-log`, `eval`
-- [~] `blog` folder role in core
-- [ ] First experiments on the vault (aggregate numbers only), with proposed defaults
+- [~] (built, committed to the branch) `search`, `hot`, `trending`, `neglected`, `read`, `log`, `export`, `import-log`, `eval`
+- [~] (built, committed to the branch) `blog` folder role in core
+- [~] First experiments on the vault: run, results in PLAN.md section 5. Applying the chosen defaults in code is still to do
 
 ## Server and sync (milestone 3)
 
 - [~] Sync design written into PLAN.md section 7 (request shapes, mutation counter, conflict handling): written, merges with the next PR
-- [~] Postgres implementation of the storage interfaces, passing the shared conformance suite in CI
+- [~] (built, committed to the branch) Postgres implementation of the storage interfaces, passing the shared conformance suite in CI
 - [ ] Server: one git repository per brain, sync API
 - [ ] Sync in the web app
 - [ ] Single-user sign-in

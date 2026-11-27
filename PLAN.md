@@ -368,6 +368,24 @@ No ranking parameter is chosen by intuition. `somememos eval` replays the brain'
   - Tests and documentation use a synthetic brain made by a generator script, never a sample of real notes.
   - The repo's `.gitignore` covers every sidecar file, and CI fails if a database or an event log export is committed.
 
+### First experiment results (2026-11-27)
+
+Run with `somememos eval` on one real vault: about seven months of history, imported from git. Only aggregate numbers are recorded here. There were 247 search cases (each commit's message as the query, the memos it changed as the answers, the index rebuilt as of the commit's parent) and 272 orientation cases (which memos have activity in the following week). MRR is mean reciprocal rank; R@10 is recall in the top ten.
+
+| Question | Result |
+|---|---|
+| Does activation help search? | **Yes.** Keyword only: MRR 0.43, R@10 0.60. Keyword plus activation: MRR 0.59, R@10 0.77 |
+| How strongly should activation count (`α`)? | **Less than 1.** MRR 0.51 at `α` = 2, 0.59 at 1, 0.62 at 0.5, 0.64 at 0.25 |
+| Which half-life drives `hot`? | **Week** for search (MRR 0.59, against 0.57 day, 0.53 month, 0.45 year). For orientation, day has the best MRR (0.72 against 0.64) and week the best R@20 |
+| Count a burst of events on one note as one? | **Yes.** With a one-hour window, orientation MRR rises from 0.64 to 0.75 and search from 0.59 to 0.61 |
+| Weight of a mention against an edit | **No clear winner.** 0.5 and 1 are within noise; 0 hurts orientation (MRR 0.61 against 0.64 to 0.66); 2 is slightly worse |
+| Keyword parameters | **Title weight 5 and body `b` 0.5** are best (keyword-only MRR 0.46, against 0.43 at the placeholders). `k1` makes no measurable difference |
+| Link spreading | **It hurts in every form tried.** Search MRR falls from 0.59 to between 0.30 and 0.51. Stays off |
+
+**Defaults chosen from this:** `α` 0.5, a one-hour burst window, title weight 5, body `b` 0.5, `hot` on the week half-life, mention weight 1, link spreading off. With `α` 0.5, the burst window and the keyword changes together, search MRR is 0.64 and R@10 0.81.
+
+**How far to trust it:** this is one vault and one kind of query, the settings were chosen and measured on the same cases, and differences under about 0.02 are noise. The read weight is unmeasured, because imported history has no reads. Section-level scoring has not been tried. Rerun as real use accumulates.
+
 ### Keyword scoring details
 
 Implemented in `packages/core/src/keyword`. The parameter values below are **placeholders until the experiments set them**.
