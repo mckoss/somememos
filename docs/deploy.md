@@ -10,7 +10,7 @@ The server is the SvelteKit app in `apps/web`, built with `adapter-node`. One pr
 
 ## Railway setup
 
-1. **Service.** Create a service from this repository. `railway.json` selects the `Dockerfile` build (Node 22 with `git`, the whole workspace built, `node apps/web/build`) and sets the health check. The container starts as root only long enough to give the volume to the unprivileged `node` user, then runs the server as that user (`scripts/docker-start.sh`); no `RAILWAY_RUN_UID` setting is needed.
+1. **Service.** Create a service from this repository. `railway.json` selects the `Dockerfile` build (Node 26 with `git`, the whole workspace built, `node apps/web/build`) and sets the health check. The container starts as root only long enough to give the volume to the unprivileged `node` user, then runs the server as that user (`scripts/docker-start.sh`); no `RAILWAY_RUN_UID` setting is needed.
 2. **Postgres.** Add Railway's managed Postgres to the project. In the service's variables, set `DATABASE_URL` to a reference to it: `${{Postgres.DATABASE_URL}}`. Railway backs the database up.
 3. **Volume.** Attach a volume to the service, mounted at `/data` (the Dockerfile sets `SOMEMEMOS_DATA_DIR=/data`). This is where the brains' repositories live; without a volume they are lost on every deploy.
 4. **Token.** Set `SOMEMEMOS_TOKEN` (below). Every API request needs it as `Authorization: Bearer <token>`.

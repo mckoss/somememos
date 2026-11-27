@@ -11,7 +11,7 @@ The examples below were run on an invented example brain. You can make the same 
 
 ## Installing
 
-somememos needs **Node 22.13 or later**. It has no other dependencies: it uses Node's built-in SQLite.
+somememos needs **Node 22.13 or later** (Node 26, the current LTS, is recommended). It has no other dependencies: it uses Node's built-in SQLite. Building it from a clone needs Node 26, like the rest of the repository; the built CLI and the one-file bundle run on either.
 
 **From a clone (today's way).**
 
@@ -36,7 +36,7 @@ Copy that file anywhere, make it executable, and run it as `somememos`.
 
 **A release download is not published yet.** `somememos help setup` prints an install line with the placeholder `<SOMEMEMOS-RELEASE-URL>`; until there is a release, build the bundle yourself as above.
 
-Node 22 prints an "experimental" warning when it loads SQLite; the CLI hides it.
+Node 22 prints an "experimental" warning when it loads SQLite (Node 26 does not); the CLI hides it.
 
 ## Local mode
 

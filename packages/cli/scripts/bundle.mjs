@@ -1,7 +1,8 @@
 // Builds the one-file CLI (IMPLEMENTATION.md task 4.1): bundle/somememos.mjs,
 // a single self-contained ES module with the CLI and its workspace packages
 // (core, sqlite-store), compiled from their TypeScript sources. It needs only
-// Node >= 22.13: Node built-ins (node:sqlite among them) stay imports, and
+// Node >= 22.13 (the CLI's minimum; building it needs Node 26, like the rest of
+// the repository): Node built-ins (node:sqlite among them) stay imports, and
 // there are no other dependencies and no native modules.
 //
 // The version is read from the root package.json at build time (the single
