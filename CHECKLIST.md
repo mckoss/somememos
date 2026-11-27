@@ -10,10 +10,10 @@ Status key: `[x]` merged to `main` with CI green, `[~]` in progress, `[ ]` not s
 
 ## Web app, local first (milestone 2)
 
-- [~] On-device brain: SQLite in the browser on a worker, persistent storage, engine in the worker, folder import, service worker and manifest
+- [~] (built, committed to the branch) On-device brain: SQLite in the browser on a worker, persistent storage, engine in the worker, folder import, service worker and manifest
 - [~] (built, committed to the branch) Web UI: app shell for phone and desktop, search with rank breakdowns, hot / trending / neglected views, note view, CodeMirror editor with live preview, blog publish control, import and settings
-- [ ] Join the two: UI running on the on-device brain, browser tests in `npm run check` and CI
-- [ ] Review screenshots at phone and desktop sizes and fix what looks wrong
+- [~] Join the two: UI running on the on-device brain, browser tests in `npm run check` and CI (agent running in a separate worktree)
+- [~] Review screenshots at phone and desktop sizes and fix what looks wrong (first set reviewed; second pass with the integration)
 - [ ] Release as v0.3.0
 
 ## CLI (milestone 1)
@@ -26,9 +26,9 @@ Status key: `[x]` merged to `main` with CI green, `[~]` in progress, `[ ]` not s
 
 - [~] Sync design written into PLAN.md section 7 (request shapes, mutation counter, conflict handling): written, merges with the next PR
 - [~] (built, committed to the branch) Postgres implementation of the storage interfaces, passing the shared conformance suite in CI
-- [ ] Server: one git repository per brain, sync API
+- [~] Server: one git repository per brain, sync API (agent running)
 - [ ] Sync in the web app
-- [ ] Single-user sign-in
+- [~] Single-user access token (part of the server agent's work)
 - [!] Deploy to Railway (needs Mike: see QUESTIONS.md)
 
 ## Agents (milestone 4)
