@@ -1004,7 +1004,8 @@ export function describeEngineConformance(
           await b.engine.index();
           b.tick();
           await b.engine.saveNote('memos/small.md', '# Small\n');
-          const big = `# Big\n\n${'x'.repeat(SYNC_LIMITS.maxNoteBytes)}\n`;
+          // Many short words: one 2 MB word is more than a Postgres index row can hold.
+          const big = `# Big\n\n${'pebble '.repeat(Math.ceil(SYNC_LIMITS.maxNoteBytes / 7) + 1)}\n`;
           await b.engine.saveNote('memos/big.md', big);
           let mutation = 0;
           const sent: string[] = [];
