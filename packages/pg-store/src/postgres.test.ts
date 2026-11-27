@@ -218,54 +218,74 @@ describePg('postgres store', () => {
 
   it(
     'folds concurrently from several connections without double counting',
-    { timeout: 120_000 },
+    { timeout: 240_000 },
     async () => {
       const pool = await testPool();
-      const brainId = newBrainId();
-      const folders = await Promise.all(
-        Array.from({ length: 5 }, () => freshStores(pool, brainId)),
-      );
-      let conflicts = 0;
-      await Promise.all(
-        folders.map(async (stores, w) => {
-          for (let r = 0; r < 25; r++) {
-            const batch: storage.LogInput[] = [];
-            for (let j = 0; j < 5; j++) batch.push(ev(`f${w}-${r}-${j}`, w * 7 + r * 3 + j));
-            batch.push(ev(`shared-${r}`, r));
-            if (w === 0 && r % 5 === 4) {
-              batch.push({
-                id: `rename-${r}`,
-                kind: 'rename',
-                item: 'some key',
-                to: `memos/key-${r}.md`,
-                time: NOW - 500,
-                client: 'test',
-              });
+      for (const window of [0, 3600]) {
+        const brainId = newBrainId();
+        const folders = await Promise.all(
+          Array.from({ length: 5 }, () => freshStores(pool, brainId)),
+        );
+        let conflicts = 0;
+        const rename = (id: string, item: string, to: string, time: number): storage.LogInput => ({
+          id,
+          kind: 'rename',
+          item,
+          to,
+          time,
+          client: 'test',
+        });
+        await Promise.all(
+          folders.map(async (stores, w) => {
+            for (let r = 0; r < 25; r++) {
+              const batch: storage.LogInput[] = [];
+              for (let j = 0; j < 5; j++) batch.push(ev(`f${w}-${r}-${j}`, w * 7 + r * 3 + j));
+              batch.push(ev(`shared-${r}`, r));
+              // One item renamed several times in one second (ids not in
+              // arrival order), a cycle within one second, a chain over two.
+              if (w === 0 && r % 5 === 4) {
+                batch.push(rename(`rename-${r}`, 'some key', `memos/key-${r}.md`, NOW - 500));
+              }
+              if (w === 1 && r % 7 === 3) {
+                batch.push(rename(`cycle-${r}-b`, 'memos/b.md', 'memos/c.md', NOW - 400));
+                batch.push(rename(`cycle-${r}-a`, 'memos/c.md', 'memos/b.md', NOW - 400));
+              }
+              if (w === 2 && r % 6 === 2) {
+                batch.push(rename(`chain-${r}-1`, 'memos/a.md', `memos/ch-${r}.md`, NOW - 300));
+                batch.push(rename(`chain-${r}-0`, `memos/ch-${r}.md`, 'memos/a.md', NOW - 299));
+              }
+              await stores.events.append(batch);
+              conflicts += (
+                await storage.foldPending(stores.events, stores.scores, {
+                  batchSize: 2 + w,
+                  burstWindow: window,
+                })
+              ).conflicts;
             }
-            await stores.events.append(batch);
-            conflicts += (await storage.foldPending(stores.events, stores.scores, { batchSize: 7 }))
-              .conflicts;
-          }
-        }),
-      );
-      const s = folders[0] as PgStores;
-      const log = await s.events.readAfter(0);
-      expect((await s.scores.foldState()).cursor).toBe(log.length);
-      const folded = await s.scores.getAll();
+          }),
+        );
+        const s = folders[0] as PgStores;
+        const log = await s.events.readAfter(0);
+        expect((await s.scores.foldState()).cursor).toBe(log.length);
+        const folded = await s.scores.getAll();
+        const items = [...folded.keys()];
+        const burst = await s.scores.burstState(items);
 
-      const memory = storage.createMemoryStores();
-      await memory.events.append(
-        log.map(({ seq: _seq, ...input }) => input as storage.LogInput),
-        { now: NOW },
-      );
-      await storage.foldPending(memory.events, memory.scores);
-      expectScoresClose(folded, await memory.scores.getAll());
+        const memory = storage.createMemoryStores();
+        await memory.events.append(
+          log.map(({ seq: _seq, ...input }) => input as storage.LogInput),
+          { now: NOW },
+        );
+        await storage.rebuildScores(memory.events, memory.scores, { burstWindow: window });
+        expectScoresClose(folded, await memory.scores.getAll());
+        expect(burst).toEqual(await memory.scores.burstState(items));
 
-      // And a rebuild in Postgres agrees too.
-      await storage.rebuildScores(s.events, s.scores);
-      expectScoresClose(await s.scores.getAll(), folded);
-      // Conflicts are expected but not guaranteed; the point is that none double-counted.
-      expect(conflicts).toBeGreaterThanOrEqual(0);
+        // And a rebuild in Postgres agrees too.
+        await storage.rebuildScores(s.events, s.scores, { burstWindow: window });
+        expectScoresClose(await s.scores.getAll(), folded);
+        // Conflicts are expected but not guaranteed; the point is that none double-counted.
+        expect(conflicts).toBeGreaterThanOrEqual(0);
+      }
     },
   );
 

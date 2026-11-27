@@ -127,13 +127,19 @@ export class SqliteScoreStore implements storage.ScoreStore {
       if (state.cursor !== batch.fromCursor) {
         throw new storage.FoldConflictError(batch.fromCursor, state.cursor);
       }
-      if (state.halfLives && !storage.sameHalfLives(state.halfLives, batch.halfLives)) {
+      const reset = batch.reset === true;
+      if (!reset && state.halfLives && !storage.sameHalfLives(state.halfLives, batch.halfLives)) {
         throw new storage.HalfLifeMismatchError(state.halfLives, batch.halfLives);
       }
       const window = batch.burstWindow ?? 0;
       storage.assertValidBurstWindow(window);
-      if (state.halfLives && storage.foldBurstWindow(state) !== window) {
+      if (!reset && state.halfLives && storage.foldBurstWindow(state) !== window) {
         throw new storage.BurstWindowMismatchError(storage.foldBurstWindow(state), window);
+      }
+      // A canonical refold replaces everything, in this same transaction.
+      if (reset) {
+        db.run(`DELETE FROM scores`);
+        db.run(`DELETE FROM burst_last`);
       }
       const putLast = db.prepare(
         `INSERT INTO burst_last (item, kind, time) VALUES (:item, :kind, :time)

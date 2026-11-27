@@ -210,13 +210,14 @@ export class PgScoreStore implements storage.ScoreStore {
       }
       const stored =
         state.half_lives === null ? null : (JSON.parse(state.half_lives) as storage.HalfLives);
-      if (stored && !storage.sameHalfLives(stored, batch.halfLives)) {
+      const reset = batch.reset === true;
+      if (!reset && stored && !storage.sameHalfLives(stored, batch.halfLives)) {
         throw new storage.HalfLifeMismatchError(stored, batch.halfLives);
       }
       const window = batch.burstWindow ?? 0;
       storage.assertValidBurstWindow(window);
       const storedWindow = state.burst_window ?? 0;
-      if (stored && storedWindow !== window) {
+      if (!reset && stored && storedWindow !== window) {
         throw new storage.BurstWindowMismatchError(storedWindow, window);
       }
       // Every check that can throw runs before the first write.
@@ -230,6 +231,12 @@ export class PgScoreStore implements storage.ScoreStore {
           touched.add(op.from).add(op.to);
           burstTouched.add(op.from).add(op.to);
         }
+      }
+
+      // A canonical refold replaces everything, in this same transaction.
+      if (reset) {
+        await query(q, `DELETE FROM scores WHERE brain_id = $1`, [brainId]);
+        await query(q, `DELETE FROM burst_last WHERE brain_id = $1`, [brainId]);
       }
 
       if (touched.size > 0) {

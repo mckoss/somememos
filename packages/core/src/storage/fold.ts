@@ -18,7 +18,8 @@
 // dated later than it (a rename that comes through sync, or an import) may
 // apply to some events already folded under its old name and not to others,
 // which one `move` cannot express. When a batch holds such a rename, the
-// scores are cleared and the whole log is folded canonically instead: every
+// stored scores are replaced, in one atomic batch checked against the
+// cursor, by the whole log folded canonically instead: every
 // event resolved through every rename record by time, renames applied as no
 // moves. So an incremental fold, a rebuild and every synced copy holding the
 // same entries agree, whatever order each received them in. A rename logged
@@ -41,8 +42,8 @@
 // (item, kind), which the score store keeps beside the scores (`'last'` ops,
 // `ScoreStore.burstState`; moved by a rename's `move`). That is exact as long
 // as each group's events arrive in time order, which they do for events
-// logged locally. Two things can break it, and each makes the fold clear the
-// scores and refold canonically, exactly as an out-of-order rename does: an
+// logged locally. Two things can break it, and each makes the fold replace
+// the scores with a canonical refold, exactly as an out-of-order rename does: an
 // event dated before its group's last counted one (a late event from sync or
 // an import), and a rename onto an item that already has events of a kind
 // the old item has too (the two histories interleave in time). So the
@@ -98,7 +99,7 @@ export interface FoldPendingOptions {
   readonly burstWindow?: number;
   /**
    * When the stored scores were folded with other half-lives or another
-   * burst window: `'rebuild'` (default) clears them and refolds the whole
+   * burst window: `'rebuild'` (default) replaces them with a refold of the whole
    * log; `'throw'` throws `HalfLifeMismatchError` or `BurstWindowMismatchError`.
    */
   readonly onHalfLifeMismatch?: 'rebuild' | 'throw';
@@ -108,13 +109,12 @@ export interface FoldPendingOptions {
    */
   readonly maxConflictRetries?: number;
   /**
-   * Resolve every event through every rename record in the log (by time),
-   * instead of only those folded before it, and apply rename records as no
-   * moves. The result does not depend on the order entries arrived in, which
-   * an incremental fold only guarantees when each rename arrives after every
-   * event it applies to and before every later event for its old name (true
-   * for renames logged locally, not for ones that arrive through sync).
-   * `rebuildScores` folds this way. Use it from an empty score store only.
+   * Start by replacing the stored scores with the canonical fold of the
+   * whole log, in one atomic batch: every event resolved through every
+   * rename record by time, renames as no moves. `rebuildScores` folds this
+   * way. Entries appended meanwhile then fold incrementally. `batchSize`
+   * does not apply to the canonical batch (its ops are per item, not per
+   * event).
    */
   readonly canonical?: boolean;
 }
@@ -128,11 +128,11 @@ export interface FoldResult {
   readonly cursor: number;
   /** Batches this call committed. */
   readonly batches: number;
-  /** True when stored scores were cleared because the half-lives or the burst window changed. */
+  /** True when stored scores were refolded because the half-lives or the burst window changed. */
   readonly rebuilt: boolean;
   /**
    * True when an out-of-order rename record, or (with the burst rule) a late
-   * event, made this call clear the scores and fold the whole log canonically
+   * event, made this call replace the scores with the whole log folded canonically
    * (see the top of this file).
    */
   readonly refolded?: boolean;
@@ -225,65 +225,58 @@ function plainBatch(
   return { ops, toCursor, events, renames, collapsed: 0 };
 }
 
-/** The burst rule decided over the whole log, for a canonical fold. */
-interface BurstPlan {
-  /** The last seq the plan covers. Entries after it fold incrementally. */
-  readonly throughSeq: number;
-  /** Every rename record through `throughSeq`. */
-  readonly known: RenameIndex;
-  /** Seqs of the events that count. */
-  readonly counted: ReadonlySet<number>;
-}
-
-async function planBursts(log: EventLog, window: number): Promise<BurstPlan> {
+/**
+ * The canonical fold of the whole log as one batch (`reset`): every event
+ * resolved through every rename record by time (./renames.ts), renames as no
+ * moves, and, with a burst window, only the events `countBursts` counts,
+ * with each group's last counted time. Applied atomically in place of the
+ * stored scores, so no other folder ever sees, or builds on, a partial
+ * refold. The ops are one per (item, kind, half-life), however long the log.
+ */
+async function canonicalBatch(
+  log: EventLog,
+  window: number,
+  halfLives: HalfLives,
+  names: readonly string[],
+): Promise<BatchPlan> {
   const all = await log.readAfter(0);
   const known = new RenameIndex();
   for (const e of all) if (e.kind === 'rename') known.add(e);
   const events = all.filter((e): e is StoredEvent => e.kind !== 'rename');
-  const { counted } = countBursts(
-    events.map((e) => ({ key: burstKey(e.kind, known.resolve(e.item, e.time)), time: e.time })),
-    window,
-  );
-  const seqs = new Set<number>();
-  events.forEach((e, i) => {
-    if (counted[i]) seqs.add(e.seq);
-  });
-  return { throughSeq: all.at(-1)?.seq ?? 0, known, counted: seqs };
-}
-
-/** A canonical batch with the burst rule: only the plan's counted events add. */
-function canonicalBurstBatch(
-  entries: readonly LogEntry[],
-  plan: BurstPlan,
-  halfLives: HalfLives,
-  names: readonly string[],
-): BatchPlan {
+  const items = events.map((e) => known.resolve(e.item, e.time));
+  const counted =
+    window > 0
+      ? countBursts(
+          events.map((e, i) => ({ key: burstKey(e.kind, items[i] as string), time: e.time })),
+          window,
+        ).counted
+      : null;
   const ops: ScoreOp[] = [];
   const pending = new Contributions(halfLives, names);
   const last = new Map<string, { item: string; kind: EventKind; time: number }>();
-  let events = 0;
-  let renames = 0;
   let collapsed = 0;
-  for (const entry of entries) {
-    if (entry.kind === 'rename') {
-      renames++;
-      continue;
-    }
-    events++;
-    if (!plan.counted.has(entry.seq)) {
+  events.forEach((e, i) => {
+    if (counted && !counted[i]) {
       collapsed++;
-      continue;
+      return;
     }
-    const item = plan.known.resolve(entry.item, entry.time);
-    pending.add(item, entry.kind, entry.time);
-    const key = burstKey(entry.kind, item);
-    const was = last.get(key);
-    if (!was || was.time < entry.time) last.set(key, { item, kind: entry.kind, time: entry.time });
-  }
+    const item = items[i] as string;
+    pending.add(item, e.kind, e.time);
+    if (counted) {
+      const key = burstKey(e.kind, item);
+      const was = last.get(key);
+      if (!was || was.time < e.time) last.set(key, { item, kind: e.kind, time: e.time });
+    }
+  });
   pending.flush(ops);
   for (const { item, kind, time } of last.values()) ops.push({ type: 'last', item, kind, time });
-  const toCursor = (entries[entries.length - 1] as LogEntry).seq;
-  return { ops, toCursor, events, renames, collapsed };
+  return {
+    ops,
+    toCursor: all.at(-1)?.seq ?? 0,
+    events: events.length,
+    renames: all.length - events.length,
+    collapsed,
+  };
 }
 
 /**
@@ -378,6 +371,16 @@ async function incrementalBurstBatch(
  * batches, each committed atomically with the cursor. Safe to run from
  * several processes at once: a batch computed from a cursor that another
  * folder has since advanced is discarded and recomputed.
+ *
+ * The invariant every committed state keeps: the stored scores at cursor `c`
+ * are the canonical fold of the log's entries through seq `c`. An
+ * incremental batch keeps it only when its renames can fold as moves
+ * (`outOfOrderRename`) and its events can be decided from the burst state;
+ * otherwise, and when the half-lives or burst window changed, the fold
+ * replaces the scores with the canonical fold of the whole log in one
+ * atomic batch (`canonicalBatch`), checked against the cursor like any
+ * other. A refold is never split into batches, and never follows a separate
+ * `clear()`, so a concurrent folder's batch cannot land between its steps.
  */
 export async function foldPending(
   log: EventLog,
@@ -401,9 +404,9 @@ export async function foldPending(
   let conflicts = 0;
   let collapsed = 0;
   let rebuilt = false;
+  let refolded = false;
+  /** The next batch must be the canonical fold of the whole log. */
   let canonical = options.canonical ?? false;
-  let plan: BurstPlan | null = null;
-  const withCollapsed = window > 0 ? () => ({ collapsed }) : () => ({});
 
   for (;;) {
     const state = await scores.foldState();
@@ -411,74 +414,50 @@ export async function foldPending(
       if (options.onHalfLifeMismatch === 'throw') {
         throw new HalfLifeMismatchError(state.halfLives, halfLives);
       }
-      await scores.clear();
+      canonical = true;
       rebuilt = true;
-      plan = null;
-      continue;
-    }
-    if (state.halfLives && foldBurstWindow(state) !== window) {
+    } else if (state.halfLives && foldBurstWindow(state) !== window) {
       if (options.onHalfLifeMismatch === 'throw') {
         throw new BurstWindowMismatchError(foldBurstWindow(state), window);
       }
-      await scores.clear();
+      canonical = true;
       rebuilt = true;
-      plan = null;
-      continue;
-    }
-
-    const entries = await log.readAfter(state.cursor, { limit: batchSize });
-    if (entries.length === 0) {
-      return {
-        events,
-        renames,
-        cursor: state.cursor,
-        batches,
-        rebuilt,
-        conflicts,
-        ...withCollapsed(),
-      };
     }
 
     let batch: BatchPlan | 'refold';
-    if (canonical && window > 0) {
-      plan ??= await planBursts(log, window);
-      const through = plan.throughSeq;
-      const within = entries.filter((e) => e.seq <= through);
-      if (within.length === 0) {
-        // Entries appended since the plan was made fold incrementally.
-        canonical = false;
-        plan = null;
-        continue;
-      }
-      batch = canonicalBurstBatch(within, plan, halfLives, names);
-    } else if (canonical) {
-      const known = new RenameIndex();
-      for (const r of await log.renames({})) known.add(r);
-      batch = plainBatch(entries, known, true, halfLives, names);
-    } else if (await outOfOrderRename(log, state.cursor, entries)) {
-      batch = 'refold';
+    let reset = false;
+    if (canonical) {
+      batch = await canonicalBatch(log, window, halfLives, names);
+      reset = true;
     } else {
-      const known = new RenameIndex();
-      for (const r of await log.renames({ throughSeq: state.cursor })) known.add(r);
-      batch =
-        window > 0
-          ? await incrementalBurstBatch(entries, known, scores, window, halfLives, names)
-          : plainBatch(entries, known, false, halfLives, names);
+      const entries = await log.readAfter(state.cursor, { limit: batchSize });
+      if (entries.length === 0) {
+        return {
+          events,
+          renames,
+          cursor: state.cursor,
+          batches,
+          rebuilt,
+          ...(refolded ? { refolded } : {}),
+          conflicts,
+          ...(window > 0 ? { collapsed } : {}),
+        };
+      }
+      if (await outOfOrderRename(log, state.cursor, entries)) {
+        batch = 'refold';
+      } else {
+        const known = new RenameIndex();
+        for (const r of await log.renames({ throughSeq: state.cursor })) known.add(r);
+        batch =
+          window > 0
+            ? await incrementalBurstBatch(entries, known, scores, window, halfLives, names)
+            : plainBatch(entries, known, false, halfLives, names);
+      }
     }
-
     if (batch === 'refold') {
-      await scores.clear();
-      const refold = await foldPending(log, scores, { ...options, canonical: true });
-      return {
-        events: refold.events,
-        renames: refold.renames,
-        cursor: refold.cursor,
-        batches: batches + refold.batches,
-        rebuilt: rebuilt || refold.rebuilt,
-        refolded: true,
-        conflicts: conflicts + refold.conflicts,
-        ...(window > 0 ? { collapsed: refold.collapsed ?? 0 } : {}),
-      };
+      canonical = true;
+      refolded = true;
+      continue;
     }
 
     try {
@@ -487,6 +466,7 @@ export async function foldPending(
         toCursor: batch.toCursor,
         halfLives,
         ...(window > 0 ? { burstWindow: window } : {}),
+        ...(reset ? { reset: true } : {}),
         ops: batch.ops,
       });
     } catch (error) {
@@ -496,9 +476,17 @@ export async function foldPending(
       }
       throw error;
     }
-    events += batch.events;
-    renames += batch.renames;
-    collapsed += batch.collapsed;
+    if (reset) {
+      // The canonical fold replaced everything: it counts the whole log.
+      events = batch.events;
+      renames = batch.renames;
+      collapsed = batch.collapsed;
+      canonical = false;
+    } else {
+      events += batch.events;
+      renames += batch.renames;
+      collapsed += batch.collapsed;
+    }
     batches++;
   }
 }
@@ -551,16 +539,16 @@ async function outOfOrderRename(
 }
 
 /**
- * Clears the stored scores and folds the whole log again, canonically: each
- * event lands where the rename records say by time, whatever order the log
- * holds them in, so every copy with the same entries gets the same scores.
+ * Replaces the stored scores with the whole log folded again, canonically
+ * and atomically: each event lands where the rename records say by time,
+ * whatever order the log holds them in, so every copy with the same entries
+ * gets the same scores. Entries appended meanwhile are folded after it.
  */
 export async function rebuildScores(
   log: EventLog,
   scores: ScoreStore,
   options: FoldPendingOptions = {},
 ): Promise<FoldResult> {
-  await scores.clear();
   const result = await foldPending(log, scores, { ...options, canonical: true });
   return { ...result, rebuilt: true };
 }

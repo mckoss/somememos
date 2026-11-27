@@ -324,18 +324,19 @@ class MemoryScoreStore implements ScoreStore {
     const s = this.state();
     if (s.cursor !== batch.fromCursor) throw new FoldConflictError(batch.fromCursor, s.cursor);
     assertValidHalfLives(batch.halfLives);
-    if (s.halfLives && !sameHalfLives(s.halfLives, batch.halfLives)) {
+    const reset = batch.reset === true;
+    if (!reset && s.halfLives && !sameHalfLives(s.halfLives, batch.halfLives)) {
       throw new HalfLifeMismatchError(s.halfLives, batch.halfLives);
     }
     const window = batch.burstWindow ?? 0;
     assertValidBurstWindow(window);
-    if (s.halfLives && s.burstWindow !== window) {
+    if (!reset && s.halfLives && s.burstWindow !== window) {
       throw new BurstWindowMismatchError(s.burstWindow, window);
     }
     if (!Number.isSafeInteger(batch.toCursor) || batch.toCursor < batch.fromCursor) {
       throw new RangeError(`toCursor must be an integer >= fromCursor, not ${batch.toCursor}`);
     }
-    const burst = new Map(s.burst);
+    const burst = reset ? new Map<string, ReadonlyMap<EventKind, number>>() : new Map(s.burst);
     const burstOwned = new Set<string>();
     const burstOf = (item: string): Map<EventKind, number> => {
       if (!burstOwned.has(item)) {
@@ -345,7 +346,7 @@ class MemoryScoreStore implements ScoreStore {
       return burst.get(item) as Map<EventKind, number>;
     };
     // Stage on a copy, so an invalid op part-way through changes nothing.
-    const staged = new Map(s.scores);
+    const staged = reset ? new Map<string, ReadonlyMap<string, number>>() : new Map(s.scores);
     const owned = new Set<string>();
     const mutable = (item: string): Map<string, number> => {
       if (!owned.has(item)) {

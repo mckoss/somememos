@@ -39,11 +39,22 @@ for (let r = 0; r < Number(rounds); r++) {
     // Every worker also sends the same shared events, as sync retries would.
     batch.push({ id: 'shared-' + r + '-' + j, kind: 'read', item, time: now - j, client: 'w' + worker });
   }
+  // Renames that only a rule for same-second ties makes deterministic:
+  // one item renamed several times in one second (ids not in arrival order),
+  // a cycle within one second, and a chain over two seconds.
   if (worker === '0' && r % 5 === 4) {
     batch.push({ id: 'rename-' + r, kind: 'rename', item: 'some key', to: 'memos/key-' + r + '.md', time: now, client: 'w0' });
   }
+  if (worker === '1' && r % 7 === 3) {
+    batch.push({ id: 'cycle-' + r + '-b', kind: 'rename', item: 'memos/b.md', to: 'memos/c.md', time: now - 5, client: 'w1' });
+    batch.push({ id: 'cycle-' + r + '-a', kind: 'rename', item: 'memos/c.md', to: 'memos/b.md', time: now - 5, client: 'w1' });
+  }
+  if (worker === '2' && r % 6 === 2) {
+    batch.push({ id: 'chain-' + r + '-1', kind: 'rename', item: 'memos/a.md', to: 'memos/chain-' + r + '.md', time: now - 2, client: 'w2' });
+    batch.push({ id: 'chain-' + r + '-0', kind: 'rename', item: 'memos/chain-' + r + '.md', to: 'memos/a.md', time: now - 1, client: 'w2' });
+  }
   appended += (await stores.events.append(batch)).appended;
-  conflicts += (await storage.foldPending(stores.events, stores.scores, { batchSize: 7 })).conflicts;
+  conflicts += (await storage.foldPending(stores.events, stores.scores, { batchSize: 2 + Number(worker) })).conflicts;
 }
 stores.close();
 process.stdout.write(JSON.stringify({ appended, conflicts }));
@@ -91,7 +102,9 @@ it(
 
     const own = workers * rounds * perRound;
     const shared = rounds * perRound;
-    const renames = rounds / 5;
+    const count = (every: number, at: number) =>
+      Array.from({ length: rounds }, (_, r) => r).filter((r) => r % every === at).length;
+    const renames = count(5, 4) + 2 * count(7, 3) + 2 * count(6, 2);
     const appended = results.reduce(
       (n, r) => n + (JSON.parse(r.stdout) as { appended: number }).appended,
       0,
@@ -116,7 +129,7 @@ it(
         log.map(({ seq: _seq, ...input }) => input as storage.LogInput),
         { now: Number.MAX_SAFE_INTEGER },
       );
-      await storage.foldPending(memory.events, memory.scores);
+      await storage.rebuildScores(memory.events, memory.scores);
       expectScoresClose(folded, await memory.scores.getAll());
     } finally {
       stores.close();
