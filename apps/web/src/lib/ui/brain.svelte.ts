@@ -53,8 +53,17 @@ async function open(): Promise<BrainHost> {
     void h.storageInfo().then((s) => (brain.storage = s));
     // Changes made in another tab refresh what this one shows. (This tab's
     // own changes call `changed()` where they happen.)
+    // A sync that brought or sent changes refreshes every tab; a change of
+    // sync status alone refreshes nothing here (#lib/ui/sync.svelte.ts).
     h.subscribe((change) => {
-      if (change.source === 'other-tab' || change.operation === 'reopen') void changed();
+      if (change.operation === 'syncStatus') return;
+      if (
+        change.source === 'other-tab' ||
+        change.operation === 'reopen' ||
+        change.operation === 'sync'
+      ) {
+        void changed();
+      }
     });
     return h;
   } catch (error) {

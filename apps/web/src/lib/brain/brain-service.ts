@@ -16,6 +16,7 @@ import {
 } from '@somememos/sqlite-store';
 import type { ImportFile } from './host.ts';
 import { ENGINE_METHODS, type EngineMethod, type Target, type WorkerStorage } from './protocol.ts';
+import { SyncController, type SyncEventMessage } from './sync-controller.ts';
 
 /** Where the brain's two databases live. */
 export interface DatabaseProvider {
@@ -45,6 +46,24 @@ interface ActiveImport {
   release(): void;
 }
 
+export interface BrainServiceOptions {
+  /** The app's origin, where the server's `/api` is. Without it there is no sync. */
+  readonly origin?: string;
+  /** Receives sync status changes, to pass to the page. */
+  readonly emit?: (event: SyncEventMessage) => void;
+}
+
+/** Engine calls after which the brain may have something new to sync. */
+const CHANGE_METHODS: ReadonlySet<string> = new Set([
+  'saveNote',
+  'renameNote',
+  'deleteNote',
+  'commit',
+  'importLog',
+  'ensureDiary',
+  'index',
+]);
+
 export interface BrainService {
   readonly storage: WorkerStorage;
   readonly config: storage.BrainConfig;
@@ -59,7 +78,10 @@ function invalid(message: string): never {
   throw new engine.EngineError('invalid-argument', message);
 }
 
-export async function openBrainService(provider: DatabaseProvider): Promise<BrainService> {
+export async function openBrainService(
+  provider: DatabaseProvider,
+  options: BrainServiceOptions = {},
+): Promise<BrainService> {
   let stores!: ReturnType<typeof createSqliteStores>;
   let events!: SqlDriver;
   let content!: storage.ContentStore;
@@ -220,6 +242,72 @@ export async function openBrainService(provider: DatabaseProvider): Promise<Brai
     return config;
   };
 
+  // --- Sync (./sync-controller.ts). The token and the sync record live in
+  // the events database's meta, so a reset wipes them with everything else.
+  const sync = new SyncController({
+    engine: () => current,
+    meta: () => stores.meta,
+    content: () => content,
+    config: () => config,
+    queue,
+    updateConfig: (next) => queue(() => updateConfig(next)),
+    emit: (event) => options.emit?.(event),
+    origin: options.origin ?? '',
+    online: () => (typeof navigator === 'undefined' ? true : navigator.onLine !== false),
+  });
+  if (options.origin) await sync.start();
+
+  const syncCall = (method: string, args: readonly unknown[]): Promise<unknown> => {
+    if (!options.origin) invalid('sync is not available here');
+    switch (method) {
+      case 'syncProbe':
+        return sync.probe();
+      case 'syncListBrains':
+        return sync.listBrains(args[0]);
+      case 'syncPlan':
+        return sync.plan(args[0] as Parameters<SyncController['plan']>[0]);
+      case 'syncConnect':
+        return sync.connect(args[0] as Parameters<SyncController['connect']>[0], args[1]);
+      case 'syncDisconnect':
+        return sync.disconnect();
+      case 'syncSetToken':
+        return sync.setToken(args[0]);
+      case 'syncView':
+        return sync.status();
+      case 'syncNow':
+        return sync.syncNow();
+      case 'syncStartOver':
+        return sync.startOver();
+      case 'syncHint':
+        sync.hint(args[0]);
+        return Promise.resolve(undefined);
+      case 'syncConflicts':
+        return sync.conflicts();
+      case 'syncResolve':
+        return sync.resolve(args[0], args[1]);
+      case 'syncNoteState':
+        return sync.noteState(args[0], args[1]);
+      default:
+        return invalid(`no such method: ${method}`);
+    }
+  };
+
+  /** Tells sync what an engine call did. */
+  const afterEngineCall = (method: string, value: unknown): void => {
+    if (!options.origin) return;
+    if (method === 'readNote') {
+      if ((value as { recorded?: unknown } | null)?.recorded === true) sync.noteChange('read');
+      return;
+    }
+    if (!CHANGE_METHODS.has(method)) return;
+    const status = (value as { status?: unknown; created?: unknown; committed?: unknown } | null)
+      ?.status;
+    if (method === 'saveNote' && status !== 'saved') return;
+    if (method === 'ensureDiary' && (value as { created?: unknown }).created !== true) return;
+    if (method === 'commit' && (value as { committed?: unknown }).committed !== true) return;
+    sync.noteChange('change');
+  };
+
   return {
     storage: provider.storage,
     get config() {
@@ -229,15 +317,21 @@ export async function openBrainService(provider: DatabaseProvider): Promise<Brai
       if (target === 'engine') {
         if (!ENGINE_METHOD_SET.has(method)) invalid(`no such method: ${method}`);
         const fn = current[method as EngineMethod] as (...a: unknown[]) => Promise<unknown>;
-        return queue(() => fn.apply(current, [...args]));
+        const value = await queue(() => fn.apply(current, [...args]));
+        afterEngineCall(method, value);
+        return value;
       }
+      if (method.startsWith('sync')) return syncCall(method, args);
       switch (method) {
         case 'importBegin':
           return importBegin();
         case 'importChunk':
           return importChunk(args[0], args[1]);
-        case 'importEnd':
-          return importEnd(args[0]);
+        case 'importEnd': {
+          const result = await importEnd(args[0]);
+          if (options.origin && result.imported > 0) sync.noteChange('change');
+          return result;
+        }
         case 'importAbort':
           if (active && active.id === args[0]) endImport(active);
           return undefined;
@@ -247,8 +341,11 @@ export async function openBrainService(provider: DatabaseProvider): Promise<Brai
           return provider.storage;
         case 'updateConfig':
           return queue(() => updateConfig(args[0]));
-        case 'reset':
-          return queue(() => reset());
+        case 'reset': {
+          const next = await queue(() => reset());
+          if (options.origin) await sync.reload();
+          return next;
+        }
         default:
           return invalid(`no such method: ${method}`);
       }
