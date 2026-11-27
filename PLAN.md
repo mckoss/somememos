@@ -168,6 +168,18 @@ The event log is the source of truth for all scores.
 - Excluded folders never appear in the log.
 - Search query text is not logged.
 
+### The change log
+
+somememos keeps the change log itself. Agents are not asked to write changelog files. (Decided 2026-11-27, replacing the vault's rule that agents append to `logs/` by hand.)
+
+- Every `commit` makes one **change record**: the time, the client, the notes that changed, and the message the agent gave.
+- The agent supplies only what it alone knows, the reason, as the commit message: `somememos commit -m "<op> <summary>"`. The optional first word is an operation tag (`ingest`, `update`, `session`, `query`, `lint`, as the vault uses today). Further lines can give per-note reasons and sources.
+- A message is expected but not required. A commit without one still works and still records what changed.
+- `somememos log` shows the change log, newest first. It can be narrowed to one note (that note's history, with reasons and sources), to an operation, or to a date range. By default it hides changes that touch only `dated` files, so routine diary and todo maintenance doesn't crowd out changes to memos.
+- Change records are original data. They are stored beside the event log, exported with it, and on the server each one is also the message of that change's git commit.
+- Messages are indexed for search, and they are the best source of queries for the experiments (section 5).
+- Because the log is no longer a note full of links, a change no longer counts twice, once as an edit and once as a mention from its log entry.
+
 ### One-time import from git
 
 An existing vault that has lived in git (Mike's has) carries years of history. `somememos import-git` reads that history once and writes it into the event log: an `edit` event for each commit that changed a note, and a `mention` event for each `[[link]]` a commit added, both at the commit's time, following renames. Imported events get ids derived from the commit, so running the import twice adds nothing. After the import, clients have no further use for git. When the vault moves to the server, its repository becomes the brain's version store (section 7).
@@ -319,7 +331,8 @@ somememos init [dir]                 create .somememos/ with default config
 somememos search <words> [--mode hot|trending|neglected|all] [--limit N]
 somememos hot | trending | neglected list notes by activation only
 somememos read <path>                place the note in the working folder, print it, log a read event
-somememos commit [paths]             send edited notes to the brain and log the edits
+somememos commit [-m msg] [paths]    send edited notes to the brain; log the edits and a change record
+somememos log [path] [--op x]        show the change log, newest first
 somememos status                     edited notes not yet committed; counts; config in effect
 somememos diary                      print the path of today's dated entry, creating it if needed
 somememos index [--rebuild]          update the derived index and scores (local mode)
@@ -333,7 +346,7 @@ somememos eval [--cases file]        run the ranking experiments (section 5)
 - `search` and the activation lists only list notes: path, heading and a snippet. They place nothing and log nothing.
 - `read` is the selection step. It puts the note into a **working folder** that mirrors the brain's paths (so relative links and ordinary tools work), prints it, and logs the read.
 - The agent edits the file in the working folder with its ordinary text tools.
-- `commit` sends each changed file together with the content hash it had when it was fetched. If that is still the brain's current version, the edit is stored and its `edit` and `mention` events are logged. If someone else changed the note meanwhile, the commit is refused for that file and the current version is saved beside it, so the agent can merge and commit again. New notes are created in the working folder and committed the same way.
+- `commit` sends each changed file together with the content hash it had when it was fetched. If that is still the brain's current version, the edit is stored and its `edit` and `mention` events are logged. If someone else changed the note meanwhile, the commit is refused for that file and the current version is saved beside it, so the agent can merge and commit again. New notes are created in the working folder and committed the same way. The `-m` message says why, and becomes the change log entry (section 4).
 - **Forgotten commits.** Every command checks the working folder for files edited since they were fetched and not yet committed, and prints a reminder naming them. `status` lists them on request. Whether the client should commit them itself instead of reminding is an open question (section 12).
 
 **Two modes, one flow.**
@@ -345,7 +358,7 @@ somememos eval [--cases file]        run the ranking experiments (section 5)
 
 - Output is short, predictable plain text by default: one result per line with path, heading and a snippet. `--json` gives the full record, including score components.
 - Exit codes are conventional (0 success, 1 error, 2 usage), and `--help` is complete enough to learn the tool from.
-- The repo ships a short `AGENTS.md` snippet (and a skill) to paste into a brain: run `somememos hot` to orient, `somememos search` before grep, `somememos read` in place of `cat`, and `somememos commit` after editing.
+- The repo ships a short `AGENTS.md` snippet (and a skill) to paste into a brain: run `somememos hot` to orient, `somememos search` before grep, `somememos log` to see what changed recently, `somememos read` in place of `cat`, and `somememos commit -m` with a reason after editing.
 - somememos requires no other structure from agents. There is no citation step and no handle to pass back.
 
 ### MCP server
@@ -444,7 +457,7 @@ Each milestone should leave something usable. [IMPLEMENTATION.md](IMPLEMENTATION
 
 - **M0 — Foundations.** npm workspace scaffold (`packages/core`, `packages/cli`, and a skeleton SvelteKit `apps/web` that shows the version), CI (lint, type-check, tests), `packages/core` with the TimeScore functions and property tests checked against the blog post. Confirm the details in section 9.
 - **M1 — Local CLI and evaluation.** `init`, `index` (keyword index, edit detection, folding), `search`, `hot`/`trending`/`neglected`, `read`, `status`, `import-git`, `export`, and `eval`. Done when Mike can index his second-brain vault on one machine, import its git history, get useful hot, trending and neglected lists, and the first experiments have set the default weights.
-- **M2 — Agent use on one machine.** A one-file CLI build, the `AGENTS.md` snippet and skill, and the vault's instructions amended. Done when Mike's agents on his main machine (Claude Code and Hermes, both of which have a shell) use `somememos hot`, `search` and `read` in place of grep and `cat`, replacing the vault's `rg "^## " logs | tail -40` step.
+- **M2 — Agent use on one machine.** A one-file CLI build, the `AGENTS.md` snippet and skill, and the vault's instructions amended. Done when Mike's agents on his main machine (Claude Code and Hermes, both of which have a shell) use `somememos hot`, `search`, `read` and `log` in place of grep and `cat`, replacing the vault's `rg "^## " logs | tail -40` step, and record their reasons with `somememos commit -m` in place of writing changelog files.
 - **M3 — Server and remote CLI.** Single-user SvelteKit server on Railway that holds each brain as a git repository on its filesystem, with a mutation counter and the event log. The CLI gains remote mode: `search`, `read` and `commit` as requests to the server over somememos's own protocol, with a working folder for fetched notes. Done when agents on any machine, including disposable cloud sessions, use the brain with only the CLI and a credential.
 - **M4 — PWA client and offline sync.** Offline-first SvelteKit PWA with an editor, `[[wiki-links]]`, backlinks, search, and activation views. It holds a full local copy and syncs by the mutation counter, as does an optional `somememos clone` for local model use. Version shown in the header. Done when Mike can stop using Obsidian entirely.
 - **M5 — Hosted multi-user and MCP.** Accounts, per-user storage, remote MCP with authentication plus local stdio MCP, privacy policy, event log retention, and export. Launch at the somememos domain.
@@ -457,12 +470,13 @@ Each milestone should leave something usable. [IMPLEMENTATION.md](IMPLEMENTATION
 - Roles for the vault: `memos/**` is `memo`; `diary/**`, `todo/**` and `logs/**` are `dated`; `raw/**` is `source`. Diaries and logs are mainly *sources of mention events*, not items to surface.
 - The vault's `AGENTS.md` currently says "No RAG pipeline" and still describes Obsidian Sync. It will need a deliberate amendment once somememos is in use. Make that change in the vault, not here.
 
+- The vault's `logs/` folder stops growing once agents use `somememos commit -m` (milestone 2). The existing files stay as dated notes, and their entries can seed the change log during the import.
 - The vault lives in git today. Its history is imported once with `somememos import-git`. From milestone 3 the server holds the vault, and git stops being how it moves between machines.
 - Agents working in the vault must read notes with `somememos read`, not `cat`, so that reads are recorded. The amended `AGENTS.md` says so.
 
 ## 12. Open questions
 
-Settled on 2026-11-27, and removed from this list: the primary purpose (agent memory), dangling links (in from M1), the look-ahead channel (events are dated by interaction, so calendar dates are just content), how scoring choices get made (by experiment), raw activity (an event log is kept), and git (the server's version store, one repository per brain, with no git interface exposed).
+Settled on 2026-11-27, and removed from this list: the primary purpose (agent memory), dangling links (in from M1), the look-ahead channel (events are dated by interaction, so calendar dates are just content), how scoring choices get made (by experiment), raw activity (an event log is kept), git (the server's version store, one repository per brain, with no git interface exposed), and the change log (kept by somememos from commit messages, not written by agents).
 
 1. **Evaluation queries.** Partly answered by reading the vault's logs on 2026-11-27: the `ingest` entries and the wiki `update` entries make good search cases, but the nightly diary entries and the older untimed headings don't. Expect 50 to 100 usable cases, so a small hand-written case file is still needed. How many is enough?
 2. **Ranking parameters, all to be answered by experiment:** per-kind weights, `α`, half-lives per mode, how bursts of edits count, heading vs body weight, link spreading (whether, which direction, how strong), and section-level vs note-level scoring.
@@ -475,4 +489,3 @@ Settled on 2026-11-27, and removed from this list: the primary purpose (agent me
 9. **Conflict handling.** After the first "keep both" version, a three-way merge or a CRDT?
 10. **Event log retention for hosted users** (milestone 5).
 11. **Forgotten commits.** The client reminds the agent about edited files that were never committed. Should it commit them itself instead? That saves work lost at the end of a session, but can store half-finished edits.
-12. **A server-side change log (proposed, not yet confirmed by Mike).** Today agents write a changelog file by hand for every change. Instead, `somememos commit -m "<op> <summary>"` would carry the reason, the server would store it with the git commit and add the time and the list of changed notes itself, and `somememos log` would show it, hiding routine diary and todo maintenance by default. `logs/` would stop growing at milestone 3. A read of the vault's 160 log files supports this: each entry is already a subject line plus per-file reasons, most of its content is a list of changed files the server would know, and recent logs are mostly nightly diary boilerplate.
