@@ -321,7 +321,7 @@ apps/web          SvelteKit app: server routes (sync API, remote MCP, accounts) 
 ```
 
 - **`packages/core` must be isomorphic.** It runs in Node (CLI and SvelteKit server) and in the browser (PWA), so it must not import Node-only modules. Storage and file access are passed in as interfaces.
-- `packages/core` and `packages/cli` are compiled with `tsc` only, with no bundler. `apps/web` uses SvelteKit's standard Vite build; that's the one place a bundler is accepted.
+- Bundlers are fine for this project: `apps/web` uses SvelteKit's standard Vite build, and `core` and `cli` may use `tsc`, Vite or another bundler, whichever is simplest.
 
 ### Details to confirm at milestone 0
 
