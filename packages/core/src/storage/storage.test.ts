@@ -6,6 +6,7 @@ import { UNIT_WEIGHTS } from '../timescore/weights.js';
 import {
   ConfigError,
   defaultBrainConfig,
+  foldOptions,
   parseBrainConfig,
   serializeBrainConfig,
 } from './config.js';
@@ -71,8 +72,9 @@ describe('brain config', () => {
       clientId: 'laptop-1',
       roles: {},
       halfLives: { ...HALF_LIVES },
+      burstWindow: 3600,
       weights: { ...UNIT_WEIGHTS },
-      alpha: 1,
+      alpha: 0.5,
       keyword: {},
       analyzer: { stem: true },
       changeOps: ['ingest', 'update', 'session', 'query', 'lint'],
@@ -94,6 +96,7 @@ describe('brain config', () => {
       clientId: 'c',
       roles: { memo: ['notes/'], excluded: ['private/'] },
       halfLives: { hour: 3600, week: 604800 },
+      burstWindow: 0,
       weights: { read: 0.5 },
       alpha: 0.25,
       keyword: { k1: 1.5, b: { body: 0.6 }, weights: { title: 4 } },
@@ -101,6 +104,8 @@ describe('brain config', () => {
       changeOps: ['ingest', 'garden'],
     });
     expect(config.halfLives).toEqual({ hour: 3600, week: 604800 });
+    expect(config.burstWindow).toBe(0);
+    expect(foldOptions(config)).toEqual({ halfLives: config.halfLives, burstWindow: 0 });
     expect(config.weights).toEqual({ read: 0.5, edit: 1, mention: 1 });
     expect(config.keyword).toEqual({ k1: 1.5, b: { body: 0.6 }, weights: { title: 4 } });
     expect(config.analyzer).toEqual({ stem: false });
@@ -116,6 +121,7 @@ describe('brain config', () => {
           role: {},
           roles: { memo: 'memos/', dated: ['diary/'], archive: [] },
           halfLives: { day: -1 },
+          burstWindow: -5,
           weights: { read: -1, like: 2 },
           alpha: 'high',
           keyword: { k1: 1.2, b: { body: 2 } },
@@ -138,6 +144,7 @@ describe('brain config', () => {
       'unknown key "archive"',
       'Dated pattern lacks',
       'halfLives:',
+      'burstWindow:',
       'weights.read',
       'unknown key "like"',
       'alpha:',

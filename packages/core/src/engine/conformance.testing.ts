@@ -23,6 +23,9 @@ import {
   type SyntheticBrain,
 } from '../testing/brain.js';
 import { contentHash } from '../storage/content.js';
+import { combineAll, eventScore } from '../timescore/timescore.js';
+import { readPendingRemote } from '../indexing/state.js';
+import { SYNC_LIMITS, truncateChangeMessage } from '../sync/protocol.js';
 import { createEngine, localDate } from './engine.js';
 import { toSyncChange, toSyncEvent } from './sync.js';
 import { EngineError, type ResultView } from './types.js';
@@ -249,13 +252,13 @@ export function describeEngineConformance(
       expect(note.hash).toBe(saved.hash);
       expect(note).toMatchObject({ title: 'Lantern', role: 'memo', date: null, recorded: false });
       expect(note.links).toEqual([
-        { target: 'memos/oil', dangling: true },
-        { target: 'wick', dangling: true },
+        { target: 'memos/oil', dangling: true, display: 'memos/oil' },
+        { target: 'wick', dangling: true, display: 'wick' },
       ]);
       expect(note.sections.length).toBeGreaterThan(0);
       expect(await b.engine.danglingLinks()).toEqual([
-        { key: 'memos/oil', count: 1 },
-        { key: 'wick', count: 1 },
+        { key: 'memos/oil', display: 'memos/oil', count: 1 },
+        { key: 'wick', display: 'wick', count: 1 },
       ]);
     });
 
@@ -439,8 +442,8 @@ export function describeEngineConformance(
       expect(await code(b.engine.readNote('memos/new.md'))).toBe('not-found');
       expect(await code(b.engine.deleteNote('memos/new.md'))).toBe('not-found');
       expect((await b.engine.readNote('memos/linker.md', { record: false })).links).toEqual([
-        { target: 'memos/new', dangling: true },
-        { target: 'old', dangling: true },
+        { target: 'memos/new', dangling: true, display: 'memos/new' },
+        { target: 'old', dangling: true, display: 'old' },
       ]);
       // Scores stay with the deleted path; it is not listed.
       expect((await b.engine.list('hot')).results.map((r) => r.item)).not.toContain('memos/new.md');
@@ -460,7 +463,7 @@ export function describeEngineConformance(
         const album = await b.engine.readNote('memos/album.md', { record: false });
         expect(album.links).toEqual([
           { target: 'memos/node.js.md', dangling: false },
-          { target: 'v1.2', dangling: true },
+          { target: 'v1.2', dangling: true, display: 'v1.2' },
         ]);
         expect((await b.engine.danglingLinks()).map((d) => d.key)).toEqual(['v1.2']);
         const mentions = (await b.entries()).filter((e) => e.kind === 'mention').map((e) => e.item);
@@ -705,6 +708,46 @@ export function describeEngineConformance(
       expect(await b.stores.terms.statistics()).toEqual(stats);
     });
 
+    it(
+      'counts a burst of saves once (the config burst window), and rebuilds when it changes',
+      { timeout },
+      async () => {
+        const b = await brain();
+        await b.engine.index();
+        for (let i = 0; i < 4; i++) {
+          b.tick(600);
+          await b.engine.saveNote('memos/burst.md', `# Burst\n\nsave ${i}\n`);
+        }
+        b.tick(3_600);
+        await b.engine.saveNote('memos/burst.md', '# Burst\n\nlater\n');
+        expect((await b.engine.status()).events.edit).toBe(5);
+        const state = await b.stores.scores.foldState();
+        expect(state.burstWindow).toBe(3600);
+        const edits = (await b.stores.events.readAfter(0)).filter((e) => e.kind === 'edit');
+        // The first save and the one an hour after the burst count; the rest do not.
+        const day = b.config.halfLives.day as number;
+        const counted = [edits[0], edits[4]].map((e) => e?.time as number);
+        expect((await b.stores.scores.getItem('memos/burst.md'))?.day?.edit).toBeCloseTo(
+          combineAll(counted.map((t) => eventScore(1, t, day))),
+          6,
+        );
+        const off = createEngine({
+          stores: b.stores,
+          content: b.content,
+          config: parseBrainConfig({
+            clientId: 'conformance-client',
+            roles: ROLES,
+            burstWindow: 0,
+          }),
+          now: () => b.tick(0),
+        });
+        const summary = await off.index();
+        expect(summary.rebuilt).toBe(true);
+        expect((await b.stores.scores.foldState()).burstWindow).toBeUndefined();
+        expect((await b.engine.status()).config.burstWindow).toBe(3600);
+      },
+    );
+
     it('serializes concurrent calls', { timeout }, async () => {
       const b = await brain();
       await b.engine.index();
@@ -717,6 +760,90 @@ export function describeEngineConformance(
       expect((await b.engine.status()).notes.total).toBe(8);
       expect(await b.engine.danglingLinks()).toEqual([]);
     });
+
+    it(
+      'keeps the link text as written for dangling links, in lists and results',
+      { timeout },
+      async () => {
+        const b = await brain();
+        await b.engine.index();
+        b.tick();
+        await b.engine.saveNote(
+          'memos/a.md',
+          '# A\n\nSee [[Quartz  Garden.md]] and [[quartz garden]].\n',
+        );
+        await b.engine.saveNote('memos/b.md', '# B\n\nAlso [[quartz garden]].\n');
+        await b.engine.saveNote('memos/c.md', '# C\n\nAnd [[Quartz Garden]].\n');
+        // a's first form, c's: two notes write it capitalized, b lower-case.
+        expect(await b.engine.danglingLinks()).toEqual([
+          { key: 'quartz garden', display: 'Quartz Garden', count: 3 },
+        ]);
+        expect((await b.engine.readNote('memos/b.md', { record: false })).links).toEqual([
+          { target: 'quartz garden', dangling: true, display: 'quartz garden' },
+        ]);
+        const hot = await b.engine.list('hot');
+        const item = hot.results.find((r) => r.item === 'quartz garden');
+        expect(item).toMatchObject({ dangling: true, path: null, title: 'Quartz Garden' });
+        const found = await b.engine.search('quartz');
+        expect(found.results.every((r) => !r.dangling)).toBe(true);
+        // A tie goes to the form that sorts first (capitals before lower case).
+        await b.engine.saveNote('memos/c.md', '# C\n\nAnd nothing.\n');
+        expect((await b.engine.danglingLinks())[0]?.display).toBe('Quartz Garden');
+        await b.engine.saveNote('memos/a.md', '# A\n\nSee [[quartz garden]].\n');
+        expect((await b.engine.danglingLinks())[0]?.display).toBe('quartz garden');
+      },
+    );
+
+    it(
+      'searches change messages with the search tokenizer, newest first',
+      { timeout },
+      async () => {
+        const b = await brain();
+        await b.engine.index();
+        b.tick();
+        await b.engine.saveNote('memos/a.md', '# A\n', {
+          message: 'ingest planting notes for tomatoes',
+        });
+        b.tick();
+        await b.engine.saveNote('memos/b.md', '# B\n', { message: 'update the compost heap' });
+        b.tick();
+        await b.engine.saveNote('memos/c.md', '# C\n', {
+          message: 'session: planted Tomato seedlings',
+        });
+        b.tick();
+        await b.engine.saveNote('memos/d.md', '# D\n');
+        b.tick();
+        await b.engine.saveNote('diary/2027/01/2027-01-05.md', '# Day\n', {
+          message: 'tomato diary',
+        });
+        const messages = async (opts: Parameters<typeof b.engine.log>[0]) =>
+          (await b.engine.log(opts)).map((c) => c.message);
+        // Stemmed: "tomato" finds "tomatoes" and "Tomato"; every word must match.
+        expect(await messages({ query: 'tomato' })).toEqual([
+          'session: planted Tomato seedlings',
+          'ingest planting notes for tomatoes',
+        ]);
+        expect(await messages({ query: 'tomato', all: true })).toEqual([
+          'tomato diary',
+          'session: planted Tomato seedlings',
+          'ingest planting notes for tomatoes',
+        ]);
+        expect(await messages({ query: 'planted tomato' })).toHaveLength(2);
+        expect(await messages({ query: 'tomato compost' })).toEqual([]);
+        expect(await messages({ query: '"tomato seedlings"' })).toEqual([
+          'session: planted Tomato seedlings',
+        ]);
+        expect(await messages({ query: '"seedlings tomato"' })).toEqual([]);
+        expect(await messages({ query: 'tomato', limit: 1 })).toEqual([
+          'session: planted Tomato seedlings',
+        ]);
+        expect(await messages({ query: 'tomato', op: 'ingest' })).toEqual([
+          'ingest planting notes for tomatoes',
+        ]);
+        expect(await messages({ query: '   ' })).toHaveLength(4);
+        expect(await messages({ query: '!!' })).toEqual([]);
+      },
+    );
 
     describe('sync', () => {
       const hashOf = (text: string) => contentHash(text);
@@ -753,7 +880,9 @@ export function describeEngineConformance(
             events.map((e) => e.id),
           );
           expectScoresClose(await b.stores.scores.getAll(), await a.stores.scores.getAll());
-          expect(await b.engine.danglingLinks()).toEqual([{ key: 'compost tea', count: 1 }]);
+          expect(await b.engine.danglingLinks()).toEqual([
+            { key: 'compost tea', display: 'Compost Tea', count: 1 },
+          ]);
           expect((await b.engine.status()).uncommitted).toEqual([]);
 
           // A new note resolves the dangling link; a rename and a delete relink.
@@ -773,7 +902,9 @@ export function describeEngineConformance(
             ],
           });
           expect(third.renamed).toEqual([{ from: 'memos/compost tea.md', to: 'memos/tea.md' }]);
-          expect(await b.engine.danglingLinks()).toEqual([{ key: 'compost tea', count: 1 }]);
+          expect(await b.engine.danglingLinks()).toEqual([
+            { key: 'compost tea', display: 'Compost Tea', count: 1 },
+          ]);
           await b.engine.applyRemote({ notes: [{ path: 'memos/garden.md', deleted: true }] });
           expect(await b.engine.danglingLinks()).toEqual([]);
           expect((await b.engine.noteTitles()).map((t) => t.path)).toEqual(['memos/tea.md']);
@@ -961,6 +1092,142 @@ export function describeEngineConformance(
           ]);
           expect(next.request.events.map((e) => e.id)).not.toContain('server-e1');
           expect(next.request.changes.map((c) => c.id)).not.toContain('server-c1');
+        },
+      );
+
+      it(
+        'never logs a crashed sync’s writes as local edits, but still logs real local edits',
+        { timeout },
+        async () => {
+          const b = await brain();
+          await b.engine.index();
+          b.tick();
+          const one = '# One\n\nFrom [[elsewhere]].\n';
+          const two = '# Two\n\nAlso [[elsewhere]].\n';
+          // A content store that crashes right after its second write: the
+          // notes are written, the no-logging pass never runs.
+          let writes = 0;
+          const crashing: ContentStore = {
+            list: () => b.content.list(),
+            stat: (p) => b.content.stat(p),
+            read: (p) => b.content.read(p),
+            remove: (p) => b.content.remove(p),
+            rename: (f, t) => b.content.rename(f, t),
+            write: async (p, text, o) => {
+              const entry = await b.content.write(p, text, o);
+              if (++writes === 2) throw new Error('simulated crash');
+              return entry;
+            },
+          };
+          const crashed = createEngine({
+            stores: b.stores,
+            content: crashing,
+            config: b.config,
+            now: () => b.tick(0),
+          });
+          await expect(
+            crashed.applyRemote({
+              notes: [
+                { path: 'memos/one.md', hash: await hashOf(one), text: one },
+                { path: 'memos/two.md', hash: await hashOf(two), text: two },
+              ],
+            }),
+          ).rejects.toThrow('simulated crash');
+          expect(await b.content.read('memos/two.md')).toBe(two);
+
+          // After the crash: a real local edit of one remote note, and a new local note.
+          b.tick();
+          const mine = '# Two\n\nMine now.\n';
+          await b.content.write('memos/two.md', mine, { mtime: b.tick(0) });
+          await b.content.write('memos/local.md', '# Local\n', { mtime: b.tick(0) });
+          const seq = await b.stores.events.lastSeq();
+          const index = await b.engine.index();
+          expect(index.events).toEqual({ edit: 2, mention: 0, rename: 0 });
+          const logged = (await b.stores.events.readAfter(seq)).map((e) => [e.kind, e.item]);
+          expect(logged.sort()).toEqual([
+            ['edit', 'memos/local.md'],
+            ['edit', 'memos/two.md'],
+          ]);
+          expect((await b.engine.status()).uncommitted).toEqual(['memos/local.md', 'memos/two.md']);
+          expect((await b.engine.noteTitles()).map((t) => t.path)).toContain('memos/one.md');
+          expect(await readPendingRemote(b.stores.meta)).toEqual({});
+          // Nothing left over: the next pass logs nothing.
+          expect((await b.engine.index()).events).toEqual({ edit: 0, mention: 0, rename: 0 });
+        },
+      );
+
+      it(
+        'keeps a conflict copy where it has a role and syncs, even beside a dated entry',
+        { timeout },
+        async () => {
+          const b = await brain();
+          await b.engine.index();
+          const day = localDate(T);
+          const [y, m] = day.split('-');
+          const diary = `diary/${y}/${m}/${day}.md`;
+          await b.engine.saveNote(diary, `# ${day}\n\nmine\n`);
+          await b.engine.saveNote('memos/plan.md', '# Plan\n\nmine\n');
+          const prepared = await b.engine.prepareSync();
+          const theirs = `# ${day}\n\ntheirs\n`;
+          const planTheirs = '# Plan\n\ntheirs\n';
+          b.tick();
+          const results = await Promise.all(
+            prepared.request.edits.map(async (e) => {
+              const text = e.path === diary ? theirs : planTheirs;
+              return {
+                id: e.id,
+                status: 'conflict' as const,
+                currentHash: await hashOf(text),
+                currentText: text,
+              };
+            }),
+          );
+          const outcome = await b.engine.applySync(prepared, {
+            mutation: 2,
+            more: false,
+            results,
+            notes: [],
+            events: [],
+            changes: [],
+          });
+          const kept = new Map(outcome.conflicts.map((c) => [c.path, c.conflictPath]));
+          // Beside the note would match no role in the dated folder: the first memo folder instead.
+          expect(kept.get(diary)).toBe(
+            `memos/${day}.conflict-conformance-client-${localDate(T + 60)}.md`,
+          );
+          expect(kept.get('memos/plan.md')).toBe(
+            `memos/plan.conflict-conformance-client-${localDate(T + 60)}.md`,
+          );
+          expect(await b.content.read(kept.get(diary) as string)).toBe(`# ${day}\n\nmine\n`);
+          const next = await b.engine.prepareSync();
+          expect(next.request.edits.map((e) => e.path).sort()).toEqual(
+            [...kept.values()].map(String).sort(),
+          );
+        },
+      );
+
+      it(
+        'truncates an over-long change message when preparing a request',
+        { timeout },
+        async () => {
+          const b = await brain();
+          await b.engine.index();
+          const long = `update ${'tomato '.repeat(4000)}😀 end`;
+          await b.engine.saveNote('memos/long.md', '# Long\n', { message: long });
+          const prepared = await b.engine.prepareSync();
+          const sent = prepared.request.changes[0]?.message as string;
+          expect(sent.length).toBeLessThanOrEqual(SYNC_LIMITS.maxMessageLength);
+          expect(sent.endsWith('…')).toBe(true);
+          expect(long.startsWith(sent.slice(0, -1))).toBe(true);
+          expect((await b.engine.log())[0]?.message).toBe(long);
+          // A message at the limit, and one that would split an emoji, are handled too.
+          const exact = 'x'.repeat(SYNC_LIMITS.maxMessageLength);
+          expect(truncateChangeMessage({ message: exact }).message).toBe(exact);
+          const split = truncateChangeMessage({
+            message: `${'x'.repeat(SYNC_LIMITS.maxMessageLength - 2)}😀😀`,
+          }).message as string;
+          expect(split).toBe(`${'x'.repeat(SYNC_LIMITS.maxMessageLength - 2)}…`);
+          expect(truncateChangeMessage({ message: null }).message).toBeNull();
         },
       );
 

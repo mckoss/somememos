@@ -16,6 +16,13 @@ export interface PgStoresOptions extends storage.StoresOptions {
   readonly pool: pg.Pool;
   /** The brain these stores read and write. Its rows are created if missing. */
   readonly brainId: string;
+  /**
+   * Open for reading only, inside a `READ ONLY` transaction the caller runs
+   * (the server's pure reads): no migration, no rows created, and the
+   * analyzer read rather than settled. The brain must exist and the schema
+   * be migrated. Any write through these stores then fails in Postgres.
+   */
+  readonly readOnly?: boolean;
 }
 
 /** The Postgres stores of one brain. */
@@ -48,6 +55,22 @@ async function settleAnalyzer(
   });
 }
 
+/** The analyzer `settleAnalyzer` would settle on, without writing or locking. */
+async function readAnalyzer(
+  db: BrainDb,
+  requested: keyword.AnalyzerOptions,
+): Promise<keyword.AnalyzerOptions> {
+  const { rows } = await db.derived<{ analyzer: string | null; has_sections: boolean }>(
+    `SELECT analyzer, EXISTS (SELECT 1 FROM sections WHERE brain_id = $1) AS has_sections
+     FROM index_state WHERE brain_id = $1`,
+    [db.brainId],
+  );
+  const row = rows[0];
+  if (!row) throw new RangeError(`no such brain: ${db.brainId}`);
+  const stored = row.analyzer ? storage.analyzerFromJson(row.analyzer) : undefined;
+  return stored && row.has_sections ? stored : requested;
+}
+
 /**
  * Opens one brain's stores over `pool`: applies any pending migrations (once
  * per pool), creates the brain's rows if missing, and settles the term
@@ -63,11 +86,15 @@ export async function createPgStores(options: PgStoresOptions): Promise<PgStores
   const { pool, brainId } = options;
   const clock = options.now ?? storage.unixNow;
   const requested = keyword.resolveAnalyzerOptions(options.analyzer);
-  await ensureMigrated(pool);
-  await ensureBrain(pool, brainId, clock());
-
   const db = new BrainDb(pool, brainId);
-  const analyzer = await settleAnalyzer(db, requested);
+  let analyzer: keyword.AnalyzerOptions;
+  if (options.readOnly) {
+    analyzer = await readAnalyzer(db, requested);
+  } else {
+    await ensureMigrated(pool);
+    await ensureBrain(pool, brainId, clock());
+    analyzer = await settleAnalyzer(db, requested);
+  }
   const terms = new PgTermIndex(db, analyzer);
 
   return {
@@ -93,7 +120,8 @@ export async function createPgStores(options: PgStoresOptions): Promise<PgStores
         }
         await query(
           q,
-          `UPDATE index_state SET fold_cursor = 0, half_lives = NULL WHERE brain_id = $1`,
+          `UPDATE index_state SET fold_cursor = 0, half_lives = NULL, burst_window = NULL
+           WHERE brain_id = $1`,
           [brainId],
         );
         await terms.setAnalyzer(q, next);

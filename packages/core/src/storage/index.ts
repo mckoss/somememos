@@ -9,6 +9,7 @@ export type {
   AppendOptions,
   AppendResult,
   Awaitable,
+  BurstState,
   ChangeFilter,
   ChangeInput,
   ChangeRecord,
@@ -37,7 +38,12 @@ export type {
   StoresOptions,
   TermIndex,
 } from './types.js';
-export { FoldConflictError, HalfLifeMismatchError, MigrationRequiredError } from './types.js';
+export {
+  BurstWindowMismatchError,
+  FoldConflictError,
+  HalfLifeMismatchError,
+  MigrationRequiredError,
+} from './types.js';
 export {
   DEFAULT_CHANGE_OPS,
   MAX_ID_LENGTH,
@@ -51,7 +57,11 @@ export {
   changeOp,
   compareAnalyzers,
   compareStrings,
+  danglingCounts,
+  foldBurstWindow,
   halfLivesToJson,
+  linkDisplay,
+  pickDanglingDisplay,
   newEvent,
   newId,
   newRename,
@@ -70,6 +80,15 @@ export {
   rebuildScores,
 } from './fold.js';
 export {
+  DEFAULT_BURST_WINDOW,
+  type BurstEvent,
+  assertValidBurstWindow,
+  burstDecision,
+  burstKey,
+  countBursts,
+} from './burst.js';
+export { RenameIndex, type RenameLike } from './renames.js';
+export {
   MemoryBrainData,
   type MemoryStores,
   type MemoryStoresOptions,
@@ -80,6 +99,7 @@ export {
   CONFIG_VERSION,
   ConfigError,
   defaultBrainConfig,
+  foldOptions,
   parseBrainConfig,
   serializeBrainConfig,
 } from './config.js';

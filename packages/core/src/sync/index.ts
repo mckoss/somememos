@@ -16,9 +16,11 @@ export {
   type SyncNote,
   type SyncRequest,
   type SyncResponse,
+  conflictCopyPath,
   conflictPath,
   isSyncablePath,
   syncPathProblem,
+  truncateChangeMessage,
 } from './protocol.js';
 export {
   EMPTY_SYNC_STATE,

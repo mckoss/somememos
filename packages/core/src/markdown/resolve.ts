@@ -38,6 +38,16 @@ export function normalizeDanglingKey(target: string): string {
   return fold(stripMd(target.trim()).trim()).replace(/\s+/g, ' ');
 }
 
+/**
+ * How a dangling link's target is shown, and what a note created from it is
+ * called: the text as written, trimmed, without a `.md` suffix, Unicode NFC,
+ * inner whitespace runs collapsed, but with its capitals kept. Its
+ * `normalizeDanglingKey` is the link's key.
+ */
+export function danglingDisplay(target: string): string {
+  return stripMd(target.trim()).trim().normalize('NFC').replace(/\s+/g, ' ');
+}
+
 /** The item a resolution refers to: the resolved path, or the dangling key. */
 export function resolutionItem(resolution: LinkResolution): string {
   return resolution.kind === 'resolved' ? resolution.path : resolution.key;

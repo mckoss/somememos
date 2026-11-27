@@ -3,6 +3,8 @@
 // as counting a burst of saves as one edit are applied when the log is folded,
 // so they stay tunable).
 
+import { assertValidBurstWindow, burstKey, countBursts } from '../storage/burst.js';
+import { RenameIndex } from '../storage/renames.js';
 import type { EventKind } from '../timescore/kinds.js';
 
 /** An event. `storage.StoredEvent` and `storage.EventInput` fit. */
@@ -48,43 +50,55 @@ export function timeOrdered<E extends ReplayEntry>(entries: readonly E[]): E[] {
 
 /** The burst rule. `window = 0` turns it off. */
 export interface BurstOptions {
-  /** Seconds. An event of the same kind on the same item less than this after the burst's first kept event is dropped. */
+  /**
+   * Seconds. Of one item's events of one kind, an event less than this after
+   * the last counted one is dropped (`storage.countBursts`).
+   */
   readonly window: number;
-  /** Kinds the rule applies to. Default: every kind. */
+  /** Kinds the rule applies to. Default: every kind (as the live fold does). */
   readonly kinds?: readonly EventKind[];
 }
 
 /**
- * Collapses bursts: of the events of one kind on one item, keep an event
- * when it is at least `window` seconds after the last kept one; drop it
- * otherwise. So a burst is counted once, at its first event, and a long
- * session of saves counts once per `window`. Causal (each decision uses only
- * earlier events), so replaying up to any time sees the same kept events.
- * Items are matched by name as logged; renames pass through unchanged.
- * Expects time-ordered input (`timeOrdered`).
+ * Collapses bursts with the same rule, and the same code, as the live fold
+ * (`storage.countBursts`, `BrainConfig.burstWindow`): of the events of one
+ * kind on one item, keep an event when it is at least `window` seconds after
+ * the last kept one; drop it otherwise. So a burst is counted once, at its
+ * first event, and a long session of saves counts once per `window`. The
+ * item is the one an event lands on after every rename record in `entries`
+ * (`storage.RenameIndex`), so a renamed note's bursts continue across the
+ * rename, exactly as a rebuild of the live scores counts them. Each decision
+ * uses only earlier events of the group; which events form a group can
+ * depend on a later rename only when that rename merges two items that both
+ * had events of one kind (rare). Renames pass through unchanged. Accepts
+ * entries in any order and returns the kept ones in input order.
  */
 export function collapseBursts<E extends ReplayEntry>(
   entries: readonly E[],
   options: BurstOptions,
 ): E[] {
   const { window } = options;
-  if (!Number.isFinite(window) || window < 0) {
-    throw new RangeError(`burst window must be a finite number >= 0, not ${window}`);
-  }
+  assertValidBurstWindow(window);
   if (window === 0) return [...entries];
   const kinds = options.kinds ? new Set<string>(options.kinds) : null;
-  const lastKept = new Map<string, number>();
-  const out: E[] = [];
-  for (const entry of entries) {
-    if (isRename(entry) || (kinds && !kinds.has(entry.kind))) {
-      out.push(entry);
-      continue;
-    }
-    const key = `${entry.kind}\0${entry.item}`;
-    const last = lastKept.get(key);
-    if (last !== undefined && entry.time - last < window) continue;
-    lastKept.set(key, entry.time);
-    out.push(entry);
-  }
-  return out;
+  const known = new RenameIndex();
+  entries.forEach((e, i) => {
+    if (isRename(e)) known.add({ item: e.item, to: e.to, time: e.time, seq: e.seq ?? i });
+  });
+  const subject: number[] = [];
+  entries.forEach((e, i) => {
+    if (!isRename(e) && (!kinds || kinds.has(e.kind))) subject.push(i);
+  });
+  const { counted } = countBursts(
+    subject.map((i) => {
+      const e = entries[i] as ReplayEvent;
+      return { key: burstKey(e.kind, known.resolve(e.item, e.time)), time: e.time };
+    }),
+    window,
+  );
+  const dropped = new Set<number>();
+  subject.forEach((i, j) => {
+    if (!counted[j]) dropped.add(i);
+  });
+  return entries.filter((_, i) => !dropped.has(i));
 }

@@ -34,6 +34,7 @@ export {
 } from './paths.js';
 export {
   createLinkResolver,
+  danglingDisplay,
   normalizeDanglingKey,
   resolutionItem,
   resolveLink,

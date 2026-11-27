@@ -171,7 +171,20 @@ export type ScoreOp =
    * Every score of `from` is combined into `to`, and `from` is left with none.
    * A no-op when `from` has no scores or `from === to`.
    */
-  | { readonly type: 'move'; readonly from: string; readonly to: string };
+  | { readonly type: 'move'; readonly from: string; readonly to: string }
+  /**
+   * The burst rule's state (./burst.ts): the last counted time of
+   * `(item, kind)` becomes the later of its stored value and `time`. A `move`
+   * moves this state with the scores (keeping the later time where both
+   * items have one).
+   */
+  | {
+      readonly type: 'last';
+      readonly item: string;
+      readonly kind: EventKind;
+      /** Unix seconds, an integer. */
+      readonly time: number;
+    };
 
 /** A batch of folded contributions, applied atomically with the cursor. */
 export interface FoldBatch {
@@ -181,6 +194,11 @@ export interface FoldBatch {
   readonly toCursor: number;
   /** The half-lives the batch was computed with. Must equal the recorded ones, if any. */
   readonly halfLives: HalfLives;
+  /**
+   * The burst window the batch was computed with (./burst.ts), in seconds.
+   * Absent or 0: off. Must equal the recorded one when scores are stored.
+   */
+  readonly burstWindow?: number;
   readonly ops: readonly ScoreOp[];
 }
 
@@ -189,7 +207,16 @@ export interface FoldState {
   readonly cursor: number;
   /** The half-lives the stored scores were folded with; null before the first fold. */
   readonly halfLives: HalfLives | null;
+  /**
+   * The burst window the stored scores were folded with, in seconds. Present
+   * only when the scores were folded with a window > 0; absent means 0 (off),
+   * or nothing folded yet.
+   */
+  readonly burstWindow?: number;
 }
+
+/** The burst rule's state of some items: item → kind → last counted time. */
+export type BurstState = Map<string, Partial<Record<EventKind, number>>>;
 
 /**
  * Derived TimeScore scores: one log score per (item, kind, half-life),
@@ -211,7 +238,12 @@ export interface ScoreStore {
    * invalid op (rolling back any ops already applied).
    */
   applyFold(batch: FoldBatch): Awaitable<void>;
-  /** Deletes every score, sets the cursor to 0 and forgets the half-lives. */
+  /**
+   * The burst rule's state (the `'last'` ops applied so far) of the given
+   * items; items without any are left out. Derived data, cleared with the scores.
+   */
+  burstState(items: readonly string[]): Awaitable<BurstState>;
+  /** Deletes every score and the burst state, sets the cursor to 0 and forgets the half-lives and burst window. */
   clear(): Awaitable<void>;
 }
 
@@ -240,10 +272,24 @@ export interface NoteLink {
   readonly target: string;
   /** True when `target` is a dangling key. */
   readonly dangling: boolean;
+  /**
+   * For a dangling link: the link text as written (its first occurrence in
+   * the note, trimmed, without `.md`), so a note created from it can keep the
+   * writer's capitals. Absent for resolved links, and when not recorded.
+   */
+  readonly display?: string;
 }
 
 export interface DanglingCount {
+  /** The dangling key (normalized, lower-cased): the scored item. */
   readonly key: string;
+  /**
+   * The link text as written, to show and to name a new note with. Of the
+   * forms linking notes use, the one most notes use; ties go to the form
+   * that sorts first (`compareStrings`, so capitals before lower case). The
+   * key itself when no form was recorded. See `pickDanglingDisplay`.
+   */
+  readonly display: string;
   /** How many notes link to it. */
   readonly count: number;
 }
@@ -402,6 +448,20 @@ export class HalfLifeMismatchError extends Error {
   constructor(stored: HalfLives, requested: HalfLives) {
     super(
       `scores were folded with half-lives ${JSON.stringify(stored)}, not ${JSON.stringify(requested)}; rebuild them from the event log`,
+    );
+    this.stored = stored;
+    this.requested = requested;
+  }
+}
+
+/** Scores were folded with another burst window; they must be rebuilt from the log. */
+export class BurstWindowMismatchError extends Error {
+  override name = 'BurstWindowMismatchError';
+  readonly stored: number;
+  readonly requested: number;
+  constructor(stored: number, requested: number) {
+    super(
+      `scores were folded with burst window ${stored}, not ${requested}; rebuild them from the event log`,
     );
     this.stored = stored;
     this.requested = requested;

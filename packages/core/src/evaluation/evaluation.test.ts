@@ -110,6 +110,18 @@ describe('log helpers', () => {
     expect(() => collapseBursts(log, { window: -1 })).toThrow(RangeError);
   });
 
+  it('collapses bursts across a rename, exactly as the live fold does', () => {
+    const log: ReplayEntry[] = timeOrdered([
+      ev('a', 'edit', 0),
+      { kind: 'rename', item: 'a', to: 'b', time: 10 },
+      ev('b', 'edit', 30), // the same note, 30 s after its last counted edit: dropped
+      ev('b', 'edit', 70), // 70 s after: kept
+      ev('a', 'edit', 40), // a new note at the old path: its own history
+    ]);
+    const kept = collapseBursts(log, { window: 60 }).map((e) => `${e.kind}:${e.item}@${e.time}`);
+    expect(kept).toEqual(['edit:a@0', 'rename:a@10', 'edit:a@40', 'edit:b@70']);
+  });
+
   it('seededRandom repeats for a seed', () => {
     const a = seededRandom(42);
     const b = seededRandom(42);
