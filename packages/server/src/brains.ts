@@ -78,13 +78,13 @@ export type BrainErrorCode =
 
 /** A brain-level failure, with the HTTP status it maps to. Never names a note. */
 export class BrainError extends Error {
+  readonly code: BrainErrorCode;
+  readonly status: number;
   override name = 'BrainError';
-  constructor(
-    readonly code: BrainErrorCode,
-    message: string,
-    readonly status: number,
-  ) {
+  constructor(code: BrainErrorCode, message: string, status: number) {
     super(message);
+    this.code = code;
+    this.status = status;
   }
 }
 
@@ -205,10 +205,12 @@ export function parseStoredConfig(value: unknown): StoredConfig {
 }
 
 export class BrainService {
+  private readonly options: BrainServiceOptions;
   readonly tx: TransactionPool;
   private readonly now: () => number;
 
-  constructor(private readonly options: BrainServiceOptions) {
+  constructor(options: BrainServiceOptions) {
+    this.options = options;
     this.tx = new TransactionPool(options.pool);
     this.now = options.now ?? storage.unixNow;
   }

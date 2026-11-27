@@ -1,6 +1,6 @@
 {
   "name": "@somememos/sqlite-store",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "description": "somememos storage over SQLite, behind a small synchronous driver interface (node:sqlite, or SQLite WebAssembly in a browser worker).",
   "license": "Apache-2.0",
@@ -15,6 +15,9 @@
       "source": "./src/node/index.ts",
       "types": "./dist/node/index.d.ts",
       "default": "./dist/node/index.js"
+    },
+    "./testing/node": {
+      "source": "./src/node/child.testing.ts"
     }
   },
   "files": [

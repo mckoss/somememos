@@ -199,6 +199,13 @@ export interface FoldBatch {
    * Absent or 0: off. Must equal the recorded one when scores are stored.
    */
   readonly burstWindow?: number;
+  /**
+   * Replace instead of add: in the same transaction, after checking the
+   * cursor, delete every score and all burst state, then apply `ops` and
+   * record this batch's half-lives and burst window (whatever was recorded
+   * before). How a canonical refold commits atomically.
+   */
+  readonly reset?: boolean;
   readonly ops: readonly ScoreOp[];
 }
 

@@ -110,7 +110,10 @@ async function applyBurstOps(
 }
 
 export class PgScoreStore implements storage.ScoreStore {
-  constructor(private readonly db: BrainDb) {}
+  private readonly db: BrainDb;
+  constructor(db: BrainDb) {
+    this.db = db;
+  }
 
   async foldState(): Promise<storage.FoldState> {
     const { rows } = await this.db.derived<IndexStateRow>(
@@ -207,13 +210,14 @@ export class PgScoreStore implements storage.ScoreStore {
       }
       const stored =
         state.half_lives === null ? null : (JSON.parse(state.half_lives) as storage.HalfLives);
-      if (stored && !storage.sameHalfLives(stored, batch.halfLives)) {
+      const reset = batch.reset === true;
+      if (!reset && stored && !storage.sameHalfLives(stored, batch.halfLives)) {
         throw new storage.HalfLifeMismatchError(stored, batch.halfLives);
       }
       const window = batch.burstWindow ?? 0;
       storage.assertValidBurstWindow(window);
       const storedWindow = state.burst_window ?? 0;
-      if (stored && storedWindow !== window) {
+      if (!reset && stored && storedWindow !== window) {
         throw new storage.BurstWindowMismatchError(storedWindow, window);
       }
       // Every check that can throw runs before the first write.
@@ -227,6 +231,12 @@ export class PgScoreStore implements storage.ScoreStore {
           touched.add(op.from).add(op.to);
           burstTouched.add(op.from).add(op.to);
         }
+      }
+
+      // A canonical refold replaces everything, in this same transaction.
+      if (reset) {
+        await query(q, `DELETE FROM scores WHERE brain_id = $1`, [brainId]);
+        await query(q, `DELETE FROM burst_last WHERE brain_id = $1`, [brainId]);
       }
 
       if (touched.size > 0) {
@@ -347,7 +357,10 @@ function toNote(row: NoteRow): storage.NoteRecord {
 const NOTE_COLUMNS = 'path, title, content_hash, mtime, role, date';
 
 export class PgNoteStore implements storage.NoteStore {
-  constructor(private readonly db: BrainDb) {}
+  private readonly db: BrainDb;
+  constructor(db: BrainDb) {
+    this.db = db;
+  }
 
   async upsertNote(note: storage.NoteRecord): Promise<void> {
     storage.assertValidNote(note);
@@ -525,11 +538,13 @@ WITH d AS (DELETE FROM sections WHERE brain_id = $1 AND path = $2 RETURNING id),
 SELECT count(*) AS n FROM d`;
 
 export class PgTermIndex implements storage.TermIndex {
-  constructor(
-    private readonly db: BrainDb,
-    /** The analyzer recorded for the brain; changed only by `setAnalyzer` (on reset). */
-    private current: keyword.AnalyzerOptions,
-  ) {}
+  private readonly db: BrainDb;
+  /** The analyzer recorded for the brain; changed only by `setAnalyzer` (on reset). */
+  private current: keyword.AnalyzerOptions;
+  constructor(db: BrainDb, current: keyword.AnalyzerOptions) {
+    this.db = db;
+    this.current = current;
+  }
 
   get analyzer(): keyword.AnalyzerOptions {
     return this.current;

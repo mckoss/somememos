@@ -100,10 +100,12 @@ async function existingIds(
 }
 
 export class PgEventLog implements storage.EventLog {
-  constructor(
-    private readonly db: BrainDb,
-    private readonly clock: () => number,
-  ) {}
+  private readonly db: BrainDb;
+  private readonly clock: () => number;
+  constructor(db: BrainDb, clock: () => number) {
+    this.db = db;
+    this.clock = clock;
+  }
 
   async append(
     entries: readonly storage.LogInput[],
@@ -303,10 +305,12 @@ export class PgEventLog implements storage.EventLog {
 
 /** A per-brain key-value table as a `MetaStore`: durable (`brain_meta`) or derived (`index_meta`). */
 export class PgMeta implements storage.MetaStore {
-  constructor(
-    private readonly db: BrainDb,
-    private readonly table: 'brain_meta' | 'index_meta',
-  ) {}
+  private readonly db: BrainDb;
+  private readonly table: 'brain_meta' | 'index_meta';
+  constructor(db: BrainDb, table: 'brain_meta' | 'index_meta') {
+    this.db = db;
+    this.table = table;
+  }
 
   private run<R extends Record<string, unknown>>(text: string, values: unknown[]) {
     return this.table === 'brain_meta'

@@ -139,10 +139,12 @@ function snapshotIndex(s: MemoryIndexState): MemoryIndexState {
 // Event log
 
 class MemoryEventLog implements EventLog {
-  constructor(
-    private readonly data: MemoryBrainData,
-    private readonly clock: () => number,
-  ) {}
+  private readonly data: MemoryBrainData;
+  private readonly clock: () => number;
+  constructor(data: MemoryBrainData, clock: () => number) {
+    this.data = data;
+    this.clock = clock;
+  }
 
   append(entries: readonly LogInput[], options?: AppendOptions): AppendResult {
     const now = options?.now ?? this.clock();
@@ -244,7 +246,10 @@ class MemoryEventLog implements EventLog {
 // Meta
 
 class MemoryMeta implements MetaStore {
-  constructor(private readonly map: () => Map<string, string>) {}
+  private readonly map: () => Map<string, string>;
+  constructor(map: () => Map<string, string>) {
+    this.map = map;
+  }
   get(key: string): string | undefined {
     return this.map().get(key);
   }
@@ -279,7 +284,10 @@ function toItemScores(inner: ReadonlyMap<string, number>): ItemScores<string> {
 }
 
 class MemoryScoreStore implements ScoreStore {
-  constructor(private readonly state: () => MemoryIndexState) {}
+  private readonly state: () => MemoryIndexState;
+  constructor(state: () => MemoryIndexState) {
+    this.state = state;
+  }
 
   foldState(): FoldState {
     const s = this.state();
@@ -316,18 +324,19 @@ class MemoryScoreStore implements ScoreStore {
     const s = this.state();
     if (s.cursor !== batch.fromCursor) throw new FoldConflictError(batch.fromCursor, s.cursor);
     assertValidHalfLives(batch.halfLives);
-    if (s.halfLives && !sameHalfLives(s.halfLives, batch.halfLives)) {
+    const reset = batch.reset === true;
+    if (!reset && s.halfLives && !sameHalfLives(s.halfLives, batch.halfLives)) {
       throw new HalfLifeMismatchError(s.halfLives, batch.halfLives);
     }
     const window = batch.burstWindow ?? 0;
     assertValidBurstWindow(window);
-    if (s.halfLives && s.burstWindow !== window) {
+    if (!reset && s.halfLives && s.burstWindow !== window) {
       throw new BurstWindowMismatchError(s.burstWindow, window);
     }
     if (!Number.isSafeInteger(batch.toCursor) || batch.toCursor < batch.fromCursor) {
       throw new RangeError(`toCursor must be an integer >= fromCursor, not ${batch.toCursor}`);
     }
-    const burst = new Map(s.burst);
+    const burst = reset ? new Map<string, ReadonlyMap<EventKind, number>>() : new Map(s.burst);
     const burstOwned = new Set<string>();
     const burstOf = (item: string): Map<EventKind, number> => {
       if (!burstOwned.has(item)) {
@@ -337,7 +346,7 @@ class MemoryScoreStore implements ScoreStore {
       return burst.get(item) as Map<EventKind, number>;
     };
     // Stage on a copy, so an invalid op part-way through changes nothing.
-    const staged = new Map(s.scores);
+    const staged = reset ? new Map<string, ReadonlyMap<string, number>>() : new Map(s.scores);
     const owned = new Set<string>();
     const mutable = (item: string): Map<string, number> => {
       if (!owned.has(item)) {
@@ -394,7 +403,10 @@ class MemoryScoreStore implements ScoreStore {
 // Notes and links
 
 class MemoryNoteStore implements NoteStore {
-  constructor(private readonly state: () => MemoryIndexState) {}
+  private readonly state: () => MemoryIndexState;
+  constructor(state: () => MemoryIndexState) {
+    this.state = state;
+  }
 
   upsertNote(note: NoteRecord): void {
     assertValidNote(note);
@@ -474,12 +486,14 @@ class MemoryNoteStore implements NoteStore {
 // Term index
 
 class MemoryTermIndex implements TermIndex {
+  private readonly state: () => MemoryIndexState;
   /** term → section id → posting; derived from `state().docs`. */
   private postingMap = new Map<string, Map<string, Posting>>();
   private totals = { title: 0, heading: 0, body: 0 };
   private sectionCount = 0;
 
-  constructor(private readonly state: () => MemoryIndexState) {
+  constructor(state: () => MemoryIndexState) {
+    this.state = state;
     this.rebuild();
   }
 

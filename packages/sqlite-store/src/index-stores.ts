@@ -56,7 +56,10 @@ function ordered(scores: timescore.ItemScores<string>): timescore.ItemScores<str
 }
 
 export class SqliteScoreStore implements storage.ScoreStore {
-  constructor(private readonly db: Db) {}
+  private readonly db: Db;
+  constructor(db: Db) {
+    this.db = db;
+  }
 
   foldState(): storage.FoldState {
     const cursor = Number(getMeta(this.db, META_FOLD_CURSOR) ?? 0);
@@ -124,13 +127,19 @@ export class SqliteScoreStore implements storage.ScoreStore {
       if (state.cursor !== batch.fromCursor) {
         throw new storage.FoldConflictError(batch.fromCursor, state.cursor);
       }
-      if (state.halfLives && !storage.sameHalfLives(state.halfLives, batch.halfLives)) {
+      const reset = batch.reset === true;
+      if (!reset && state.halfLives && !storage.sameHalfLives(state.halfLives, batch.halfLives)) {
         throw new storage.HalfLifeMismatchError(state.halfLives, batch.halfLives);
       }
       const window = batch.burstWindow ?? 0;
       storage.assertValidBurstWindow(window);
-      if (state.halfLives && storage.foldBurstWindow(state) !== window) {
+      if (!reset && state.halfLives && storage.foldBurstWindow(state) !== window) {
         throw new storage.BurstWindowMismatchError(storage.foldBurstWindow(state), window);
+      }
+      // A canonical refold replaces everything, in this same transaction.
+      if (reset) {
+        db.run(`DELETE FROM scores`);
+        db.run(`DELETE FROM burst_last`);
       }
       const putLast = db.prepare(
         `INSERT INTO burst_last (item, kind, time) VALUES (:item, :kind, :time)
@@ -216,7 +225,10 @@ function toNote(row: NoteRow): storage.NoteRecord {
 }
 
 export class SqliteNoteStore implements storage.NoteStore {
-  constructor(private readonly db: Db) {}
+  private readonly db: Db;
+  constructor(db: Db) {
+    this.db = db;
+  }
 
   upsertNote(note: storage.NoteRecord): void {
     storage.assertValidNote(note);
@@ -344,11 +356,13 @@ const SECTION_COLUMNS =
   'path, idx, title, heading, body, start_line, end_line, title_len, heading_len, body_len';
 
 export class SqliteTermIndex implements storage.TermIndex {
-  constructor(
-    private readonly db: Db,
-    /** The analyzer recorded in the file; changed only by `setAnalyzer` (on reset). */
-    private current: keyword.AnalyzerOptions,
-  ) {}
+  private readonly db: Db;
+  /** The analyzer recorded in the file; changed only by `setAnalyzer` (on reset). */
+  private current: keyword.AnalyzerOptions;
+  constructor(db: Db, current: keyword.AnalyzerOptions) {
+    this.db = db;
+    this.current = current;
+  }
 
   get analyzer(): keyword.AnalyzerOptions {
     return this.current;

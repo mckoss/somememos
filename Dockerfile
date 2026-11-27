@@ -1,13 +1,13 @@
 # The somememos server and web app, for Railway (docs/deploy.md) or any
-# container host. Node 22, git for the brains' repositories, the whole
+# container host. Node 26 (the LTS line), git for the brains' repositories, the whole
 # workspace built, then `node apps/web/build` (SvelteKit's adapter-node).
 
-FROM node:22-bookworm-slim AS build
+FROM node:26-bookworm-slim AS build
 WORKDIR /app
 COPY . .
 RUN npm ci && npm run build && npm prune --omit=dev
 
-FROM node:22-bookworm-slim
+FROM node:26-bookworm-slim
 RUN apt-get update \
   && apt-get install -y --no-install-recommends git ca-certificates \
   && rm -rf /var/lib/apt/lists/*

@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { storage } from '@somememos/core';
 import { expectScoresClose } from '@somememos/core/testing/storage';
 import { afterEach, beforeEach, expect, it } from 'vitest';
+import { sourceChildFlags } from './child.testing.js';
 import { openSqliteFiles } from './files.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -18,24 +19,6 @@ const storeUrl = pathToFileURL(join(here, 'index.ts')).href;
 
 const openBrainStores = (dir: string) =>
   openSqliteFiles({ eventsPath: join(dir, 'events.sqlite'), indexPath: join(dir, 'index.sqlite') });
-
-// Lets a plain `node` child load this package's TypeScript source: imports
-// written as `./x.js` resolve to `./x.ts`.
-const HOOKS = `
-import { registerHooks } from 'node:module';
-registerHooks({
-  resolve(specifier, context, next) {
-    try {
-      return next(specifier, context);
-    } catch (error) {
-      if (error?.code === 'ERR_MODULE_NOT_FOUND' && specifier.startsWith('.') && specifier.endsWith('.js')) {
-        return next(specifier.slice(0, -3) + '.ts', context);
-      }
-      throw error;
-    }
-  },
-});
-`;
 
 const WORKER = `
 const [brainDir, worker, rounds, perRound] = process.argv.slice(1);
@@ -56,11 +39,22 @@ for (let r = 0; r < Number(rounds); r++) {
     // Every worker also sends the same shared events, as sync retries would.
     batch.push({ id: 'shared-' + r + '-' + j, kind: 'read', item, time: now - j, client: 'w' + worker });
   }
+  // Renames that only a rule for same-second ties makes deterministic:
+  // one item renamed several times in one second (ids not in arrival order),
+  // a cycle within one second, and a chain over two seconds.
   if (worker === '0' && r % 5 === 4) {
     batch.push({ id: 'rename-' + r, kind: 'rename', item: 'some key', to: 'memos/key-' + r + '.md', time: now, client: 'w0' });
   }
+  if (worker === '1' && r % 7 === 3) {
+    batch.push({ id: 'cycle-' + r + '-b', kind: 'rename', item: 'memos/b.md', to: 'memos/c.md', time: now - 5, client: 'w1' });
+    batch.push({ id: 'cycle-' + r + '-a', kind: 'rename', item: 'memos/c.md', to: 'memos/b.md', time: now - 5, client: 'w1' });
+  }
+  if (worker === '2' && r % 6 === 2) {
+    batch.push({ id: 'chain-' + r + '-1', kind: 'rename', item: 'memos/a.md', to: 'memos/chain-' + r + '.md', time: now - 2, client: 'w2' });
+    batch.push({ id: 'chain-' + r + '-0', kind: 'rename', item: 'memos/chain-' + r + '.md', to: 'memos/a.md', time: now - 1, client: 'w2' });
+  }
   appended += (await stores.events.append(batch)).appended;
-  conflicts += (await storage.foldPending(stores.events, stores.scores, { batchSize: 7 })).conflicts;
+  conflicts += (await storage.foldPending(stores.events, stores.scores, { batchSize: 2 + Number(worker) })).conflicts;
 }
 stores.close();
 process.stdout.write(JSON.stringify({ appended, conflicts }));
@@ -72,17 +66,7 @@ function runWorker(
   return new Promise((resolve, reject) => {
     const child = spawn(
       process.execPath,
-      [
-        '--conditions=source',
-        '--experimental-transform-types',
-        '--disable-warning=ExperimentalWarning',
-        `--import=data:text/javascript,${encodeURIComponent(HOOKS)}`,
-        '--input-type=module',
-        '-e',
-        WORKER,
-        '--',
-        ...args,
-      ],
+      [...sourceChildFlags(), '--input-type=module', '-e', WORKER, '--', ...args],
       { cwd: packageRoot, stdio: ['ignore', 'pipe', 'pipe'] },
     );
     let stdout = '';
@@ -118,7 +102,9 @@ it(
 
     const own = workers * rounds * perRound;
     const shared = rounds * perRound;
-    const renames = rounds / 5;
+    const count = (every: number, at: number) =>
+      Array.from({ length: rounds }, (_, r) => r).filter((r) => r % every === at).length;
+    const renames = count(5, 4) + 2 * count(7, 3) + 2 * count(6, 2);
     const appended = results.reduce(
       (n, r) => n + (JSON.parse(r.stdout) as { appended: number }).appended,
       0,
@@ -143,7 +129,7 @@ it(
         log.map(({ seq: _seq, ...input }) => input as storage.LogInput),
         { now: Number.MAX_SAFE_INTEGER },
       );
-      await storage.foldPending(memory.events, memory.scores);
+      await storage.rebuildScores(memory.events, memory.scores);
       expectScoresClose(folded, await memory.scores.getAll());
     } finally {
       stores.close();

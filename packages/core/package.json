@@ -1,6 +1,6 @@
 {
   "name": "@somememos/core",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "private": true,
   "description": "Isomorphic somememos logic: TimeScore, chunking, links, indexing, ranking, the engine, evaluation.",
   "license": "Apache-2.0",

@@ -123,14 +123,20 @@ export interface Snapshot {
  * --batch` and a cache of blob texts. Close it when done.
  */
 export class GitSnapshots {
+  private readonly brainDir: string;
+  private readonly classifier: markdown.RoleClassifier;
+  private readonly analyzer: keyword.AnalyzerOptions;
   private readonly blobs: BlobReader;
   private readonly texts = new Map<string, string | null>();
 
   constructor(
-    private readonly brainDir: string,
-    private readonly classifier: markdown.RoleClassifier,
-    private readonly analyzer: keyword.AnalyzerOptions,
+    brainDir: string,
+    classifier: markdown.RoleClassifier,
+    analyzer: keyword.AnalyzerOptions,
   ) {
+    this.brainDir = brainDir;
+    this.classifier = classifier;
+    this.analyzer = analyzer;
     this.blobs = new BlobReader(brainDir, MAX_FILE_BYTES);
   }
 

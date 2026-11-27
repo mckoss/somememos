@@ -8,6 +8,7 @@ import { readdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { markdown, storage } from '@somememos/core';
+import { sourceChildFlags } from '@somememos/sqlite-store/testing/node';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished } from 'vitest';
 import { tempDir, writeNote, writeTestConfig } from '../brain/testing.js';
 import { openBrainStores } from '../store/index.js';
@@ -15,24 +16,6 @@ import { type IndexSummary, runIndexPass } from './pass.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const cliUrl = pathToFileURL(join(here, '..', 'index.ts')).href;
-
-// Lets a plain `node` child load this package's TypeScript source: imports
-// written as `./x.js` resolve to `./x.ts`.
-const HOOKS = `
-import { registerHooks } from 'node:module';
-registerHooks({
-  resolve(specifier, context, next) {
-    try {
-      return next(specifier, context);
-    } catch (error) {
-      if (error?.code === 'ERR_MODULE_NOT_FOUND' && specifier.startsWith('.') && specifier.endsWith('.js')) {
-        return next(specifier.slice(0, -3) + '.ts', context);
-      }
-      throw error;
-    }
-  },
-});
-`;
 
 // With a barrier path, the child loads the CLI, signals it is ready, and
 // waits for the barrier file, so that several children start at once.
@@ -57,17 +40,7 @@ export function runCli(
   return new Promise((resolve, reject) => {
     const child = spawn(
       process.execPath,
-      [
-        '--conditions=source',
-        '--experimental-transform-types',
-        '--disable-warning=ExperimentalWarning',
-        `--import=data:text/javascript,${encodeURIComponent(HOOKS)}`,
-        '--input-type=module',
-        '-e',
-        WORKER,
-        '--',
-        ...args,
-      ],
+      [...sourceChildFlags(), '--input-type=module', '-e', WORKER, '--', ...args],
       { cwd, stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, SOMEMEMOS_BRAIN: '' } },
     );
     let stdout = '';

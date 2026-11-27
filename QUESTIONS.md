@@ -54,3 +54,8 @@ Collected while Mike was away overnight (from 2026-11-27). None of these blocked
 
 17. **The sync test that failed once on CI.** Its exact cause was never reproduced. A real bug with the same symptom was fixed (the note page could stay on "No note here yet"), and the tests now explain themselves when they fail. Treat it as probably fixed until CI has stayed green for a while.
 
+18. **The CLI on Node 22.** Everything needs Node 26 except the CLI, which still supports Node 22.13 or later so agents can use it where Node 22 is what's installed.
+    - *Meanwhile:* a CI job on Node 22 proves it. Node 22 leaves maintenance in April 2027; drop that job and require Node 26 for the CLI then, or sooner if you prefer one version everywhere.
+
+19. **Three bespoke pieces being replaced by packages,** as you asked: zip (fflate), server request validation (a schema library) and the browser test shim (Vitest's browser mode). In progress.
+

@@ -7,16 +7,24 @@ import { engine as coreEngine } from '@somememos/core';
 
 /** A refused request: its status, a stable code and a message that names no note. */
 export class HttpError extends Error {
+  readonly status: number;
+  readonly code: string;
+  readonly headers: Readonly<Record<string, string>>;
+  /** More fields for the error body (e.g. the current config of a refused config change). */
+  readonly extra: Readonly<Record<string, unknown>>;
   override name = 'HttpError';
   constructor(
-    readonly status: number,
-    readonly code: string,
+    status: number,
+    code: string,
     message: string,
-    readonly headers: Readonly<Record<string, string>> = {},
-    /** More fields for the error body (e.g. the current config of a refused config change). */
-    readonly extra: Readonly<Record<string, unknown>> = {},
+    headers: Readonly<Record<string, string>> = {},
+    extra: Readonly<Record<string, unknown>> = {},
   ) {
     super(message);
+    this.status = status;
+    this.code = code;
+    this.headers = headers;
+    this.extra = extra;
   }
 }
 

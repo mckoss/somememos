@@ -192,7 +192,7 @@ Implemented in `packages/core/src/storage` (interfaces, folding, an in-memory re
 - **Scores are combined in application code**, not with the SQL statement shown below. SQLite and Postgres would each round that statement slightly differently; doing it in core makes every store agree exactly. Scores rebuilt from the log agree with incrementally folded ones to within rounding in the last digits.
 - **Renames apply by time.** An event dated at or before a rename counts toward the new name, following chains of renames. An event dated after it stays with the old name. So a late-arriving event from before the rename follows the note, while a new note that later reuses the old path starts fresh.
 - **Ties are part of the rule** (settled 2026-11-27, after a property test found arrival order leaking into scores). Renames dated the same second are simultaneous: a chain only continues with a rename dated strictly later, so `a→b` and `b→c` in one second move `a`'s history to `b` and `b`'s to `c`, and `a→b` with `b→a` swaps them. Of several renames of one item in one second, the one with the smallest id applies. An event at exactly a rename's second counts toward the new name. Nothing depends on a copy's own arrival sequence, so every copy holding the same entries computes the same scores. An incremental fold that receives same-second renames that interact in another order than this rule refolds from the log.
-- Folding is safe when several processes run at once: a fold that loses the race is recomputed, never double-counted.
+- Folding is safe when several processes run at once: a fold that loses the race is recomputed, never double-counted. Every committed state is the canonical fold of the log up to its cursor, so once every process has folded to the end the scores equal a rebuild. A refold (after a late rename or event, or a changed half-life or burst window) replaces the scores in one atomic batch checked against the cursor, never in steps another process could interleave with.
 - Every implementation must pass one shared conformance test suite, which the Postgres implementation will also run.
 
 ### One engine for every host
@@ -637,7 +637,8 @@ Decided 2026-11-27: a brain has a `blog/` folder of dated posts that its owner c
 
 Decided by Mike on 2026-11-26:
 
-- **TypeScript everywhere.** Node 22+ LTS, native ESM.
+- **TypeScript everywhere,** native ESM.
+- **Node 26 LTS** (decided 2026-11-27) for development, CI, the server and the web app, pinned in `.nvmrc`. The CLI and the packages it bundles (core and the SQLite store) also support Node 22.13 or later, because agents run the CLI in environments that may still ship Node 22; a separate CI job on Node 22 runs their unit tests and the one-file bundle. All TypeScript uses only erasable syntax (`erasableSyntaxOnly`), so Node can run sources by stripping types alone.
 - **SvelteKit for the server and the PWA client**, as one app. Server routes provide the sync API and, later, the remote MCP endpoint and accounts. The same app serves the offline-first PWA.
 - **A Node-based CLI**, the `somememos` command. It is how agents use a brain (section 6). From milestone 5 it also runs the local stdio MCP server (`somememos mcp`).
 

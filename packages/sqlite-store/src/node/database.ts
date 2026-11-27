@@ -69,8 +69,9 @@ let sqliteModule: SqliteModule | undefined;
 
 /**
  * Load `node:sqlite` without printing Node's "SQLite is an experimental
- * feature" warning (printed on Node 22). Only that one warning is filtered,
- * only while the module loads.
+ * feature" warning (printed on Node 22; Node 26 prints none, so there this
+ * changes nothing). Only that one warning is filtered, only while the module
+ * loads.
  */
 export function loadSqlite(): SqliteModule {
   if (sqliteModule) return sqliteModule;
