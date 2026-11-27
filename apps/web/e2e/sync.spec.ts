@@ -2,7 +2,7 @@
 // with a real Postgres (playwright.sync.config.ts, e2e/sync-setup.ts).
 // Invented content only: the brain comes from `generateBrain`.
 
-import { expect, test, type Page } from '@playwright/test';
+import type { Page } from '@playwright/test';
 import { typeAtEnd } from './fixtures.ts';
 import {
   TEST_TOKEN,
@@ -20,6 +20,8 @@ import {
   twoDevices,
   uniqueBrainId,
   type SyncViewLike,
+  expect,
+  test,
 } from './sync-fixtures.ts';
 import { OTHER_TOKEN, freePort, startServer } from './sync-server.ts';
 import { importBrain } from './fixtures.ts';
@@ -34,6 +36,9 @@ interface NoteView {
 
 const read = (page: Page, path: string) =>
   engineCall<NoteView>(page, 'readNote', path, { record: false });
+/** The note page shows this note (its title in the header). */
+const expectNote = (page: Page, title: string) =>
+  expect(page.locator('.note-head h1')).toHaveText(title);
 const titles = (page: Page) =>
   engineCall<{ path: string }[]>(page, 'noteTitles').then((t) => t.map((n) => n.path));
 
@@ -216,7 +221,19 @@ test('a blog post says "waiting to sync" until the server has it', async ({ page
   await connectViaUi(page, { brain: { create: brainId }, kind: 'create-upload' });
   await expectSynced(page);
   await clientGo(page, `/note/${post}`);
+  await expectNote(page, 'A small post');
   await expect(page.getByTestId('publish-badge')).toHaveText('Draft');
+
+  // A second post, written while connected and opened at once, while its
+  // automatic sync is still to come.
+  const second = 'blog/2026/2026-11-21-another-post.md';
+  await engineCall(page, 'saveNote', second, '# Another post\n\nMore invented words.\n', {});
+  await clientGo(page, `/note/${second}`);
+  await expectNote(page, 'Another post');
+  await expect(page.getByTestId('publish-badge')).toHaveText('Draft');
+  await expectSynced(page);
+  await clientGo(page, `/note/${post}`);
+  await expectNote(page, 'A small post');
 
   await page.context().setOffline(true);
   await page.getByRole('button', { name: /Publish…/ }).click();
@@ -356,4 +373,36 @@ test('the sync view reports the first download in pages', async ({ browser, page
   expect(view.lastRun?.rounds ?? 0).toBeGreaterThan(1);
   expect(baseURL()).toContain('127.0.0.1');
   await b.context.close();
+});
+
+test('a device with notes of its own joins a brain only after agreeing to combine them', async ({
+  browser,
+  page,
+}, info) => {
+  test.skip(info.project.name !== 'desktop', 'one viewport is enough');
+  const brainId = uniqueBrainId(info, 'merge');
+  await importBrain(page);
+  await connectViaUi(page, { brain: { create: brainId }, kind: 'create-upload' });
+  await expectSynced(page);
+  const before = (await serverStatus(brainId)).notes.total;
+
+  const c = await newDevice(browser, info);
+  await c.page.goto('/more');
+  await c.page.waitForFunction(() => 'somememos' in globalThis);
+  await engineCall(c.page, 'saveNote', 'memos/an-idea.md', '# An idea\n\nOn a third device.\n', {});
+  await connectViaUi(c.page, {
+    brain: { existing: brainId },
+    kind: 'merge',
+    before: async (step) => {
+      if (step !== 'plan') return;
+      const plan = c.page.getByTestId('sync-plan');
+      await expect(plan).toContainText('Combine this device’s 1 note');
+      await expect(plan).toContainText('kept twice');
+      await expect(plan.getByRole('button', { name: 'Combine and sync' })).toBeVisible();
+    },
+  });
+  await expectSynced(c.page);
+  expect((await serverStatus(brainId)).notes.total).toBe(before + 1);
+  expect((await titles(c.page)).length).toBe(before + 1);
+  await c.context.close();
 });

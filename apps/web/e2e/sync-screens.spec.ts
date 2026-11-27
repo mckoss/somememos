@@ -1,11 +1,15 @@
 // Screenshots of sync for review (not compared against a baseline): the
 // settings, each connect flow, the header indicator's states and the
 // conflict list, at a phone and a desktop size. They go to
-// $SYNC_SCREENSHOT_DIR (default: under node_modules/.cache, which git ignores).
+// $SYNC_SCREENSHOT_DIR, and the spec runs only when that is set: it exists to
+// produce images, and every behaviour it passes through is asserted by
+// sync.spec.ts, which CI runs.
+//
+//   SYNC_SCREENSHOT_DIR=/some/dir npx playwright test -c apps/web/playwright.sync.config.ts sync-screens
 
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import type { Locator, Page } from '@playwright/test';
 import { importBrain } from './fixtures.ts';
 import {
   TEST_TOKEN,
@@ -17,14 +21,18 @@ import {
   skipWithoutServer,
   syncCall,
   uniqueBrainId,
+  expect,
+  test,
 } from './sync-fixtures.ts';
 
 skipWithoutServer();
+test.skip(
+  !process.env.SYNC_SCREENSHOT_DIR,
+  'screenshots only: set SYNC_SCREENSHOT_DIR to take them',
+);
 
 function shotPath(name: string, project: string): string {
-  const dir =
-    process.env.SYNC_SCREENSHOT_DIR ??
-    join(process.cwd(), '../../node_modules/.cache/somememos-e2e/screens-sync');
+  const dir = process.env.SYNC_SCREENSHOT_DIR as string;
   mkdirSync(dir, { recursive: true });
   return join(dir, `${project}-${name}.png`);
 }
@@ -159,6 +167,7 @@ test('screenshots of sync', async ({ browser, page }, info) => {
   const post = 'blog/2026/2026-11-20-a-small-post.md';
   await engineCall(page, 'saveNote', post, '# A small post\n\nInvented.\n', {});
   await clientGo(page, `/note/${post}`);
+  await expect(page.locator('.note-head h1')).toHaveText('A small post');
   await expect(page.getByTestId('publish-badge')).toHaveText('Draft');
   await page.context().setOffline(true);
   await page.getByRole('button', { name: /Publish…/ }).click();
