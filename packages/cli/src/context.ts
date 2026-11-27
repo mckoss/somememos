@@ -19,6 +19,11 @@ export interface Context {
   /** The directory the command runs in. */
   cwd: string;
   env: Readonly<Record<string, string | undefined>>;
+  /**
+   * The clock, in whole Unix seconds. Optional so tests can omit it; use
+   * `clockOf(ctx)` to read it (defaults to the system clock).
+   */
+  now?: () => number;
 }
 
 export function processContext(): Context {
@@ -28,6 +33,11 @@ export function processContext(): Context {
     cwd: process.cwd(),
     env: process.env,
   };
+}
+
+/** The context's clock, or the system clock: whole Unix seconds. */
+export function clockOf(ctx: Context): () => number {
+  return ctx.now ?? (() => Math.floor(Date.now() / 1000));
 }
 
 /** Raised by a command to report bad usage; `run` prints it and exits 2. */

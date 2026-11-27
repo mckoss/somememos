@@ -8,3 +8,5 @@ export * as timescore from './timescore/index.js';
 export * as keyword from './keyword/index.js';
 export * as markdown from './markdown/index.js';
 export * as storage from './storage/index.js';
+export * as ranking from './ranking/index.js';
+export * as evaluation from './evaluation/index.js';
