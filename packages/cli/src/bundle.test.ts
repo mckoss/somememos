@@ -108,9 +108,7 @@ describePg('the one-file build in remote mode', () => {
     };
     const search = await run(['search', 'centering'], env);
     expect(search.code, search.stderr).toBe(0);
-    expect(search.stdout).toBe(
-      `${join(tmp.dir, 'work', 'memos/wheel.md')}  Wheel Centering clay on the wheel.\n`,
-    );
+    expect(search.stdout).toBe('memos/wheel.md  Wheel Centering clay on the wheel.\n');
     const hot = await run(['hot'], env);
     expect(hot.code, hot.stderr).toBe(0);
     expect(`${hot.stdout}${hot.stderr}`).not.toContain(TEST_TOKEN);

@@ -408,13 +408,8 @@ describePg(
       const env = envOnly({ SOMEMEMOS_WORKDIR: workdir });
       const l = await ok(work, ['hot']);
       const r = await ok(cwd, ['hot'], env);
-      // Paths are shown from the working folder, which is outside cwd.
-      expect(r.stdout).toBe(
-        l.stdout
-          .split('\n')
-          .map((line) => (line === '' || line.startsWith('(') ? line : join(workdir, line)))
-          .join('\n'),
-      );
+      // Paths are shown brain-relative: the working folder is not where the agent is.
+      expect(r.stdout).toBe(l.stdout);
       expect(existsSync(workdir)).toBe(false); // queries write nothing
       const path = memos[9] as string;
       expect((await ok(cwd, ['read', path], env)).stdout).toBe(files.get(path));
@@ -429,6 +424,18 @@ describePg(
       // Default working folder: ~/somememos/<brain id>.
       await ok(cwd, ['read', path], envOnly());
       expect(existsSync(join(home, 'somememos', 'garden', path))).toBe(true);
+
+      // Paths are shown brain-relative there (the working folder is not where
+      // the agent is), and read takes either form.
+      const hot = (await ok(cwd, ['hot'], envOnly())).stdout;
+      expect(hot).not.toContain(join(home, 'somememos'));
+      expect(hot).toMatch(/^memos\//m);
+      const found = (await ok(cwd, ['search', brain.topics[0]?.name as string], envOnly())).stdout;
+      expect(found).not.toContain(home);
+      expect(found).toMatch(/^memos\//m);
+      expect(
+        (await ok(cwd, ['read', join(home, 'somememos', 'garden', path)], envOnly())).stdout,
+      ).toBe(readFileSync(join(home, 'somememos', 'garden', path), 'utf8'));
     });
 
     it('a wrong token and an unreachable server are one-line errors with exit 1', async () => {

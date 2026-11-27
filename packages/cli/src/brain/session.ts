@@ -115,7 +115,15 @@ export function locateBrain(ctx: Context, explicit?: string): BrainLocation {
   );
 }
 
-function pathHelpers(root: string, cwd: string) {
+/**
+ * Paths a user gives (absolute, relative to the working directory, or
+ * brain-relative via `resolveNotePath`) and paths shown: relative to the
+ * working directory when it is inside `root`; otherwise absolute, except with
+ * `brainRelative` (remote mode set only by environment variables, whose
+ * working folder under ~/somememos is not where the agent works), where they
+ * are shown brain-relative.
+ */
+function pathHelpers(root: string, cwd: string, brainRelative = false) {
   const cwdInside = cwd === root || cwd.startsWith(root + sep);
   return {
     brainPath(userPath: string): string | null {
@@ -126,7 +134,7 @@ function pathHelpers(root: string, cwd: string) {
       return rel.split(sep).join('/');
     },
     displayPath(path: string): string {
-      if (!cwdInside) return join(root, path);
+      if (!cwdInside) return brainRelative ? path : join(root, path);
       return relative(cwd, join(root, path)).split(sep).join('/');
     },
   };
@@ -198,7 +206,7 @@ export async function withSession<T>(
     root: location.root,
     engine: remote.engine,
     ctx,
-    ...pathHelpers(location.root, resolve(ctx.cwd)),
+    ...pathHelpers(location.root, resolve(ctx.cwd), !location.connected),
     local: null,
     remote,
   };
