@@ -188,8 +188,50 @@ CREATE TABLE scores (
 );
 `;
 
+// The server's own tables (packages/server): which brains exist and who owns
+// them, the git commit each brain's repository is at, every note version by
+// mutation number, and the mutation number each log entry and change record
+// took (PLAN.md section 7, "The mutation counter"). NULL `mutation` means the
+// entry was not stored through the server's write path (pg-store's own tests,
+// or a write that has not been numbered yet); the server numbers such entries
+// on its next write to the brain.
+const SERVER = `
+ALTER TABLE events ADD COLUMN mutation bigint;
+ALTER TABLE changes ADD COLUMN mutation bigint;
+CREATE INDEX events_mutation ON events (brain_id, mutation);
+CREATE INDEX changes_mutation ON changes (brain_id, mutation);
+
+-- A brain the server hosts. Ownership lives here so real accounts can
+-- replace the single-user token without changing the data.
+CREATE TABLE server_brains (
+  brain_id   text COLLATE "C" PRIMARY KEY REFERENCES brains,
+  owner_id   text COLLATE "C" NOT NULL,
+  config     text NOT NULL,                 -- the brain's config (JSON), without a client id
+  git_head   text,                          -- the commit the repository is recorded at; NULL before the first
+  created_at bigint NOT NULL                -- Unix seconds
+);
+CREATE INDEX server_brains_owner ON server_brains (owner_id, brain_id);
+
+-- Every note version the server stored, by the mutation number it took. A
+-- rename takes one number and two rows: the old path (hash NULL, renamed_to
+-- set) and the new one.
+CREATE TABLE note_versions (
+  brain_id   text COLLATE "C" NOT NULL REFERENCES brains,
+  mutation   bigint NOT NULL,
+  path       text COLLATE "C" NOT NULL,
+  hash       text,                          -- storage.contentHash of the text; NULL when the path was removed
+  renamed_to text COLLATE "C",              -- set when the path was removed by a rename
+  commit     text NOT NULL,                 -- the git commit that made this version
+  PRIMARY KEY (brain_id, path, mutation)
+);
+CREATE INDEX note_versions_mutation ON note_versions (brain_id, mutation);
+`;
+
 /** Every migration, in order. Append only. */
-export const MIGRATIONS: readonly Migration[] = [{ version: 1, name: 'initial', sql: INITIAL }];
+export const MIGRATIONS: readonly Migration[] = [
+  { version: 1, name: 'initial', sql: INITIAL },
+  { version: 2, name: 'server', sql: SERVER },
+];
 
 /** The derived tables of a brain, in an order safe to delete from. */
 export const DERIVED_TABLES = ['postings', 'sections', 'links', 'notes', 'scores', 'index_meta'];

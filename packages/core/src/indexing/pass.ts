@@ -90,6 +90,15 @@ export interface IndexPassOptions {
    * one is not read. Use it after a save, so a coarse mtime can't hide it.
    */
   readonly paths?: readonly string[];
+  /**
+   * Log the events the changes imply, and mark changed paths as uncommitted.
+   * Default true. False is for changes that arrived from elsewhere (sync,
+   * PLAN.md section 4, "What does not count"): the client that made them
+   * already logged their edits, mentions, renames and dangling carry-overs,
+   * and those records arrive through the event log. The derived data
+   * (notes, links, sections, relinking) is updated exactly as usual.
+   */
+  readonly record?: boolean;
 }
 
 export interface IndexSummary {
@@ -273,7 +282,7 @@ async function indexChanges(opts: IndexPassOptions, rebuild: boolean): Promise<P
       );
     }
   }
-  const logEvents = !baseline;
+  const logEvents = !baseline && (opts.record ?? true);
 
   // --- Classify each listed file.
   interface Loaded {
@@ -549,6 +558,7 @@ async function indexChanges(opts: IndexPassOptions, rebuild: boolean): Promise<P
   if (logEntries.length > 0) await stores.events.append(logEntries, { now });
 
   const changedList = logEvents ? [...changed].sort() : [];
+  // With `record: false`, `changed` is not reported either: nothing is uncommitted.
   if (changedList.length > 0) {
     await writeUncommitted(meta, [...(await readUncommitted(meta)), ...changedList]);
   }

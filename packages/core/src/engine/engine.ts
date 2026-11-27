@@ -22,6 +22,7 @@ import type {
   Stores,
 } from '../storage/types.js';
 import { changeOp, newId, normalizeChangePaths, unixNow } from '../storage/validate.js';
+import { createSyncMethods } from './sync.js';
 import {
   EngineError,
   type ChangeOptions,
@@ -138,7 +139,7 @@ export function createEngine(options: EngineOptions): Engine {
     return text === undefined ? false : markdown.isPublished(text);
   };
 
-  const pass = (opts: IndexOptions = {}): Promise<IndexSummary> =>
+  const pass = (opts: IndexOptions & { readonly record?: boolean } = {}): Promise<IndexSummary> =>
     runIndexPass({
       stores,
       content,
@@ -147,6 +148,7 @@ export function createEngine(options: EngineOptions): Engine {
       now,
       ...(opts.rebuild ? { rebuild: true } : {}),
       ...(opts.paths && opts.paths.length > 0 ? { paths: opts.paths } : {}),
+      ...(opts.record === false ? { record: false } : {}),
     });
 
   /** Appends one change record for `paths` and drops them from the uncommitted list. Under the index lock. */
@@ -267,8 +269,25 @@ export function createEngine(options: EngineOptions): Engine {
     return { path, date: day };
   };
 
+  const sync = createSyncMethods({
+    stores,
+    content,
+    config,
+    classifier,
+    now,
+    pass: (opts = {}) => pass(opts),
+    recordChange: (paths, message) => recordChange(paths, message),
+    today: () => localDate(now()),
+  });
+
   const engine: Engine = {
     config,
+
+    applyRemote: (input) => serial(() => sync.applyRemote(input ?? {})),
+    syncStatus: () => serial(() => sync.syncStatus()),
+    prepareSync: (opts) => serial(() => sync.prepareSync(opts)),
+    applySync: (prepared, response) => serial(() => sync.applySync(prepared, response)),
+    resetSync: () => serial(() => sync.resetSync()),
 
     index: (opts = {}) => serial(() => pass(opts)),
 

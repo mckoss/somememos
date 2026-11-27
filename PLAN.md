@@ -510,6 +510,19 @@ response: { mutation,                    // the server's counter after this requ
 
 **Access.** Every request carries a bearer token. The first version is a single-user server with one token set in its environment; real sign-in replaces how a token is obtained, not the protocol.
 
+### The server as built
+
+Implemented on 2026-11-27 in `packages/server`, mounted by the web app under `/api`. See `docs/deploy.md` for running it.
+
+- **Git is the only copy of note text on the server.** Postgres holds the event log, change records, scores, the index, and a record of which note version took which mutation number.
+- **One request, one transaction.** Each request runs in a single Postgres transaction under a lock for its brain. The git commit is made first and the database commit second, and the database commit is what makes the change real. If the process dies between the two, the next request finds git ahead, sets that commit aside under a ref, and the client's retry is deduplicated.
+- **Additions to the sync shapes above:** a request may name its `client`; an edit can come back `refused` with a reason code (for example, changing an immutable source); the response carries `more` when it is paged.
+- **The client side of sync lives in core** (`prepareSync`, `applySync`, `runSync`, `applyRemote`), so the browser, the CLI and tests all use the same code. A copy remembers the last mutation number it applied and the hash each note had at the last sync, and works out its edits by comparing.
+- **Renames apply by time whatever order entries arrive in.** Two copies that receive the same entries in different orders compute the same scores. A rename that arrives late triggers a refold.
+- **Access** is a bearer token from the server's environment, compared in constant time, with failed attempts rate-limited and cross-origin requests refused. Real accounts can replace the token check without changing a route.
+- **Without a database** the server still serves the web app, and the API answers 503.
+- **Folder roles are set when a brain is created** on the server, and a syncing copy takes them from there.
+
 ### Edits and conflicts
 
 - Every file version is identified by its content hash. An edit arrives with the **base hash** it was made against.
