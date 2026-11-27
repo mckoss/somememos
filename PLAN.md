@@ -14,7 +14,7 @@ somememos is a second brain made of plain markdown files, plus a **sidecar datab
 - an **event log** of interactions with the notes (reads, edits, mentions), and
 - **TimeScore activation scores** computed from that log, a working memory that says which notes are active now, which are heating up, and which used to matter but have gone quiet.
 
-The notes live on the **server's filesystem**, which also keeps a version history of each note. somememos does not use git. Agents reach it through a CLI that talks to the server directly and fetches only the notes it reads. The web app keeps a full **offline copy** and syncs with the server. All of a person's agents share this one durable memory. An **MCP server** comes later, for clients without a shell and for the hosted service.
+The notes live on the **server's filesystem**, in one git repository per brain, which gives every note a version history. Git stays inside the server: clients never speak the git protocol. Agents reach it through a CLI that talks to the server directly and fetches only the notes it reads. The web app keeps a full **offline copy** and syncs with the server. All of a person's agents share this one durable memory. An **MCP server** comes later, for clients without a shell and for the hosted service.
 
 **Primary purpose:** a more relevant memory for agents. Views for people (what am I neglecting?) matter too, but agent relevance decides the defaults.
 
@@ -47,7 +47,7 @@ Embeddings may be added later as one more ranking signal (section 12), never as 
 4. **Offline where it matters.** The web app works fully on a local copy and syncs when it can, because a person needs their notes on a plane. Agents are almost always online, so the CLI talks to the server and keeps only the notes it has read. A full local copy is an option for local or offline model use.
 5. **You own your brain.** An export is the user's markdown plus the event log as a plain-text file. Together they rebuild everything.
 6. **Agents read files.** The index exists to point agents at the right files, not to replace reading them. Agents read them through `somememos read`, so each read is recorded.
-7. **No git inside.** The server's filesystem is the home of the notes, and the server keeps their version history. A person may keep their own copy in git, but somememos never reads or needs it, apart from a one-time import of an existing vault's history (section 4).
+7. **Git on the server only.** Each brain is one git repository on the server's filesystem. The server commits every accepted change, so git supplies version history, diffs and the base for merges. No git interface is exposed for now: clients use somememos's own lighter protocol (section 7), and a hosted user never needs to know git is there. Exposing the git protocol to agents later remains possible.
 
 ## 3. TimeScore: the algorithm
 
@@ -170,7 +170,7 @@ The event log is the source of truth for all scores.
 
 ### One-time import from git
 
-An existing vault that has lived in git (Mike's has) carries years of history. `somememos import-git` reads that history once and writes it into the event log: an `edit` event for each commit that changed a note, and a `mention` event for each `[[link]]` a commit added, both at the commit's time, following renames. Imported events get ids derived from the commit, so running the import twice adds nothing. After the import, somememos has no further use for git.
+An existing vault that has lived in git (Mike's has) carries years of history. `somememos import-git` reads that history once and writes it into the event log: an `edit` event for each commit that changed a note, and a `mention` event for each `[[link]]` a commit added, both at the commit's time, following renames. Imported events get ids derived from the commit, so running the import twice adds nothing. After the import, clients have no further use for git. When the vault moves to the server, its repository becomes the brain's version store (section 7).
 
 ### What does *not* count
 
@@ -370,19 +370,20 @@ A client that must work offline holds a full local copy: the markdown, the event
 - Otherwise it's a conflict, and nothing is overwritten silently. A remote client gets the commit refused, with the current version to merge against. For an offline copy, the first version keeps both, saving the incoming edit as `name.conflict-<client>-<date>.md` and surfacing it to the user. Later: a three-way merge (diff3) for non-overlapping changes, using the base version from the version history. Whether to eventually use a CRDT is an open question.
 - Deletes and renames are explicit operations, so a rename doesn't look like a delete plus a new note.
 
-### Version history
+### Version history: a git repository per brain
 
-The server keeps earlier versions of every note, each with its content hash and the time it was replaced. This gives:
+The server stores each brain as its own git repository and makes one commit for every change it accepts (a committed edit, a new note, a delete, a rename), recording which client sent it. This gives:
 
-- **Undo and recovery** of any earlier version of a note, without git.
-- **The base version** for a three-way merge.
-- **History for experiments:** the keyword index can be rebuilt as of a past moment.
+- **Undo and recovery** of any earlier version of a note, with ordinary git history behind it.
+- **The base version** for a three-way merge, and git's own merge machinery to do it.
+- **History for experiments:** the keyword index can be rebuilt as of any past commit, the same way the evaluation harness reads imported history.
+- **A simple import.** An existing vault's git history becomes the brain's history when the vault moves to the server.
 
-How long versions are kept, and whether offline copies hold any history, is settled in the milestone 3 design.
+Git is an internal detail of the server. Clients send and receive whole notes with content hashes over the somememos protocol and never run git against the server. Local mode (milestones 1 and 2) doesn't use git either, apart from the one-time `import-git`. Full history stays on the server; offline copies hold only current versions.
 
 ## 8. Hosted service direction
 
-- **Where users' files live:** on the server's filesystem, one directory per user, with version history kept by the server and a full export always available. The server does not store brains in git or in a user's GitHub repo.
+- **Where users' files live:** on the server's filesystem, one git repository per brain, with a full export always available. Git is the server's storage format, not an interface: users don't push to it, and the server does not store brains in a user's GitHub repo.
 - **One SQLite file per user** for the sidecar. It isolates users cleanly and is cheap to back up and rebuild.
 - **The MCP server is likely the feature people pay for**: every agent a person uses shares one durable, time-aware memory.
 - **Privacy.** The server must read plaintext to index it, so client-side encryption like git-crypt doesn't carry over. Encryption at rest, a clear data policy, and possibly a self-hosted option matter from the start. A brain holds the most sensitive text a user has.
@@ -427,7 +428,7 @@ Each milestone should leave something usable. [IMPLEMENTATION.md](IMPLEMENTATION
 - **M0 — Foundations.** npm workspace scaffold (`packages/core`, `packages/cli`, and a skeleton SvelteKit `apps/web` that shows the version), CI (lint, type-check, tests), `packages/core` with the TimeScore functions and property tests checked against the blog post. Confirm the details in section 9.
 - **M1 — Local CLI and evaluation.** `init`, `index` (keyword index, edit detection, folding), `search`, `hot`/`trending`/`neglected`, `read`, `status`, `import-git`, `export`, and `eval`. Done when Mike can index his second-brain vault on one machine, import its git history, get useful hot, trending and neglected lists, and the first experiments have set the default weights.
 - **M2 — Agent use on one machine.** A one-file CLI build, the `AGENTS.md` snippet and skill, and the vault's instructions amended. Done when Mike's agents on his main machine (Claude Code and Hermes, both of which have a shell) use `somememos hot`, `search` and `read` in place of grep and `cat`, replacing the vault's `rg "^## " logs | tail -40` step.
-- **M3 — Server and remote CLI.** Single-user SvelteKit server on Railway that holds the notes on its filesystem with version history, a mutation counter, and the event log. The CLI gains remote mode: `search`, `read` and `commit` as requests to the server, with a working folder for fetched notes. Done when agents on any machine, including disposable cloud sessions, use the brain with only the CLI and a credential, with no git involved.
+- **M3 — Server and remote CLI.** Single-user SvelteKit server on Railway that holds each brain as a git repository on its filesystem, with a mutation counter and the event log. The CLI gains remote mode: `search`, `read` and `commit` as requests to the server over somememos's own protocol, with a working folder for fetched notes. Done when agents on any machine, including disposable cloud sessions, use the brain with only the CLI and a credential.
 - **M4 — PWA client and offline sync.** Offline-first SvelteKit PWA with an editor, `[[wiki-links]]`, backlinks, search, and activation views. It holds a full local copy and syncs by the mutation counter, as does an optional `somememos clone` for local model use. Version shown in the header. Done when Mike can stop using Obsidian entirely.
 - **M5 — Hosted multi-user and MCP.** Accounts, per-user storage, remote MCP with authentication plus local stdio MCP, privacy policy, event log retention, and export. Launch at the somememos domain.
 
@@ -443,7 +444,7 @@ Each milestone should leave something usable. [IMPLEMENTATION.md](IMPLEMENTATION
 
 ## 12. Open questions
 
-Settled on 2026-11-27, and removed from this list: the primary purpose (agent memory), dangling links (in from M1), the look-ahead channel (events are dated by interaction, so calendar dates are just content), how scoring choices get made (by experiment), raw activity (an event log is kept), and git (not used, apart from a one-time import).
+Settled on 2026-11-27, and removed from this list: the primary purpose (agent memory), dangling links (in from M1), the look-ahead channel (events are dated by interaction, so calendar dates are just content), how scoring choices get made (by experiment), raw activity (an event log is kept), and git (the server's version store, one repository per brain, with no git interface exposed).
 
 1. **Evaluation queries.** Are the vault's changelog entries and commit messages descriptive enough to serve as search cases, or is a hand-written case file needed from the start?
 2. **Ranking parameters, all to be answered by experiment:** per-kind weights, `α`, half-lives per mode, how bursts of edits count, heading vs body weight, link spreading (whether, which direction, how strong), and section-level vs note-level scoring.
@@ -452,7 +453,7 @@ Settled on 2026-11-27, and removed from this list: the primary purpose (agent me
 5. **Who made the event.** Should a person's read or edit count differently from an agent's? The log records the client, not whether a person or an agent was behind it.
 6. **Logging search queries.** Not logged today, because scoring doesn't use them. Would they be worth keeping for building evaluation cases?
 7. **Agent citations.** Should somememos ever capture which notes an agent actually used, without requiring structure from agents?
-8. **Version history.** How long the server keeps old versions, and whether clients hold any history offline (milestone 3).
+8. **Exposing git.** The server keeps each brain in git but offers no git interface. Would letting agents clone and push directly ever be worth it?
 9. **Conflict handling.** After the first "keep both" version, a three-way merge or a CRDT?
 10. **Event log retention for hosted users** (milestone 5).
 11. **Forgotten commits.** The client reminds the agent about edited files that were never committed. Should it commit them itself instead? That saves work lost at the end of a session, but can store half-finished edits.
