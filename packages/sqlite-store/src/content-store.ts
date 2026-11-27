@@ -21,10 +21,12 @@ const toEntry = (r: ContentRow): storage.ContentEntry => ({
 });
 
 export class SqliteContentStore implements storage.ContentStore {
-  constructor(
-    private readonly db: Db,
-    private readonly clock: () => number,
-  ) {}
+  private readonly db: Db;
+  private readonly clock: () => number;
+  constructor(db: Db, clock: () => number) {
+    this.db = db;
+    this.clock = clock;
+  }
 
   list(): storage.ContentEntry[] {
     return this.db

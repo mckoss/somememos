@@ -23,10 +23,12 @@ const toEntry = (r: ContentRow): storage.ContentEntry => ({
 const UNIQUE_VIOLATION = '23505';
 
 export class PgContentStore implements storage.ContentStore {
-  constructor(
-    private readonly db: BrainDb,
-    private readonly clock: () => number,
-  ) {}
+  private readonly db: BrainDb;
+  private readonly clock: () => number;
+  constructor(db: BrainDb, clock: () => number) {
+    this.db = db;
+    this.clock = clock;
+  }
 
   async list(): Promise<storage.ContentEntry[]> {
     const { rows } = await this.db.original<ContentRow>(

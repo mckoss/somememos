@@ -85,9 +85,11 @@ export function configWithClient(
  * applied; take `view` (or resolve a conflict) and sync again.
  */
 export class ConfigChangedError extends Error {
+  readonly view: ConfigView;
   override name = 'ConfigChangedError';
-  constructor(readonly view: ConfigView) {
+  constructor(view: ConfigView) {
     super(`the brain's shared config changed on the server (now revision ${view.revision})`);
+    this.view = view;
   }
 }
 
@@ -97,15 +99,16 @@ export class ConfigChangedError extends Error {
  * `resolveConfigConflict` ('mine' replaces the server's, 'theirs' takes it).
  */
 export class ConfigConflictError extends Error {
+  /** This copy's shared config. */
+  readonly local: SharedConfig;
+  /** The server's. */
+  readonly server: ConfigView;
   override name = 'ConfigConflictError';
-  constructor(
-    /** This copy's shared config. */
-    readonly local: SharedConfig,
-    /** The server's. */
-    readonly server: ConfigView,
-  ) {
+  constructor(local: SharedConfig, server: ConfigView) {
     super(
       `the brain's shared config was changed both here and on another device (the server is at revision ${server.revision}); choose which to keep`,
     );
+    this.local = local;
+    this.server = server;
   }
 }

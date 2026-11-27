@@ -174,7 +174,10 @@ export function commitMessage(message: string): string {
 
 /** A brain's repository: a working tree (the notes) with its `.git` inside. */
 export class BrainRepo {
-  constructor(readonly dir: string) {}
+  readonly dir: string;
+  constructor(dir: string) {
+    this.dir = dir;
+  }
 
   private git(args: readonly string[], options?: GitRunOptions): Promise<string> {
     return runGit(this.dir, args, options);

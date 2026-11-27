@@ -110,7 +110,10 @@ async function applyBurstOps(
 }
 
 export class PgScoreStore implements storage.ScoreStore {
-  constructor(private readonly db: BrainDb) {}
+  private readonly db: BrainDb;
+  constructor(db: BrainDb) {
+    this.db = db;
+  }
 
   async foldState(): Promise<storage.FoldState> {
     const { rows } = await this.db.derived<IndexStateRow>(
@@ -347,7 +350,10 @@ function toNote(row: NoteRow): storage.NoteRecord {
 const NOTE_COLUMNS = 'path, title, content_hash, mtime, role, date';
 
 export class PgNoteStore implements storage.NoteStore {
-  constructor(private readonly db: BrainDb) {}
+  private readonly db: BrainDb;
+  constructor(db: BrainDb) {
+    this.db = db;
+  }
 
   async upsertNote(note: storage.NoteRecord): Promise<void> {
     storage.assertValidNote(note);
@@ -525,11 +531,13 @@ WITH d AS (DELETE FROM sections WHERE brain_id = $1 AND path = $2 RETURNING id),
 SELECT count(*) AS n FROM d`;
 
 export class PgTermIndex implements storage.TermIndex {
-  constructor(
-    private readonly db: BrainDb,
-    /** The analyzer recorded for the brain; changed only by `setAnalyzer` (on reset). */
-    private current: keyword.AnalyzerOptions,
-  ) {}
+  private readonly db: BrainDb;
+  /** The analyzer recorded for the brain; changed only by `setAnalyzer` (on reset). */
+  private current: keyword.AnalyzerOptions;
+  constructor(db: BrainDb, current: keyword.AnalyzerOptions) {
+    this.db = db;
+    this.current = current;
+  }
 
   get analyzer(): keyword.AnalyzerOptions {
     return this.current;

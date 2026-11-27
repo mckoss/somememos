@@ -8,6 +8,7 @@
     "sourceMap": true,
     "strict": true,
     "noUncheckedIndexedAccess": true,
+    "erasableSyntaxOnly": true,
     "customConditions": ["source"]
   },
   "include": ["src", "test", "*"],

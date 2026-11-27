@@ -22,12 +22,13 @@ export class InvalidEventError extends RangeError {
 
 /** An event dated after `now`. Events are dated when the interaction happens. */
 export class FutureEventError extends RangeError {
+  readonly time: number;
+  readonly now: number;
   override name = 'FutureEventError';
-  constructor(
-    readonly time: number,
-    readonly now: number,
-  ) {
+  constructor(time: number, now: number) {
     super(`event time ${time} is later than now (${now})`);
+    this.time = time;
+    this.now = now;
   }
 }
 

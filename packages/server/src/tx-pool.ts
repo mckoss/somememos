@@ -27,9 +27,12 @@ type QueryArgs = [unknown, unknown?, unknown?];
 
 /** A `pg.Pool` look-alike over the current transaction's connection. */
 export class TransactionPool {
+  readonly pool: pg.Pool;
   private readonly current = new AsyncLocalStorage<Tx>();
 
-  constructor(readonly pool: pg.Pool) {}
+  constructor(pool: pg.Pool) {
+    this.pool = pool;
+  }
 
   /** Runs `fn` inside a transaction on one connection; every query of this pool made by it joins. */
   async run<T>(fn: (client: pg.PoolClient) => Promise<T>): Promise<T> {
