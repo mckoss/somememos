@@ -5,7 +5,7 @@ A second brain made of plain markdown files, with a sidecar database that adds k
 somememos ranks your notes by what you're working on now, what's heating up, and what you've let go quiet. It uses the [TimeScore](https://mckoss.com/posts/timescore/) algorithm: every bit of activity adds to a note's score, and scores fade with a half-life at several time scales (a day, a week, a month, a year).
 
 - **Your notes stay plain markdown.** The sidecar can always be exported alongside them.
-- **Offline first.** The CLI and web clients work on a local copy and sync to the server.
+- **Works offline where it matters.** The web app keeps a local copy and syncs to the server. Agents use a command-line tool that talks to the server and fetches only what they read.
 - **Built for agents.** A command-line tool lets any AI agent with a shell search and read your brain. An MCP server follows for agents without one.
 
 Status: planning. See [PLAN.md](PLAN.md) and [IMPLEMENTATION.md](IMPLEMENTATION.md).

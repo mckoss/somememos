@@ -14,7 +14,7 @@ somememos is a second brain made of plain markdown files, plus a **sidecar datab
 - an **event log** of interactions with the notes (reads, edits, mentions), and
 - **TimeScore activation scores** computed from that log, a working memory that says which notes are active now, which are heating up, and which used to matter but have gone quiet.
 
-The notes live on the **server's filesystem**, which also keeps a version history of each note. somememos does not use git. Clients (a CLI and a web app) work on an **offline copy** and periodically **sync events and edits** to the server copy. AI agents use the brain through the **CLI** first, so all of a person's agents share one durable memory. An **MCP server** comes later, for clients without a shell and for the hosted service.
+The notes live on the **server's filesystem**, which also keeps a version history of each note. somememos does not use git. Agents reach it through a CLI that talks to the server directly and fetches only the notes it reads. The web app keeps a full **offline copy** and syncs with the server. All of a person's agents share this one durable memory. An **MCP server** comes later, for clients without a shell and for the hosted service.
 
 **Primary purpose:** a more relevant memory for agents. Views for people (what am I neglecting?) matter too, but agent relevance decides the defaults.
 
@@ -44,7 +44,7 @@ Embeddings may be added later as one more ranking signal (section 12), never as 
    - The **event log** is original information: one record per interaction with a note (which note, what kind, when). The most useful signals, such as what was read, never appear in the files. The log cannot be rebuilt from the markdown, so it is backed up, synced and exported.
    - Everything else is **derived**. The keyword index is built from the markdown, and the TimeScore scores are built from the event log. Both can be deleted and rebuilt at any time.
 3. **Keep the event log.** (Decided 2026-11-27. The earlier plan forbade storing any raw activity, as a privacy feature; Mike dropped that rule.) Keeping events means scores can be rebuilt, weights and half-lives can change, experiments can replay real history, and sync stays simple. Search query text is not logged for now, only because scoring doesn't use it. How long a hosted service keeps other people's logs is decided at milestone 5.
-4. **Offline first.** Every client works fully on a local copy and syncs when it can.
+4. **Offline where it matters.** The web app works fully on a local copy and syncs when it can, because a person needs their notes on a plane. Agents are almost always online, so the CLI talks to the server and keeps only the notes it has read. A full local copy is an option for local or offline model use.
 5. **You own your brain.** An export is the user's markdown plus the event log as a plain-text file. Together they rebuild everything.
 6. **Agents read files.** The index exists to point agents at the right files, not to replace reading them. Agents read them through `somememos read`, so each read is recorded.
 7. **No git inside.** The server's filesystem is the home of the notes, and the server keeps their version history. A person may keep their own copy in git, but somememos never reads or needs it, apart from a one-time import of an existing vault's history (section 4).
@@ -144,7 +144,7 @@ Each item keeps one log score per half-life:
   | Kind      | What happened                                                                  | Event time                                   |
   |-----------|--------------------------------------------------------------------------------|----------------------------------------------|
   | `read`    | The note was read through somememos (`somememos read`; later MCP and the PWA)  | when it was read                             |
-  | `edit`    | The note's content changed (found by the next index pass, or saved in the PWA) | the file's modification time, at most now    |
+  | `edit`    | The note's content changed (committed through the CLI, or saved in the PWA)    | the file's modification time, at most now    |
   | `mention` | An edit added a `[[link]]` to the note (or to a dangling target)               | the same time as that edit                   |
 
 - **An event is dated when the interaction happens.** A date written inside a note (a deadline, a meeting next week) is content, not an event time. Writing about next week's meeting is an event today.
@@ -300,26 +300,35 @@ No ranking parameter is chosen by intuition. `somememos eval` replays the brain'
 
 ```
 somememos init [dir]                 create .somememos/ with default config
-somememos index [--rebuild]          update the keyword index, log new edits, fold events into scores
 somememos search <words> [--mode hot|trending|neglected|all] [--limit N]
 somememos hot | trending | neglected list notes by activation only
-somememos read <path>                print a note and log a read event
-somememos status                     counts, events logged, config in effect
+somememos read <path>                place the note in the working folder, print it, log a read event
+somememos commit [paths]             send edited notes to the brain and log the edits
+somememos status                     edited notes not yet committed; counts; config in effect
+somememos index [--rebuild]          update the derived index and scores (local mode)
 somememos import-git                 one-time: write a vault's git history into the event log
 somememos export                     write the event log as events.jsonl
 somememos eval [--cases file]        run the ranking experiments (section 5)
-somememos sync                       push events and edits, pull changes (milestone 3)
 ```
 
-- Every command that reads the brain first runs a quick incremental `index`, so an agent never has to remember to.
-- Agents edit notes with their own tools. The next index pass sees the change and logs the edit, along with any links it added.
-- `index --rebuild` deletes the derived data and rebuilds it from the markdown and the event log.
+**The agent's flow is search, read, edit, commit.**
+
+- `search` and the activation lists only list notes: path, heading and a snippet. They place nothing and log nothing.
+- `read` is the selection step. It puts the note into a **working folder** that mirrors the brain's paths (so relative links and ordinary tools work), prints it, and logs the read.
+- The agent edits the file in the working folder with its ordinary text tools.
+- `commit` sends each changed file together with the content hash it had when it was fetched. If that is still the brain's current version, the edit is stored and its `edit` and `mention` events are logged. If someone else changed the note meanwhile, the commit is refused for that file and the current version is saved beside it, so the agent can merge and commit again. New notes are created in the working folder and committed the same way.
+- **Forgotten commits.** Every command checks the working folder for files edited since they were fetched and not yet committed, and prints a reminder naming them. `status` lists them on request. Whether the client should commit them itself instead of reminding is an open question (section 12).
+
+**Two modes, one flow.**
+
+- *Local mode* (milestones 1 and 2): the brain's directory is on this machine and is its own working folder. `read` prints and logs; `commit` runs the index pass that finds changed files and logs their edits. Every command also runs that pass first, so a forgotten commit is picked up by the next command.
+- *Remote mode* (from milestone 3): the brain is on the server. Each command is a request to the server, the working folder holds only the notes this agent has read, and a new machine needs just the CLI and a credential.
 
 **Agents use the CLI.** It costs an agent no context until it is used, composes with other shell commands, and is the same interface Mike tests by hand. To serve agents well:
 
 - Output is short, predictable plain text by default: one result per line with path, heading and a snippet. `--json` gives the full record, including score components.
 - Exit codes are conventional (0 success, 1 error, 2 usage), and `--help` is complete enough to learn the tool from.
-- The repo ships a short `AGENTS.md` snippet (and a skill) to paste into a brain: run `somememos hot` to orient, `somememos search` before grep, and `somememos read` in place of `cat`.
+- The repo ships a short `AGENTS.md` snippet (and a skill) to paste into a brain: run `somememos hot` to orient, `somememos search` before grep, `somememos read` in place of `cat`, and `somememos commit` after editing.
 - somememos requires no other structure from agents. There is no citation step and no handle to pass back.
 
 ### MCP server
@@ -330,24 +339,36 @@ Deferred to milestone 5, where it arrives as a remote endpoint with authenticati
 
 An offline-first PWA (milestone 4), built in the same SvelteKit app as the server: a markdown editor with `[[wiki-links]]`, backlinks and quick search, plus hot, trending and neglected views. It installs to the home screen, works with no network, and syncs when it can. It replaces Obsidian for Mike.
 
-## 7. Offline-first sync
+## 7. Clients, sync and offline use
 
-Each client (CLI or web) holds a full local copy: the markdown, the event log, and the derived index and scores. It syncs periodically with the server copy. The server's filesystem is the home of the notes.
+The server's filesystem is the home of the notes. Clients come in two shapes.
 
-### Events: send the log, never the scores
+### Remote clients (the CLI for agents)
 
-- A client pushes the events it has logged since its last sync. Every event has a globally unique id, and the server **ignores any id it already has**. A retried or repeated push therefore counts nothing twice.
-- The client pulls the events it hasn't seen (the server gives each a sequence number, and the client remembers how far it has read) and folds them into its local scores.
-- **Score tables are never merged or sent.** Scores are derived from the log on each copy. Merging two score tables that share history would count that history twice.
-- Folding is order-independent (`combine()` is commutative and associative), so every copy that holds the same events computes the same scores.
+- Each command is a request to the server. Search and ranking run there, and events are logged there directly, so nothing is lost when a disposable session ends.
+- The only local state is the working folder: the notes this agent has read, plus a manifest of each one's path and the content hash it had when fetched.
+- A repeated `read` fetches the note again if the server has a newer version and the local file is untouched.
+- Edits go back through `commit` with the base hash (section 6).
 
-### Edits
+### The mutation counter
 
-- Every file version is identified by its content hash. A client uploads an edit together with the **base hash** it was made against.
+The server keeps one counter that never decreases. Every change, whether a new version of a note, a delete, a rename or a logged event, takes the next number. A client that keeps a copy remembers the last number it has seen and asks for everything after it. That makes catching up cheap however large the brain is.
+
+### Offline copies (the PWA, and an optional `somememos clone`)
+
+A client that must work offline holds a full local copy: the markdown, the event log, and the derived index and scores.
+
+- **Catching up:** it asks the server for all changes after its last counter value and applies them.
+- **Events: send the log, never the scores.** The client pushes the events it logged while offline. Every event has a globally unique id, and the server ignores any id it already has, so a retried push counts nothing twice. Score tables are never merged or sent; each copy derives its scores from the log. Folding is order-independent (`combine()` is commutative and associative), so every copy that holds the same events computes the same scores.
+- **Edits** made offline are sent like a commit, each with its base hash.
+- A change that arrives from the server is not a new event on the receiving client.
+
+### Edits and conflicts
+
+- Every file version is identified by its content hash. An edit arrives with the **base hash** it was made against.
 - If the server's current hash equals the base, the edit applies.
-- Otherwise it's a conflict. First version: keep both, saving the incoming edit as `name.conflict-<client>-<date>.md` and surfacing it to the user. Later: a three-way merge (diff3) for non-overlapping changes, using the base version from the version history. Whether to eventually use a CRDT is an open question.
-- Deletes and renames sync as explicit operations, so a rename doesn't look like a delete plus a new note.
-- The client that makes an edit logs its `edit` and `mention` events. Clients that receive the edit log nothing.
+- Otherwise it's a conflict, and nothing is overwritten silently. A remote client gets the commit refused, with the current version to merge against. For an offline copy, the first version keeps both, saving the incoming edit as `name.conflict-<client>-<date>.md` and surfacing it to the user. Later: a three-way merge (diff3) for non-overlapping changes, using the base version from the version history. Whether to eventually use a CRDT is an open question.
+- Deletes and renames are explicit operations, so a rename doesn't look like a delete plus a new note.
 
 ### Version history
 
@@ -357,7 +378,7 @@ The server keeps earlier versions of every note, each with its content hash and 
 - **The base version** for a three-way merge.
 - **History for experiments:** the keyword index can be rebuilt as of a past moment.
 
-How long versions are kept, and whether clients hold any history offline, is settled in the milestone 3 design.
+How long versions are kept, and whether offline copies hold any history, is settled in the milestone 3 design.
 
 ## 8. Hosted service direction
 
@@ -406,8 +427,8 @@ Each milestone should leave something usable. [IMPLEMENTATION.md](IMPLEMENTATION
 - **M0 — Foundations.** npm workspace scaffold (`packages/core`, `packages/cli`, and a skeleton SvelteKit `apps/web` that shows the version), CI (lint, type-check, tests), `packages/core` with the TimeScore functions and property tests checked against the blog post. Confirm the details in section 9.
 - **M1 — Local CLI and evaluation.** `init`, `index` (keyword index, edit detection, folding), `search`, `hot`/`trending`/`neglected`, `read`, `status`, `import-git`, `export`, and `eval`. Done when Mike can index his second-brain vault on one machine, import its git history, get useful hot, trending and neglected lists, and the first experiments have set the default weights.
 - **M2 — Agent use on one machine.** A one-file CLI build, the `AGENTS.md` snippet and skill, and the vault's instructions amended. Done when Mike's agents on his main machine (Claude Code and Hermes, both of which have a shell) use `somememos hot`, `search` and `read` in place of grep and `cat`, replacing the vault's `rg "^## " logs | tail -40` step.
-- **M3 — Server and sync.** Single-user SvelteKit server on Railway that holds the notes on its filesystem with version history: event sync by unique id, edit sync with base hashes and conflict files. The CLI syncs. Done when agents on any machine, including disposable cloud sessions, get the brain with `somememos sync` and their events reach the server, with no git involved.
-- **M4 — PWA client.** Offline-first SvelteKit PWA with an editor, `[[wiki-links]]`, backlinks, search, and activation views, syncing through the same protocol as the CLI. Version shown in the header. Done when Mike can stop using Obsidian entirely.
+- **M3 — Server and remote CLI.** Single-user SvelteKit server on Railway that holds the notes on its filesystem with version history, a mutation counter, and the event log. The CLI gains remote mode: `search`, `read` and `commit` as requests to the server, with a working folder for fetched notes. Done when agents on any machine, including disposable cloud sessions, use the brain with only the CLI and a credential, with no git involved.
+- **M4 — PWA client and offline sync.** Offline-first SvelteKit PWA with an editor, `[[wiki-links]]`, backlinks, search, and activation views. It holds a full local copy and syncs by the mutation counter, as does an optional `somememos clone` for local model use. Version shown in the header. Done when Mike can stop using Obsidian entirely.
 - **M5 — Hosted multi-user and MCP.** Accounts, per-user storage, remote MCP with authentication plus local stdio MCP, privacy policy, event log retention, and export. Launch at the somememos domain.
 
 ## 11. Dogfooding on Mike's vault
@@ -434,3 +455,4 @@ Settled on 2026-11-27, and removed from this list: the primary purpose (agent me
 8. **Version history.** How long the server keeps old versions, and whether clients hold any history offline (milestone 3).
 9. **Conflict handling.** After the first "keep both" version, a three-way merge or a CRDT?
 10. **Event log retention for hosted users** (milestone 5).
+11. **Forgotten commits.** The client reminds the agent about edited files that were never committed. Should it commit them itself instead? That saves work lost at the end of a session, but can store half-finished edits.

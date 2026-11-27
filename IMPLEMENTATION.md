@@ -58,7 +58,7 @@ Goal: on one machine, Mike indexes his vault, imports its git history, gets usef
 - [ ] **1.12 Ranking (core).** Given candidate items, their per-kind scores, weights, `α`, a half-life and a mode, return ranked results with the score components. Pure functions with no database access, so the evaluation harness can call them with any parameters.
 - [ ] **1.13 `search`.** FTS5 query built safely from the user's words (quote terms, so punctuation can't break the query syntax), `r = −bm25()` clamped, combined with activation, grouped so a note appears once with its best section. Modes `hot`, `trending`, `neglected`, `all`.
 - [ ] **1.14 `hot`, `trending`, `neglected`.** Activation-only lists, including dangling links, marked as such.
-- [ ] **1.15 `read`.** Print the note and log a `read` event at the current time. Refuse excluded paths. Reading a note that isn't a scored item prints it and logs nothing.
+- [ ] **1.15 `read` and `commit`.** `read` prints the note and logs a `read` event at the current time. It refuses excluded paths, and reading a note that isn't a scored item prints it and logs nothing. `commit` runs the index pass, so its edits are logged at once; it exists in local mode so agents follow the same search, read, edit, commit flow they will use against the server.
 - [ ] **1.16 Output.** Plain text by default: one result per line (path, heading, snippet), stable across runs. `--json` gives full records with score components. Exit codes 0, 1 and 2. Complete `--help` for every command.
 - [ ] **1.17 `status` and `export`.** `status` shows note and section counts, events by kind, and the weights in effect. `export` writes `events.jsonl`; a round-trip test imports it into an empty brain and compares scores.
 - [ ] **1.18 Concurrency.** WAL mode and a busy timeout on both databases, so several agents can run commands at once. A test runs parallel `read` commands and checks that no event is lost or folded twice.
@@ -88,11 +88,11 @@ Done when: `somememos index` and `import-git` run cleanly on the vault with the 
 
 ## M2 — Agent use on one machine
 
-Goal: Mike's agents on his main machine use somememos for orientation and reading. Other machines wait for sync in M3.
+Goal: Mike's agents on his main machine use somememos for orientation and reading. Other machines wait for the server in M3.
 
 - [ ] **2.1 One-file build.** Bundle the CLI and core into a single JavaScript file that needs only Node. Smoke-test the bundle in CI on a clean Node install.
 - [ ] **2.2 Distribution.** Attach the bundle to a GitHub release and document a one-line install. Decide here whether to also publish to npm.
-- [ ] **2.3 Agent instructions.** A short `AGENTS.md` snippet and a skill, shipped in this repo: `somememos hot` to orient at session start, `somememos search` before grep, `somememos read` in place of `cat`, and edit notes as usual.
+- [ ] **2.3 Agent instructions.** A short `AGENTS.md` snippet and a skill, shipped in this repo: `somememos hot` to orient at session start, `somememos search` before grep, `somememos read` in place of `cat`, edit notes with ordinary tools, and `somememos commit` after editing.
 - [ ] **2.4 Amend the vault.** In `mckoss/2nd-brain` (not here): add `.somememos/config.json` with the exclusions, ignore the two database files in git, replace the `rg "^## " logs | tail -40` step, and update the "No RAG pipeline" and Obsidian Sync text.
 - [ ] **2.5 Back up the event log.** Until the server exists, the log lives on one machine. Schedule `somememos export` to a backed-up location and document it.
 - [ ] **2.6 Dogfood review.** After two weeks of use: is `hot` output the right size and shape for a session start, do agents follow the instructions, and how fast is the CLI in practice? Adjust output and instructions from what the sessions show.
@@ -100,19 +100,21 @@ Goal: Mike's agents on his main machine use somememos for orientation and readin
 
 Done when: Claude Code and Hermes sessions on the main machine orient with `somememos hot` and read with `somememos read` without being reminded, and the read weight has a measured default.
 
-## M3 — Server and sync (outline)
+## M3 — Server and remote CLI (outline)
 
-Goal: the server's filesystem becomes the home of the vault, and agents on any machine use it without git.
+Goal: the server's filesystem becomes the home of the vault, and agents on any machine use it with only the CLI and a credential.
 
-- [ ] **3.0 Design review.** Settle version history (how long, what clients hold offline), the conflict policy, single-user authentication, and how the vault moves from git to the server. Update PLAN.md section 7 before coding.
-- [ ] **3.1 Server storage.** Notes on the server's filesystem, a version store keyed by content hash with timestamps, and the server's own `events.sqlite`.
-- [ ] **3.2 Event sync.** Push events (the server ignores ids it has), pull events after a cursor, fold locally.
-- [ ] **3.3 Edit sync.** Push and pull edits by content hash with a base hash; conflict files; explicit deletes and renames. A received edit logs no event on the receiving client.
-- [ ] **3.4 Property tests for sync.** Repeated pushes count nothing twice; any interleaving of clients ends with the same events and the same scores everywhere.
-- [ ] **3.5 Version history commands.** List a note's versions and restore one.
-- [ ] **3.6 Deploy.** Railway with `adapter-node`, a volume for the notes and databases, backups, and a health endpoint that reports the version.
-- [ ] **3.7 `somememos sync` and first-time clone.** A fresh machine, including a disposable cloud session, gets the whole brain with one command and pushes its events before it ends. Add the install and sync steps to the cloud environment's setup (Mike changes the environment; give him the exact lines).
-- [ ] **3.8 Move the vault.** Upload the vault and its event log to the server, and update the vault's agent instructions so git is no longer how it travels.
+- [ ] **3.0 Design review.** Settle version history (how long it is kept), single-user authentication, the request API, and how the vault moves from git to the server. Update PLAN.md section 7 before coding.
+- [ ] **3.1 Server storage.** Notes on the server's filesystem, a version store keyed by content hash with timestamps, the event log, and one mutation counter that numbers every change.
+- [ ] **3.2 Query API.** `search`, the activation lists and `status` as server routes that run the same core code as local mode.
+- [ ] **3.3 Read API and working folder.** `read` fetches a note into the working folder, records its path and hash in a manifest, and logs the read on the server. A repeated read refetches when the server is newer and the local file is untouched, and warns when both have changed.
+- [ ] **3.4 Commit API.** `commit` sends changed and new files with their base hashes. The server stores a new version and logs `edit` and `mention` events, or refuses a stale base and returns the current version, which the CLI saves beside the file. Deletes and renames are explicit.
+- [ ] **3.5 Forgotten commits.** Every remote command compares the working folder with its manifest and prints a reminder naming edited, uncommitted files. `status` lists them.
+- [ ] **3.6 Tests.** Two clients editing the same note; a commit retried after a dropped connection; a stale working folder; excluded paths refused by every route.
+- [ ] **3.7 Version history commands.** List a note's versions and restore one.
+- [ ] **3.8 Deploy.** Railway with `adapter-node`, a volume for the notes and databases, backups, and a health endpoint that reports the version.
+- [ ] **3.9 Cloud sessions.** Add the CLI install and credential to the cloud environment's setup (Mike changes the environment; give him the exact lines).
+- [ ] **3.10 Move the vault.** Upload the vault and its event log to the server, and update the vault's agent instructions so git is no longer how it travels.
 
 ## M4 — PWA client (outline)
 
@@ -121,8 +123,9 @@ Goal: the server's filesystem becomes the home of the vault, and agents on any m
 - [ ] **4.2 Offline shell.** Service worker, manifest, install to home screen.
 - [ ] **4.3 Notes.** Editor with `[[wiki-links]]`, backlinks, quick search, and version history.
 - [ ] **4.4 Activation views.** Hot, trending, neglected, and dangling links worth writing.
-- [ ] **4.5 Sync.** The same protocol as the CLI.
-- [ ] **4.6 Playwright tests.** Including offline edits that sync later.
+- [ ] **4.5 Offline sync.** Catch up from the server by mutation counter; push events logged offline (the server ignores ids it has) and offline edits with base hashes; conflict files. Property tests: repeated pushes count nothing twice, and any interleaving of clients ends with the same events and scores everywhere.
+- [ ] **4.6 `somememos clone`.** The same sync for a full local copy on a machine that runs local or offline models.
+- [ ] **4.7 Playwright tests.** Including offline edits that sync later.
 
 ## M5 — Hosted multi-user and MCP (outline)
 
