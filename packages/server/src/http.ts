@@ -18,7 +18,7 @@
 //   GET    /api/brains/{b}/notes/{path}/versions/{commit}        → PastVersion
 //   GET    /api/brains/{b}/notes/{path}/versions?hash=           → PastVersion (the latest with that hash)
 //   POST   /api/brains/{b}/notes/{path}/restore { commit, baseHash?, message? } → SaveResult
-//   GET    /api/brains/{b}/log?path=&op=&since=&until=&limit=&all=  → { changes }
+//   GET    /api/brains/{b}/log?path=&op=&since=&until=&limit=&all=&q=  → { changes } (q: message words)
 //   GET    /api/brains/{b}/status                                → EngineStatus
 //   GET    /api/brains/{b}/titles                                → { notes: NoteTitle[] }
 //   GET    /api/brains/{b}/dangling                              → { dangling: DanglingCount[] }
@@ -28,6 +28,11 @@
 // A request may name its client with `X-Somememos-Client: <client id>`: the
 // server's engine records events and change records under it, and git
 // commits are authored by it.
+//
+// Requests that log nothing (search, list, log, status, titles, dangling,
+// history and versions, GET diary, a note read with `record=false`) run
+// without the brain's lock on a read-only snapshot (`BrainService.readBrain`);
+// everything else is serialized per brain (`BrainService.withBrain`).
 //
 // Errors are `{ error: { code, message, path? } }` with a proper status.
 // Cross-origin browser requests are refused: there are no CORS headers, and
@@ -309,6 +314,9 @@ export function createApp(options: AppOptions): App {
     const clientId = clientHeader ?? undefined;
     const withBrain = <T>(fn: (ctx: BrainContext) => Promise<T>): Promise<T> =>
       svc.withBrain(owner, brainId, clientId ? { clientId } : {}, fn);
+    // A pure read that logs nothing: no brain lock, no repository check (brains.ts).
+    const readBrain = <T>(fn: (ctx: BrainContext) => Promise<T>): Promise<T> =>
+      svc.readBrain(owner, brainId, clientId ? { clientId } : {}, fn);
     const allow = (...methods: string[]) => {
       if (!methods.includes(method)) {
         throw new HttpError(405, 'method-not-allowed', `use ${methods.join(' or ')}`, {
@@ -345,12 +353,12 @@ export function createApp(options: AppOptions): App {
         const limit = intParam(params, 'limit') ?? 200;
         if (limit < 1 || limit > 1000)
           throw new HttpError(400, 'invalid-argument', 'limit must be 1 to 1000');
-        return json(200, await withBrain((ctx) => noteHistory(ctx, checkRole(ctx, path), limit)));
+        return json(200, await readBrain((ctx) => noteHistory(ctx, checkRole(ctx, path), limit)));
       }
       if (decoded.length > 2 && decoded.at(-2) === 'versions') {
         allow('GET');
         const path = notePath(decoded.slice(0, -2).join('/'));
-        return json(200, await withBrain((ctx) => pastVersion(ctx, checkRole(ctx, path), last)));
+        return json(200, await readBrain((ctx) => pastVersion(ctx, checkRole(ctx, path), last)));
       }
       if (last === 'versions' && decoded.length > 1) {
         allow('GET');
@@ -360,7 +368,7 @@ export function createApp(options: AppOptions): App {
           throw new HttpError(400, 'invalid-argument', 'hash must be a SHA-256 hex hash');
         return json(
           200,
-          await withBrain(async (ctx) => {
+          await readBrain(async (ctx) => {
             const rows = await ctx.query<{ commit: string }>(
               `SELECT commit FROM note_versions WHERE brain_id = $1 AND path = $2 AND hash = $3
                ORDER BY mutation DESC LIMIT 1`,
@@ -391,11 +399,11 @@ export function createApp(options: AppOptions): App {
       const path = notePath(decoded.join('/'));
       if (method === 'GET') {
         const record = boolParam(params, 'record');
+        // A read that logs nothing needs no lock; one that logs a read event does.
+        const run = record === false ? readBrain : withBrain;
         return json(
           200,
-          await withBrain((ctx) =>
-            ctx.engine.readNote(path, record === undefined ? {} : { record }),
-          ),
+          await run((ctx) => ctx.engine.readNote(path, record === undefined ? {} : { record })),
         );
       }
       if (method === 'PUT') {
@@ -436,7 +444,7 @@ export function createApp(options: AppOptions): App {
         const until = stringParam(params, 'until');
         return json(
           200,
-          await withBrain((ctx) =>
+          await readBrain((ctx) =>
             ctx.engine.search(q, {
               ...(mode ? { mode } : {}),
               ...(limit !== undefined ? { limit } : {}),
@@ -452,7 +460,7 @@ export function createApp(options: AppOptions): App {
         const limit = intParam(params, 'limit');
         return json(
           200,
-          await withBrain((ctx) =>
+          await readBrain((ctx) =>
             ctx.engine.list(mode ?? 'hot', limit !== undefined ? { limit } : {}),
           ),
         );
@@ -478,10 +486,12 @@ export function createApp(options: AppOptions): App {
         const until = intParam(params, 'until');
         const limit = intParam(params, 'limit');
         const all = boolParam(params, 'all');
-        const changes = await withBrain((ctx) =>
+        const query = stringParam(params, 'q');
+        const changes = await readBrain((ctx) =>
           ctx.engine.log({
             ...(path !== undefined ? { path: notePath(path) } : {}),
             ...(op !== undefined ? { op } : {}),
+            ...(query !== undefined ? { query } : {}),
             ...(since !== undefined ? { since } : {}),
             ...(until !== undefined ? { until } : {}),
             ...(limit !== undefined ? { limit } : {}),
@@ -492,20 +502,20 @@ export function createApp(options: AppOptions): App {
       }
       case 'status':
         allow('GET');
-        return json(200, await withBrain((ctx) => ctx.engine.status()));
+        return json(200, await readBrain((ctx) => ctx.engine.status()));
       case 'titles':
         allow('GET');
-        return json(200, { notes: await withBrain((ctx) => ctx.engine.noteTitles()) });
+        return json(200, { notes: await readBrain((ctx) => ctx.engine.noteTitles()) });
       case 'dangling':
         allow('GET');
-        return json(200, { dangling: await withBrain((ctx) => ctx.engine.danglingLinks()) });
+        return json(200, { dangling: await readBrain((ctx) => ctx.engine.danglingLinks()) });
       case 'diary': {
         const date =
           method === 'POST'
             ? optionalString(object(await readJson(request, SMALL_BODY)), 'date')
             : stringParam(params, 'date');
         if (method === 'GET')
-          return json(200, await withBrain((ctx) => ctx.engine.diaryPath(date)));
+          return json(200, await readBrain((ctx) => ctx.engine.diaryPath(date)));
         allow('POST');
         return json(200, await withBrain((ctx) => ctx.engine.ensureDiary(date)));
       }

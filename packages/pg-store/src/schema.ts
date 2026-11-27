@@ -227,11 +227,41 @@ CREATE TABLE note_versions (
 CREATE INDEX note_versions_mutation ON note_versions (brain_id, mutation);
 `;
 
+// The burst rule (core storage/burst.ts) and dangling links' display form,
+// both derived data. `burst_window` NULL means 0 (off), which is what every
+// fold before this migration used, so stored scores stay valid; a server
+// whose config sets a window rebuilds them on its next fold. Links stored
+// before this have no display form and show their key until their note is
+// indexed again.
+const BURST_AND_DISPLAY = `
+ALTER TABLE index_state ADD COLUMN burst_window double precision;  -- NULL: 0, off
+
+-- The burst rule's state: the last counted event time per (item, kind).
+CREATE TABLE burst_last (
+  brain_id text COLLATE "C" NOT NULL REFERENCES brains,
+  item     text COLLATE "C" NOT NULL,
+  kind     text COLLATE "C" NOT NULL,
+  time     bigint NOT NULL,                  -- Unix seconds
+  PRIMARY KEY (brain_id, item, kind)
+);
+
+ALTER TABLE links ADD COLUMN display text;  -- a dangling link's text as written; otherwise NULL
+`;
+
 /** Every migration, in order. Append only. */
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'initial', sql: INITIAL },
   { version: 2, name: 'server', sql: SERVER },
+  { version: 3, name: 'burst-and-display', sql: BURST_AND_DISPLAY },
 ];
 
 /** The derived tables of a brain, in an order safe to delete from. */
-export const DERIVED_TABLES = ['postings', 'sections', 'links', 'notes', 'scores', 'index_meta'];
+export const DERIVED_TABLES = [
+  'postings',
+  'sections',
+  'links',
+  'notes',
+  'scores',
+  'burst_last',
+  'index_meta',
+];

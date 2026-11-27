@@ -17,11 +17,14 @@ import type { Posting } from '../keyword/search.js';
 import { EVENT_KINDS, type EventKind } from '../timescore/kinds.js';
 import type { ItemScores } from '../timescore/events.js';
 import { combine } from '../timescore/timescore.js';
+import { assertValidBurstWindow } from './burst.js';
 import type { ScoresByKind } from '../timescore/weights.js';
 import {
+  BurstWindowMismatchError,
   FoldConflictError,
   HalfLifeMismatchError,
   type AnalyzerMismatch,
+  type BurstState,
   type AppendOptions,
   type AppendResult,
   type ChangeFilter,
@@ -56,6 +59,8 @@ import {
   assertValidScoreOp,
   compareAnalyzers,
   compareStrings,
+  danglingCounts,
+  linkDisplay,
   normalizeChangePaths,
   sameHalfLives,
   sectionId,
@@ -71,14 +76,23 @@ interface MemoryDoc {
 interface MemoryIndexState {
   analyzer: AnalyzerOptions;
   notes: Map<string, NoteRecord>;
-  /** source → target → dangling. Inner maps are replaced, never mutated. */
-  links: Map<string, ReadonlyMap<string, boolean>>;
+  /** source → target → link. Inner maps are replaced, never mutated. */
+  links: Map<string, ReadonlyMap<string, StoredLink>>;
   docs: Map<string, MemoryDoc>;
   /** item → "kind\0halfLife" → log score. Inner maps are replaced, never mutated. */
   scores: Map<string, ReadonlyMap<string, number>>;
+  /** item → kind → last counted time (the burst rule). Inner maps are replaced, never mutated. */
+  burst: Map<string, ReadonlyMap<EventKind, number>>;
   cursor: number;
   halfLives: HalfLives | null;
+  /** 0 when off or nothing folded. */
+  burstWindow: number;
   meta: Map<string, string>;
+}
+
+interface StoredLink {
+  readonly dangling: boolean;
+  readonly display?: string;
 }
 
 /** Everything a memory brain holds. Pass the same object to reopen it. */
@@ -98,8 +112,10 @@ function newIndexState(analyzer: AnalyzerOptions): MemoryIndexState {
     links: new Map(),
     docs: new Map(),
     scores: new Map(),
+    burst: new Map(),
     cursor: 0,
     halfLives: null,
+    burstWindow: 0,
     meta: new Map(),
   };
 }
@@ -111,8 +127,10 @@ function snapshotIndex(s: MemoryIndexState): MemoryIndexState {
     links: new Map(s.links),
     docs: new Map(s.docs),
     scores: new Map(s.scores),
+    burst: new Map(s.burst),
     cursor: s.cursor,
     halfLives: s.halfLives,
+    burstWindow: s.burstWindow,
     meta: new Map(s.meta),
   };
 }
@@ -265,7 +283,19 @@ class MemoryScoreStore implements ScoreStore {
 
   foldState(): FoldState {
     const s = this.state();
-    return { cursor: s.cursor, halfLives: s.halfLives };
+    return s.burstWindow > 0
+      ? { cursor: s.cursor, halfLives: s.halfLives, burstWindow: s.burstWindow }
+      : { cursor: s.cursor, halfLives: s.halfLives };
+  }
+
+  burstState(items: readonly string[]): BurstState {
+    const s = this.state();
+    const out: BurstState = new Map();
+    for (const item of new Set(items)) {
+      const inner = s.burst.get(item);
+      if (inner && inner.size > 0) out.set(item, Object.fromEntries(inner));
+    }
+    return out;
   }
 
   getItem(item: string): ItemScores<string> | undefined {
@@ -289,9 +319,23 @@ class MemoryScoreStore implements ScoreStore {
     if (s.halfLives && !sameHalfLives(s.halfLives, batch.halfLives)) {
       throw new HalfLifeMismatchError(s.halfLives, batch.halfLives);
     }
+    const window = batch.burstWindow ?? 0;
+    assertValidBurstWindow(window);
+    if (s.halfLives && s.burstWindow !== window) {
+      throw new BurstWindowMismatchError(s.burstWindow, window);
+    }
     if (!Number.isSafeInteger(batch.toCursor) || batch.toCursor < batch.fromCursor) {
       throw new RangeError(`toCursor must be an integer >= fromCursor, not ${batch.toCursor}`);
     }
+    const burst = new Map(s.burst);
+    const burstOwned = new Set<string>();
+    const burstOf = (item: string): Map<EventKind, number> => {
+      if (!burstOwned.has(item)) {
+        burst.set(item, new Map(burst.get(item) ?? []));
+        burstOwned.add(item);
+      }
+      return burst.get(item) as Map<EventKind, number>;
+    };
     // Stage on a copy, so an invalid op part-way through changes nothing.
     const staged = new Map(s.scores);
     const owned = new Set<string>();
@@ -308,9 +352,21 @@ class MemoryScoreStore implements ScoreStore {
         const inner = mutable(op.item);
         const key = scoreKey(op.kind, op.halfLife);
         inner.set(key, combine(inner.get(key) ?? -Infinity, op.logScore));
+      } else if (op.type === 'last') {
+        const inner = burstOf(op.item);
+        inner.set(op.kind, Math.max(inner.get(op.kind) ?? -Infinity, op.time));
       } else {
+        if (op.from === op.to) continue;
+        const fromBurst = burst.get(op.from);
+        if (fromBurst) {
+          const to = burstOf(op.to);
+          for (const [kind, time] of fromBurst)
+            to.set(kind, Math.max(to.get(kind) ?? -Infinity, time));
+          burst.delete(op.from);
+          burstOwned.delete(op.from);
+        }
         const from = staged.get(op.from);
-        if (!from || op.from === op.to) continue;
+        if (!from) continue;
         const to = mutable(op.to);
         for (const [key, value] of from) to.set(key, combine(to.get(key) ?? -Infinity, value));
         staged.delete(op.from);
@@ -318,15 +374,19 @@ class MemoryScoreStore implements ScoreStore {
       }
     }
     s.scores = staged;
+    s.burst = burst;
     s.cursor = batch.toCursor;
     s.halfLives = batch.halfLives;
+    s.burstWindow = window;
   }
 
   clear(): void {
     const s = this.state();
     s.scores = new Map();
+    s.burst = new Map();
     s.cursor = 0;
     s.halfLives = null;
+    s.burstWindow = 0;
   }
 }
 
@@ -365,12 +425,16 @@ class MemoryNoteStore implements NoteStore {
   }
 
   replaceLinks(source: string, links: readonly NoteLink[]): void {
-    const inner = new Map<string, boolean>();
+    const inner = new Map<string, StoredLink>();
     for (const link of links) {
       if (typeof link.target !== 'string' || link.target === '') {
         throw new RangeError('link target must be a non-empty string');
       }
-      inner.set(link.target, Boolean(link.dangling));
+      const display = linkDisplay(link);
+      inner.set(link.target, {
+        dangling: Boolean(link.dangling),
+        ...(display !== undefined ? { display } : {}),
+      });
     }
     const s = this.state();
     if (inner.size === 0) s.links.delete(source);
@@ -381,7 +445,11 @@ class MemoryNoteStore implements NoteStore {
     const inner = this.state().links.get(source);
     if (!inner) return [];
     return [...inner]
-      .map(([target, dangling]) => ({ target, dangling }))
+      .map(([target, l]) => ({
+        target,
+        dangling: l.dangling,
+        ...(l.display !== undefined ? { display: l.display } : {}),
+      }))
       .sort((a, b) => compareStrings(a.target, b.target));
   }
 
@@ -392,15 +460,13 @@ class MemoryNoteStore implements NoteStore {
   }
 
   danglingTargets(): DanglingCount[] {
-    const counts = new Map<string, number>();
+    const links: { key: string; display: string | undefined }[] = [];
     for (const inner of this.state().links.values()) {
-      for (const [target, dangling] of inner) {
-        if (dangling) counts.set(target, (counts.get(target) ?? 0) + 1);
+      for (const [target, l] of inner) {
+        if (l.dangling) links.push({ key: target, display: l.display });
       }
     }
-    return [...counts]
-      .map(([key, count]) => ({ key, count }))
-      .sort((a, b) => b.count - a.count || compareStrings(a.key, b.key));
+    return danglingCounts(links);
   }
 }
 

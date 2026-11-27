@@ -330,8 +330,8 @@ describe('status', () => {
       'folded: through 3 of 3',
       'uncommitted: 1 changed note (somememos commit -m "<why>")',
       '  memos/pear.md',
-      'weights: read 1, edit 1, mention 1; alpha 1',
-      'half-lives: day 1d, week 7d, month 30d, year 365d',
+      'weights: read 1, edit 1, mention 1; alpha 0.5',
+      'half-lives: day 1d, week 7d, month 30d, year 365d; burst window 1h',
       'roles: excluded private/; source sources/; dated diary/{YYYY}/{MM}/{YYYY}-{MM}-{DD}.md; memo memos/',
     ]);
   });
@@ -358,7 +358,7 @@ describe('status', () => {
     expect(record.events).toEqual({ read: 0, edit: 0, mention: 0, rename: 0 });
     expect(record.firstIndexedAt).toBe(NOW);
     expect(Object.keys(record.config as object).sort()).toEqual(
-      ['alpha', 'analyzer', 'changeOps', 'halfLives', 'roles', 'weights'].sort(),
+      ['alpha', 'analyzer', 'burstWindow', 'changeOps', 'halfLives', 'roles', 'weights'].sort(),
     );
   });
 });

@@ -6,7 +6,7 @@
 
 import type { IndexSummary } from '../indexing/pass.js';
 import * as markdown from '../markdown/index.js';
-import type { BrainConfig } from '../storage/config.js';
+import { foldOptions, type BrainConfig } from '../storage/config.js';
 import { contentHash, sha256Hex, utf8Length, type ContentStore } from '../storage/content.js';
 import { foldPending } from '../storage/fold.js';
 import type {
@@ -20,8 +20,9 @@ import type {
 import {
   SYNC_CLOCK_SKEW,
   SYNC_LIMITS,
-  conflictPath,
+  conflictCopyPath,
   isSyncablePath,
+  truncateChangeMessage,
   type SyncChange,
   type SyncEdit,
   type SyncEvent,
@@ -29,6 +30,7 @@ import {
   type SyncResponse,
 } from '../sync/protocol.js';
 import { readSyncState, writeSyncState, clearSyncState, type SyncState } from '../sync/state.js';
+import { addPendingRemote, type PendingRemote } from '../indexing/state.js';
 import {
   EngineError,
   type Engine,
@@ -172,7 +174,7 @@ export function createSyncMethods(ctx: SyncContext) {
       records.length > 0
         ? await stores.events.appendChanges(records, { now: at })
         : { appended: 0, duplicates: 0 };
-    await foldPending(stores.events, stores.scores, { halfLives: config.halfLives });
+    await foldPending(stores.events, stores.scores, foldOptions(config));
     return { events: appendedEvents, changes: appendedChanges, skipped };
   };
 
@@ -183,6 +185,20 @@ export function createSyncMethods(ctx: SyncContext) {
     const renamed: { from: string; to: string }[] = [];
     const touched = new Set<string>();
     let skipped = 0;
+    // Record what is about to be written before the first write, so a crash
+    // before the no-logging pass never turns these into local edits.
+    const pending: PendingRemote = {};
+    for (const note of notes) {
+      if (!accepts(note.path)) continue;
+      if ('text' in note) pending[note.path] = note.hash;
+      else if ('renamedTo' in note && accepts(note.renamedTo)) {
+        const hash = await localHash(note.path);
+        if (hash === undefined) continue;
+        pending[note.path] = null;
+        if (!(await content.stat(note.renamedTo))) pending[note.renamedTo] = hash;
+      } else pending[note.path] = null;
+    }
+    await addPendingRemote(stores.meta, pending);
     for (const note of notes) {
       if (!accepts(note.path)) {
         skipped++;
@@ -390,7 +406,7 @@ export function createSyncMethods(ctx: SyncContext) {
         since: state.since,
         client: config.clientId,
         events: entries.map(toSyncEvent),
-        changes: changes.map(toSyncChange),
+        changes: changes.map((c) => truncateChangeMessage(toSyncChange(c))),
         edits,
       },
       cursor: {
@@ -431,16 +447,25 @@ export function createSyncMethods(ctx: SyncContext) {
     let applied = 0;
     let duplicates = 0;
 
+    /** Writes (or removes) a note as the server has it, recorded as pending first. */
+    const writeRemote = async (path: string, text: string | null, hash: string | null) => {
+      await addPendingRemote(stores.meta, {
+        [path]: text === null ? null : (hash ?? (await contentHash(text))),
+      });
+      if (text === null) await content.remove(path);
+      else await content.write(path, text, { mtime: now() });
+    };
+
     const takeServerVersion = async (
       path: string,
       hash: string | null | undefined,
       text: string | null | undefined,
     ) => {
       if (typeof text === 'string' && typeof hash === 'string') {
-        await content.write(path, text, { mtime: now() });
+        await writeRemote(path, text, hash);
         bases[path] = hash;
       } else {
-        await content.remove(path);
+        await writeRemote(path, null, null);
         delete bases[path];
       }
       touched.add(path);
@@ -477,13 +502,21 @@ export function createSyncMethods(ctx: SyncContext) {
         if (text !== undefined && (await contentHash(text)) !== result.currentHash) {
           const taken = new Set<string>();
           for (const e of await content.list()) taken.add(e.path);
-          kept = conflictPath(localPath, config.clientId, ctx.today(), (p) => taken.has(p));
-          await content.write(kept, text, { mtime: now() });
+          kept = conflictCopyPath(
+            localPath,
+            config.clientId,
+            ctx.today(),
+            (p) => taken.has(p),
+            accepts,
+            config.roles,
+          );
+          // This copy's edit was logged when it was made; keeping it aside logs nothing.
+          await writeRemote(kept, text, null);
           touched.add(kept);
           conflictFiles.push({ path: kept, original: edit.path });
         }
         if (localPath !== edit.path) {
-          await content.remove(localPath);
+          await writeRemote(localPath, null, null);
           touched.add(localPath);
         }
       }
@@ -513,7 +546,7 @@ export function createSyncMethods(ctx: SyncContext) {
           if ((await contentHash(note.text)) !== note.hash) {
             throw new EngineError('invalid-argument', 'a note from sync does not match its hash');
           }
-          await content.write(note.path, note.text, { mtime: now() });
+          await writeRemote(note.path, note.text, note.hash);
           bases[note.path] = note.hash;
           touched.add(note.path);
         } else {
@@ -522,7 +555,7 @@ export function createSyncMethods(ctx: SyncContext) {
       } else if (mine === undefined) {
         delete bases[note.path];
       } else if (mine === base) {
-        await content.remove(note.path);
+        await writeRemote(note.path, null, null);
         delete bases[note.path];
         touched.add(note.path);
       } else {

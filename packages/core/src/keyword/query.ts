@@ -67,3 +67,32 @@ export function parseQuery(query: string, options?: Partial<AnalyzerOptions>): P
   }
   return { clauses, terms };
 }
+
+/**
+ * Whether `text` matches every clause of `query`: each term occurs in it, and
+ * each phrase's terms occur at consecutive positions. The text is analyzed
+ * with `options`, which must be the analyzer the query was parsed with. A
+ * query with no clauses matches nothing. For searching short texts one by one
+ * (change messages), not an index.
+ */
+export function matchesAllClauses(
+  text: string,
+  query: ParsedQuery,
+  options?: Partial<AnalyzerOptions>,
+): boolean {
+  if (query.clauses.length === 0) return false;
+  const tokens = analyze(text, options).map((t) => t.text);
+  const positions = new Map<string, number[]>();
+  tokens.forEach((term, i) => {
+    let list = positions.get(term);
+    if (!list) positions.set(term, (list = []));
+    list.push(i);
+  });
+  return query.clauses.every((clause) => {
+    if (clause.kind === 'term') return positions.has(clause.term);
+    const [first, ...rest] = clause.terms;
+    return (positions.get(first as string) ?? []).some((start) =>
+      rest.every((term, j) => tokens[start + j + 1] === term),
+    );
+  });
+}

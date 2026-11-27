@@ -48,6 +48,38 @@ export function newSchemaName(): string {
   return name;
 }
 
+/** Schemas created (or being created) by this test file, by name. */
+const created = new Map<string, Promise<void>>();
+
+/** Postgres error codes a racing `CREATE SCHEMA IF NOT EXISTS` can raise. */
+const SCHEMA_RACE_CODES = new Set(['23505', '42P06']);
+
+/**
+ * Creates `schema` once per test file. Several concurrent
+ * `CREATE SCHEMA IF NOT EXISTS` statements race in Postgres (one fails with
+ * a unique violation on `pg_namespace`), so the first call creates it and
+ * every other waits for that; a race with another process is retried.
+ */
+function ensureSchema(pool: pg.Pool, schema: string): Promise<void> {
+  let done = created.get(schema);
+  if (!done) {
+    done = (async () => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await pool.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
+          return;
+        } catch (error) {
+          const code = (error as { code?: string }).code;
+          if (!SCHEMA_RACE_CODES.has(code ?? '') || attempt >= 5) throw error;
+        }
+      }
+    })();
+    created.set(schema, done);
+    done.catch(() => created.delete(schema));
+  }
+  return done;
+}
+
 /** A pool on the test database whose search_path is `schema` (created if missing). */
 export async function poolFor(schema: string, max = 10): Promise<pg.Pool> {
   if (!TEST_DATABASE_URL) throw new Error(SKIP_MESSAGE);
@@ -57,15 +89,7 @@ export async function poolFor(schema: string, max = 10): Promise<pg.Pool> {
     options: `-c search_path=${schema}`,
   });
   pools.push(pool);
-  try {
-    await pool.query(`CREATE SCHEMA IF NOT EXISTS ${schema}`);
-  } catch (error) {
-    // Postgres does not make CREATE SCHEMA IF NOT EXISTS safe against a
-    // concurrent creator: the loser gets a duplicate-key (23505) or
-    // duplicate-schema (42P06) error. Either way the schema now exists.
-    const code = (error as { code?: string }).code;
-    if (code !== '23505' && code !== '42P06') throw error;
-  }
+  await ensureSchema(pool, schema);
   return pool;
 }
 
@@ -84,6 +108,7 @@ if (TEST_DATABASE_URL) {
     try {
       for (const schema of schemas.splice(0)) {
         await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`);
+        created.delete(schema);
       }
     } finally {
       await admin.end();
@@ -103,6 +128,7 @@ export const BRAIN_TABLES = [
   'links',
   'notes',
   'scores',
+  'burst_last',
   'index_meta',
   'index_state',
   'change_paths',
@@ -201,7 +227,7 @@ export async function populateNoiseBrain(pool: pg.Pool, brainId: string): Promis
       date: null,
     });
     await s.notes.replaceLinks(path, [
-      { target: 'ember plan', dangling: true },
+      { target: 'ember plan', dangling: true, display: 'Ember Plan' },
       { target: 'saffron', dangling: true },
       { target: 'memos/x.md', dangling: false },
     ]);
@@ -210,7 +236,7 @@ export async function populateNoiseBrain(pool: pg.Pool, brainId: string): Promis
       { heading: 'Meadow', body: 'violin falcon maple compost planting' },
     ]);
   }
-  await storage.foldPending(s.events, s.scores);
+  await storage.foldPending(s.events, s.scores, { burstWindow: storage.DEFAULT_BURST_WINDOW });
   await s.close();
   const content = await createPgContentStore({ pool, brainId, now: () => NOW });
   for (const path of ['memos/x.md', 'memos/a.md', 'diary/2027/01/2027-01-15.md']) {

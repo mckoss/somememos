@@ -1,9 +1,12 @@
 // Ranking parameters (PLAN.md section 5; IMPLEMENTATION.md task 1.12).
 //
-// Every value here is a PLACEHOLDER until `somememos eval` measures it. The
-// project's rule is that no ranking parameter is chosen by intuition, so each
-// default below is the simplest neutral choice, not a tuned one, and every one
-// can be overridden per call (and per experiment setting).
+// The project's rule is that no ranking parameter is chosen by intuition.
+// Measured with `somememos eval` on 2026-11-27 (PLAN.md section 5, "First
+// experiment results"): `alpha` 0.5, `hot` on the week half-life, the mention
+// weight 1, and link spreading off. The read weight (1) is an unmeasured
+// placeholder (imported history has no reads), and so is every other value
+// here: the simplest neutral choice until an experiment measures it. Every
+// one can be overridden per call (and per experiment setting).
 
 import type { Bm25fParamsOverride } from '../keyword/bm25f.js';
 import type { MatchMode } from '../keyword/search.js';
@@ -143,11 +146,18 @@ export interface RankingParamsInput {
   readonly halfLifeSeconds?: Readonly<Record<string, number>>;
 }
 
-/** The placeholder defaults. None of them is measured yet. */
+/**
+ * The defaults. Measured on 2026-11-27 (PLAN.md section 5): `alpha`,
+ * `halfLives.hot`, the mention weight and `spreading` (off). The read weight
+ * and the rest are unmeasured placeholders.
+ */
 export const DEFAULT_RANKING_PARAMS: RankingParams = Object.freeze({
+  /** Mention 1: measured. Read 1: placeholder. Edit 1: the unit the others are relative to. */
   weights: UNIT_WEIGHTS,
-  alpha: 1,
+  /** Measured: MRR 0.62 at 0.5 against 0.59 at 1. */
+  alpha: 0.5,
   halfLives: Object.freeze({
+    /** Measured: the week half-life is best for search. */
     hot: 'week',
     trendingFast: 'week',
     trendingSlow: 'month',
@@ -159,6 +169,7 @@ export const DEFAULT_RANKING_PARAMS: RankingParams = Object.freeze({
   combination: Object.freeze({ hot: 'sum', trending: 'sum', neglected: 'sum' }),
   rerankDepth: 20,
   floor: Object.freeze({ mode: 'relative', offset: -Math.LN2 }),
+  /** Measured: spreading hurt in every form tried, so it stays off. */
   spreading: Object.freeze({ direction: 'off', beta: 0.5 }),
   trendingCandidates: 100,
   neglectedCandidates: 100,

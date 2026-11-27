@@ -285,7 +285,7 @@ describe('importGitHistory on synthetic brains', () => {
     const early = entries.filter((e) => e.kind === 'mention' && e.item === key && e.time < created);
     expect(early.length).toBeGreaterThan(0);
 
-    await storage.foldPending(stores.events, stores.scores, { halfLives: config.halfLives });
+    await storage.foldPending(stores.events, stores.scores, storage.foldOptions(config));
     expect(await stores.scores.getItem(key)).toBeUndefined();
     const scores = await stores.scores.getItem(path);
     expect(scores).toBeDefined();
@@ -295,7 +295,7 @@ describe('importGitHistory on synthetic brains', () => {
       entries.filter((e) => !(e.kind === 'rename' && e.item === key)),
       { now: NOW },
     );
-    await storage.foldPending(memory.events, memory.scores, { halfLives: config.halfLives });
+    await storage.foldPending(memory.events, memory.scores, storage.foldOptions(config));
     expect(await memory.scores.getItem(key)).toBeDefined();
   });
 
@@ -705,9 +705,11 @@ describe('import-git at scale', () => {
     const built = performance.now() - t0;
     const { dir, stores, config } = cloneBrain(b);
     const result = await importGitHistory({ brainDir: dir, config, stores, now: NOW });
-    const folded = await storage.foldPending(stores.events, stores.scores, {
-      halfLives: config.halfLives,
-    });
+    const folded = await storage.foldPending(
+      stores.events,
+      stores.scores,
+      storage.foldOptions(config),
+    );
     const entries = await allEntries(stores);
     expect(actualByStep(b.brain, entries)).toEqual(expectedFromTruth(b.brain));
     console.log(

@@ -11,3 +11,4 @@ packages/core/src/version.ts
 *.md
 .claude/
 test-results/
+packages/cli/bundle/

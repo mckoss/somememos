@@ -81,7 +81,7 @@ describePg('the HTTP API', () => {
     expect(r.body).toMatchObject({
       version: VERSION,
       status: 'ok',
-      database: { configured: true, connected: true, migration: { current: 2, expected: 2 } },
+      database: { configured: true, connected: true, migration: { current: 3, expected: 3 } },
     });
   });
 
@@ -640,5 +640,63 @@ describePg('the HTTP API', () => {
     expect((await server.request('PATCH', `${b}/notes/memos/kiln.md`, { text: 'x' })).status).toBe(
       405,
     );
+  });
+  it('serves pure reads without the brain lock, from the recorded commit', async () => {
+    const server = await testServer();
+    await createBrain(server, 'reads');
+    const b = '/api/brains/reads';
+    // Before the first commit a read falls back to the locked path, and still works.
+    expect((await server.request('GET', `${b}/list`)).status).toBe(200);
+    await server.request('PUT', `${b}/notes/memos/kiln.md`, {
+      text: '# Kiln\n\nGlaze firing [[Cone Six]].\n',
+      message: 'ingest kiln notes',
+    });
+    // Another process holds the brain's lock (as a long write would).
+    const holder = await server.pool.connect();
+    await holder.query('BEGIN');
+    await holder.query('SELECT pg_advisory_xact_lock(hashtextextended($1, 0))', [
+      'somememos-brain:reads',
+    ]);
+    // A stray edit in the working tree that no request committed: reads never see it.
+    const { writeFileSync } = await import('node:fs');
+    writeFileSync(join(server.dataDir, 'brains', 'reads', 'memos', 'kiln.md'), '# Torn\n');
+    try {
+      const reads = await Promise.all([
+        server.request('GET', `${b}/search?q=glaze`),
+        server.request('GET', `${b}/list`),
+        server.request('GET', `${b}/status`),
+        server.request('GET', `${b}/titles`),
+        server.request('GET', `${b}/dangling`),
+        server.request('GET', `${b}/log?q=kiln`),
+        server.request('GET', `${b}/notes/memos/kiln.md/history`),
+        server.request('GET', `${b}/notes/memos/kiln.md?record=false`),
+      ]);
+      expect(reads.map((r) => r.status)).toEqual(Array(8).fill(200));
+      expect(reads[0]?.body.results.map((r: { item: string }) => r.item)).toEqual([
+        'memos/kiln.md',
+      ]);
+      expect(reads[4]?.body.dangling).toEqual([{ key: 'cone six', display: 'Cone Six', count: 1 }]);
+      expect(reads[5]?.body.changes.map((c: { message: string }) => c.message)).toEqual([
+        'ingest kiln notes',
+      ]);
+      expect(reads[7]?.body).toMatchObject({ text: '# Kiln\n\nGlaze firing [[Cone Six]].\n' });
+      // A read that logs an event waits for the lock.
+      let done = false;
+      const recorded = server.request('GET', `${b}/notes/memos/kiln.md`).then((r) => {
+        done = true;
+        return r;
+      });
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      expect(done).toBe(false);
+      await holder.query('ROLLBACK');
+      // The locked request first puts the working tree back to the recorded commit.
+      expect((await recorded).body).toMatchObject({
+        recorded: true,
+        text: '# Kiln\n\nGlaze firing [[Cone Six]].\n',
+      });
+    } finally {
+      await holder.query('ROLLBACK').catch(() => undefined);
+      holder.release();
+    }
   });
 });

@@ -9,6 +9,7 @@ import { SqliteContentStore } from './content-store.js';
 import { SqliteEventLog, SqliteMeta } from './event-log.js';
 import {
   META_ANALYZER,
+  META_FOLD_BURST_WINDOW,
   META_FOLD_CURSOR,
   META_FOLD_HALF_LIVES,
   SqliteNoteStore,
@@ -118,7 +119,7 @@ export function createSqliteStores(options: SqliteStoresOptions): SqliteStores {
         : requested;
       atomic(idb, () => {
         for (const table of INDEX_TABLES) idb.exec(`DELETE FROM ${table}`);
-        for (const key of [META_FOLD_CURSOR, META_FOLD_HALF_LIVES]) {
+        for (const key of [META_FOLD_CURSOR, META_FOLD_HALF_LIVES, META_FOLD_BURST_WINDOW]) {
           idb.run(`DELETE FROM meta WHERE key = :key`, { key });
         }
         terms.setAnalyzer(next);

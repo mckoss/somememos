@@ -73,9 +73,11 @@ async function importAndFold(options: {
   });
   let folded: ImportGitCommandResult['folded'] = null;
   if (!dryRun && stores) {
-    const f = await storage.foldPending(stores.events, stores.scores, {
-      halfLives: options.config.halfLives,
-    });
+    const f = await storage.foldPending(
+      stores.events,
+      stores.scores,
+      storage.foldOptions(options.config),
+    );
     folded = { events: f.events, renames: f.renames };
   }
   return { ...result, folded };

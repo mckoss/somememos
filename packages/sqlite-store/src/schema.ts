@@ -16,8 +16,12 @@ import type { Db } from './db.js';
 
 /** Bump when `events.sqlite` changes shape; add a migration from every older version. */
 export const EVENTS_SCHEMA_VERSION = 1;
-/** Bump when `index.sqlite` changes shape; old index files are then rebuilt. */
-export const INDEX_SCHEMA_VERSION = 1;
+/**
+ * Bump when `index.sqlite` changes shape; old index files are then rebuilt.
+ * 2: `links.display` (the link text as written) and `burst_last` (the burst
+ * rule's state).
+ */
+export const INDEX_SCHEMA_VERSION = 2;
 
 /** Internal key in each file's `meta` table. */
 export const SCHEMA_VERSION_KEY = 'schema_version';
@@ -68,7 +72,7 @@ CREATE INDEX change_paths_path ON change_paths (path, change_seq);
 `;
 
 const INDEX_SCHEMA = `
--- Internal settings: schema version, fold cursor and half-lives, analyzer.
+-- Internal settings: schema version, fold cursor, half-lives and burst window, analyzer.
 CREATE TABLE meta (
   key   TEXT PRIMARY KEY,
   value TEXT NOT NULL
@@ -93,6 +97,7 @@ CREATE TABLE links (
   source   TEXT NOT NULL,         -- the linking note's path
   target   TEXT NOT NULL,         -- resolved path, or dangling key
   dangling INTEGER NOT NULL,      -- 1 when target is a dangling key
+  display  TEXT,                  -- a dangling link's text as written; otherwise NULL
   PRIMARY KEY (source, target)
 ) WITHOUT ROWID;
 CREATE INDEX links_target ON links (target, source);
@@ -133,10 +138,26 @@ CREATE TABLE scores (
   log_score REAL NOT NULL,
   PRIMARY KEY (item, kind, half_life)
 ) WITHOUT ROWID;
+
+-- The burst rule's state: the last counted event time per (item, kind).
+CREATE TABLE burst_last (
+  item TEXT NOT NULL,
+  kind TEXT NOT NULL,
+  time INTEGER NOT NULL,          -- Unix seconds
+  PRIMARY KEY (item, kind)
+) WITHOUT ROWID;
 `;
 
 /** The tables of the index file, in an order safe to delete from. */
-export const INDEX_TABLES = ['postings', 'sections', 'links', 'notes', 'scores', 'user_meta'];
+export const INDEX_TABLES = [
+  'postings',
+  'sections',
+  'links',
+  'notes',
+  'scores',
+  'burst_last',
+  'user_meta',
+];
 
 function userTables(db: Db): string[] {
   return db

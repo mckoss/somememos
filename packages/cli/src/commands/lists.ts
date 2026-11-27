@@ -9,9 +9,9 @@ import {
   brainOptions,
   emit,
   parseCommandArgs,
-  withBrain,
+  withSession,
 } from '../brain/index.js';
-import type { Brain } from '../brain/index.js';
+import type { Session } from '../brain/index.js';
 import { EXIT_OK, UsageError } from '../context.js';
 import { activityIndicator, oneLineText, parseLimit, resultLabel } from './shared.js';
 import type { Command } from './types.js';
@@ -70,7 +70,7 @@ Examples:
 }
 
 /** One activation list line. */
-export function formatListLine(brain: Brain, r: engine.ResultView, mode: ListMode): string {
+export function formatListLine(brain: Session, r: engine.ResultView, mode: ListMode): string {
   const parts = [resultLabel(brain, r)];
   if (!r.dangling && r.title !== '') parts.push(oneLineText(r.title, 60));
   parts.push(activityIndicator(r, mode));
@@ -99,7 +99,7 @@ function listCommand(mode: ListMode): Command {
         );
       }
       const limit = parseLimit(values.limit);
-      return withBrain(ctx, brainOptions(globals), async (brain) => {
+      return withSession(ctx, brainOptions(globals), async (brain) => {
         const response = await brain.engine.list(mode, limit === undefined ? {} : { limit });
         emit(ctx, globals.json, response, (r) =>
           r.results.map((x) => formatListLine(brain, x, mode)),

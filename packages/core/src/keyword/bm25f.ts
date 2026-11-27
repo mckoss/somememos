@@ -29,7 +29,7 @@
 
 import { FIELDS, type Field, type FieldValues } from './document.js';
 
-/** BM25F parameters. Every value is a placeholder until `somememos eval` sets it. */
+/** BM25F parameters. The defaults are `DEFAULT_BM25F_PARAMS`. */
 export interface Bm25fParams {
   /** Term-frequency saturation. ≥ 0. */
   readonly k1: number;
@@ -47,14 +47,16 @@ export interface Bm25fParamsOverride {
 }
 
 /**
- * Default parameters. PLACEHOLDERS, not measured: k1 and body b are the usual
- * BM25 textbook values; title and heading are short, so they get less length
- * normalization; field weights favour title and heading over body.
+ * Default parameters. Title weight 5 and body `b` 0.5 were measured with
+ * `somememos eval` on 2026-11-27 (PLAN.md section 5, "First experiment
+ * results": keyword-only MRR 0.46 against 0.43). `k1` made no measurable
+ * difference and keeps the textbook 1.2. Title and heading `b` (0.5) and the
+ * heading and body weights (2, 1) are unmeasured placeholders.
  */
 export const DEFAULT_BM25F_PARAMS: Bm25fParams = Object.freeze({
   k1: 1.2,
-  b: Object.freeze({ title: 0.5, heading: 0.5, body: 0.75 }),
-  weights: Object.freeze({ title: 3, heading: 2, body: 1 }),
+  b: Object.freeze({ title: 0.5, heading: 0.5, body: 0.5 }),
+  weights: Object.freeze({ title: 5, heading: 2, body: 1 }),
 });
 
 /** Merges overrides onto `base` (default: DEFAULT_BM25F_PARAMS) and validates. */

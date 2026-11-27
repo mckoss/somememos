@@ -42,6 +42,13 @@
 // crash between appending to the event log and committing the index, every
 // id the pass logs is derived from what it describes (kind, path, old and new
 // content hash, time), so logging the same change twice stores it once.
+//
+// Changes from elsewhere. Sync records the notes it is about to write
+// (`indexer.pendingRemote`, ./state.ts) before writing them. A pass treats a
+// note whose content hash equals its pending hash as such a change and logs
+// nothing for it (no edit, mention or rename, and it is not uncommitted),
+// even when a crash came between the write and sync's own no-logging pass.
+// A note edited locally since then has another hash and is logged as usual.
 
 import * as markdown from '../markdown/index.js';
 import {
@@ -51,7 +58,7 @@ import {
   type ContentEntry,
   type ContentStore,
 } from '../storage/content.js';
-import type { BrainConfig } from '../storage/config.js';
+import { foldOptions, type BrainConfig } from '../storage/config.js';
 import { foldPending, rebuildScores } from '../storage/fold.js';
 import type { LogInput, NoteLink, NoteRecord, NoteRole, Stores } from '../storage/types.js';
 import { unixNow } from '../storage/validate.js';
@@ -59,10 +66,13 @@ import { ExcludedLinks, linkItemsOf } from './links.js';
 import {
   META_BASELINE,
   META_FIRST_INDEXED,
+  clearPendingRemote,
   deleteLinkTargets,
+  readPendingRemote,
   readFingerprints,
   readLinkTargets,
   readUncommitted,
+  type PendingRemote,
   writeFingerprints,
   writeLinkTargets,
   writeUncommitted,
@@ -245,14 +255,24 @@ interface PassResult {
 }
 
 /** Index everything that changed. Runs inside `indexTransaction`. */
-async function indexChanges(opts: IndexPassOptions, rebuild: boolean): Promise<PassResult> {
+async function indexChanges(
+  opts: IndexPassOptions,
+  rebuild: boolean,
+  pendingRemote: PendingRemote,
+): Promise<PassResult> {
   const { stores, content, config } = opts;
   const classifier = opts.classifier ?? markdown.createRoleClassifier(config.roles);
   const nowFn = opts.now ?? unixNow;
   const now = nowFn();
   const { indexMeta, meta, notes: noteStore, terms } = stores;
   const warnings: string[] = [];
-  const forced = new Set(opts.paths ?? []);
+  const forced = new Set([...(opts.paths ?? []), ...Object.keys(pendingRemote)]);
+  /**
+   * True when sync recorded that it writes `path` with `hash` (null: removes
+   * it) from elsewhere: nothing is logged for it, as with `record: false`.
+   */
+  const fromElsewhere = (path: string, hash: string | null): boolean =>
+    Object.hasOwn(pendingRemote, path) && pendingRemote[path] === hash;
 
   // Re-list under the lock: another process may have changed things.
   const listing = await listContent(content, classifier);
@@ -416,7 +436,7 @@ async function indexChanges(opts: IndexPassOptions, rebuild: boolean): Promise<P
       }
       return;
     }
-    if (!logEvents) return;
+    if (!logEvents || fromElsewhere(file.path, hash)) return;
     const time = eventTime(file);
     if (markdown.isScoredRole(file.role)) {
       logEntries.push({
@@ -449,17 +469,18 @@ async function indexChanges(opts: IndexPassOptions, rebuild: boolean): Promise<P
     const oldHash = (prior.get(path) as NoteRecord).contentHash;
     const targets = await writeNote(loaded);
     indexed++;
-    changed.add(path);
+    if (!fromElsewhere(path, loaded.hash)) changed.add(path);
     await logContentChange(loaded, targets, oldTargets, oldHash);
   }
   for (const [path, loaded] of added) {
     const targets = await writeNote(loaded);
     indexed++;
-    changed.add(path);
+    const remote = fromElsewhere(path, loaded.hash);
+    if (!remote) changed.add(path);
     const from = movedTo.get(path);
     if (from !== undefined) {
-      changed.add(from);
-      if (markdown.isScoredRole(loaded.file.role) && logEvents) {
+      if (!remote) changed.add(from);
+      if (markdown.isScoredRole(loaded.file.role) && logEvents && !remote) {
         logEntries.push({
           id: await derivedId('rename', from, path, loaded.hash),
           kind: 'rename',
@@ -489,7 +510,7 @@ async function indexChanges(opts: IndexPassOptions, rebuild: boolean): Promise<P
       });
     }
   }
-  for (const path of deleted) changed.add(path);
+  for (const path of deleted) if (!fromElsewhere(path, null)) changed.add(path);
 
   // --- Notes whose links may resolve differently now that the set of notes
   // changed: those with a link whose name matches an added or removed path.
@@ -515,6 +536,7 @@ async function indexChanges(opts: IndexPassOptions, rebuild: boolean): Promise<P
           const is = resolver.resolve(target, newPath);
           if (is.kind !== 'resolved' || !added.has(is.path)) continue;
           if (!markdown.isScoredRole(files.get(is.path)?.role)) continue;
+          if (fromElsewhere(is.path, (added.get(is.path) as Loaded).hash)) continue;
           carried.set(was.key, is.path);
         }
       }
@@ -566,9 +588,7 @@ async function indexChanges(opts: IndexPassOptions, rebuild: boolean): Promise<P
   let folded = { events: 0, renames: 0 };
   if (rebuild) {
     // Refold inside the transaction, so no reader sees the scores half rebuilt.
-    const f = await rebuildScores(stores.events, stores.scores, {
-      halfLives: config.halfLives,
-    });
+    const f = await rebuildScores(stores.events, stores.scores, foldOptions(config));
     folded = { events: f.events, renames: f.renames };
   }
 
@@ -601,15 +621,21 @@ export async function runIndexPass(opts: IndexPassOptions): Promise<IndexSummary
     notes.push('the keyword index was built with other analyzer options, so it was rebuilt');
   }
 
+  // Notes sync recorded as being written from elsewhere (indexing/state.ts).
+  const pendingRemote = await readPendingRemote(stores.meta);
+  const hasPending = Object.keys(pendingRemote).length > 0;
+
   let result: PassResult;
   if (rebuild) {
-    result = await stores.indexTransaction(() => indexChanges(opts, true));
+    result = await stores.indexTransaction(() => indexChanges(opts, true, pendingRemote));
   } else {
     const classifier = opts.classifier ?? markdown.createRoleClassifier(config.roles);
     const listing = await listContent(opts.content, classifier);
-    const forced = (opts.paths?.length ?? 0) > 0;
+    const forced = (opts.paths?.length ?? 0) > 0 || hasPending;
     if (forced || !(await upToDate(stores, listing))) {
-      result = await stores.indexTransaction(() => indexChanges({ ...opts, classifier }, false));
+      result = await stores.indexTransaction(() =>
+        indexChanges({ ...opts, classifier }, false, pendingRemote),
+      );
     } else {
       result = {
         scanned: listing.files.size,
@@ -627,9 +653,10 @@ export async function runIndexPass(opts: IndexPassOptions): Promise<IndexSummary
     }
   }
 
-  const fold = await foldPending(stores.events, stores.scores, {
-    halfLives: config.halfLives,
-  });
+  // The pass has indexed those notes and committed: they are no longer pending.
+  if (hasPending) await clearPendingRemote(stores.meta, pendingRemote);
+
+  const fold = await foldPending(stores.events, stores.scores, foldOptions(config));
   return {
     ...result,
     warnings: [...notes, ...result.warnings],

@@ -11,7 +11,7 @@ import {
 import { MemoryKeywordIndex } from './memory-index.js';
 
 // A tiny invented corpus, stemming off, default parameters
-// (k1 = 1.2; b: title 0.5, heading 0.5, body 0.75; weights: title 3, heading 2, body 1).
+// (k1 = 1.2; b: title 0.5, heading 0.5, body 0.5; weights: title 5, heading 2, body 1).
 //
 //   A: title "apple"   heading ""        body "apple banana"               lengths 1/0/2
 //   B: title "cherry"  heading "banana"  body "cherry cherry banana date"  lengths 1/1/4
@@ -20,15 +20,15 @@ import { MemoryKeywordIndex } from './memory-index.js';
 //   N = 3; avglen: title 3/3 = 1, heading 1/3, body 7/3.
 //
 // Query "apple" (df = 1): idf = ln(1 + (3 − 1 + 0.5)/(1 + 0.5)) = ln(8/3) ≈ 0.980829
-//   A: title  B = 0.5 + 0.5·1/1 = 1          → 3·1/1      = 3
-//      body   B = 0.25 + 0.75·2/(7/3) = 0.892857 → 1·1/0.892857 = 1.12
-//      tf̃ = 4.12;  s = 0.980829 · 4.12 · 2.2 / (1.2 + 4.12) ≈ 1.671097
+//   A: title  B = 0.5 + 0.5·1/1 = 1          → 5·1/1      = 5
+//      body   B = 0.5 + 0.5·2/(7/3) = 0.928571 → 1·1/0.928571 = 1.076923
+//      tf̃ = 6.076923;  s = 0.980829 · 6.076923 · 2.2 / (1.2 + 6.076923) ≈ 1.801989
 //
 // Query "banana" (df = 2): idf = ln(1 + 1.5/2.5) = ln 1.6 ≈ 0.470004
-//   A: body tf̃ = 1.12;  s = 0.470004 · 1.12 · 2.2 / 2.32 ≈ 0.499176
+//   A: body tf̃ = 1.076923;  s = 0.470004 · 1.076923 · 2.2 / 2.276923 ≈ 0.489058
 //   B: heading B = 0.5 + 0.5·1/(1/3) = 2 → 2·1/2 = 1
-//      body    B = 0.25 + 0.75·4/(7/3) = 1.535714 → 1/1.535714 = 0.651163
-//      tf̃ = 1.651163;  s = 0.470004 · 1.651163 · 2.2 / 2.851163 ≈ 0.598814
+//      body    B = 0.5 + 0.5·4/(7/3) = 1.357143 → 1/1.357143 = 0.736842
+//      tf̃ = 1.736842;  s = 0.470004 · 1.736842 · 2.2 / 2.936842 ≈ 0.611510
 function tinyCorpus(): MemoryKeywordIndex {
   const index = new MemoryKeywordIndex({ analyzer: { stem: false } });
   index.add('A', { title: 'apple', heading: '', body: 'apple banana' });
@@ -51,21 +51,21 @@ describe('BM25F by hand', () => {
     const hits = tinyCorpus().search('apple');
     expect(hits).toHaveLength(1);
     expect(hits[0]!.id).toBe('A');
-    expect(hits[0]!.score).toBeCloseTo(1.671097058, 8);
+    expect(hits[0]!.score).toBeCloseTo(1.801988628, 8);
     expect(hits[0]!.matchedTerms).toEqual(['apple']);
   });
 
   it('scores across fields and ranks the heading match first', () => {
     const hits = tinyCorpus().search('banana');
     expect(hits.map((h) => h.id)).toEqual(['B', 'A']);
-    expect(hits[0]!.score).toBeCloseTo(0.598813759, 8);
-    expect(hits[1]!.score).toBeCloseTo(0.499176268, 8);
+    expect(hits[0]!.score).toBeCloseTo(0.611510098, 8);
+    expect(hits[1]!.score).toBeCloseTo(0.48905783, 8);
   });
 
   it('sums term scores for a multi-term query', () => {
     const hits = tinyCorpus().search('apple banana');
     expect(hits[0]!.id).toBe('A');
-    expect(hits[0]!.score).toBeCloseTo(1.671097058 + 0.499176268, 8);
+    expect(hits[0]!.score).toBeCloseTo(1.801988628 + 0.48905783, 8);
     expect(hits[0]!.matchedTerms).toEqual(['apple', 'banana']);
   });
 
@@ -111,6 +111,14 @@ describe('parameters', () => {
       weights: { title: 5, heading: 2, body: 1 },
     });
     expect(resolveBm25fParams()).toEqual(DEFAULT_BM25F_PARAMS);
+  });
+
+  it('defaults to the values measured on 2026-11-27 (PLAN.md section 5)', () => {
+    expect(DEFAULT_BM25F_PARAMS).toEqual({
+      k1: 1.2,
+      b: { title: 0.5, heading: 0.5, body: 0.5 },
+      weights: { title: 5, heading: 2, body: 1 },
+    });
   });
 
   it('rejects out-of-range values', () => {

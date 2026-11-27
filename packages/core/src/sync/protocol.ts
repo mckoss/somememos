@@ -7,7 +7,8 @@
 //
 // Everything here is plain JSON data.
 
-import { isMarkdownPath, normalizePath } from '../markdown/paths.js';
+import { baseName, isMarkdownPath, normalizePath } from '../markdown/paths.js';
+import type { FolderRolesConfig } from '../markdown/roles.js';
 import type { EventKind } from '../timescore/kinds.js';
 
 // ---------------------------------------------------------------------------
@@ -211,4 +212,75 @@ export function conflictPath(
   let candidate = `${base}${ext}`;
   for (let n = 2; taken(candidate); n++) candidate = `${base}-${n}${ext}`;
   return candidate;
+}
+
+/**
+ * The literal folder a role pattern starts with (`memos/` → `memos`,
+ * `notes/**\/*.md` → `notes`, `*.md` → ``), or null when even its first
+ * segment has a wildcard or placeholder.
+ */
+function patternFolder(pattern: string): string | null {
+  const p = pattern.trim().replace(/^(?:\.\/|\/)+/, '');
+  const segments = p.split('/');
+  const literal: string[] = [];
+  // Every segment but the last is a folder; stop at the first wildcard or placeholder.
+  for (const segment of segments.slice(0, -1)) {
+    if (/[*?{]/.test(segment) || segment === '') break;
+    literal.push(segment);
+  }
+  if (literal.length === 0 && /[*?{]/.test(segments[0] ?? '') && segments.length > 1) return null;
+  return literal.join('/');
+}
+
+/**
+ * Where a conflicting local version is kept so that it syncs: the
+ * `conflictPath` beside the note when `accepts` it (it has a role there, not
+ * `excluded`, and is syncable), otherwise the same file name in the first
+ * folder of a `memo` pattern that accepts it (then of a `blog` or `source`
+ * pattern), otherwise the brain's root. A conflict copy of a dated entry in
+ * a strictly patterned diary folder (`diary/{YYYY}/{MM}/{YYYY}-{MM}-{DD}.md`)
+ * matches no pattern there, so it goes to the first memo folder. Falls back
+ * to the path beside the note when nothing accepts one (it then stays on
+ * this copy only, still never lost).
+ */
+export function conflictCopyPath(
+  path: string,
+  client: string,
+  date: string,
+  taken: (candidate: string) => boolean,
+  accepts: (candidate: string) => boolean,
+  roles: FolderRolesConfig,
+): string {
+  const beside = conflictPath(path, client, date, taken);
+  if (accepts(beside)) return beside;
+  const folders: string[] = [];
+  for (const role of ['memo', 'blog', 'source'] as const) {
+    for (const pattern of roles[role] ?? []) {
+      const folder = patternFolder(pattern);
+      if (folder !== null && !folders.includes(folder)) folders.push(folder);
+    }
+  }
+  if (!folders.includes('')) folders.push('');
+  const name = baseName(path);
+  for (const folder of folders) {
+    const candidate = conflictPath(folder === '' ? name : `${folder}/${name}`, client, date, taken);
+    if (accepts(candidate)) return candidate;
+  }
+  return beside;
+}
+
+/**
+ * A change record with its message cut to `SYNC_LIMITS.maxMessageLength`
+ * UTF-16 code units (the server's check), ending in `…` when cut, and never
+ * splitting a surrogate pair. Applied when a request is prepared, so an
+ * over-long message never makes the server refuse the whole batch.
+ */
+export function truncateChangeMessage<C extends { readonly message: string | null }>(change: C): C {
+  const max = SYNC_LIMITS.maxMessageLength;
+  const message = change.message;
+  if (typeof message !== 'string' || message.length <= max) return change;
+  let cut = message.slice(0, max - 1);
+  const last = cut.charCodeAt(cut.length - 1);
+  if (last >= 0xd800 && last <= 0xdbff) cut = cut.slice(0, -1);
+  return { ...change, message: `${cut}…` };
 }

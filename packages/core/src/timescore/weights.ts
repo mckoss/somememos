@@ -15,8 +15,10 @@ export type ScoresByKind = Partial<Record<EventKind, LogScore>>;
 export type Weights = Readonly<Record<EventKind, number>>;
 
 /**
- * Every weight 1. PLAN.md: until an experiment has measured them, every weight
- * is 1. That is a placeholder, not a choice.
+ * Every weight 1. Mention 1 (against edit 1) was measured on 2026-11-27
+ * (PLAN.md section 5, "First experiment results": 0.5 and 1 within noise, 0
+ * hurts, 2 slightly worse). The read weight 1 is an unmeasured placeholder:
+ * imported history has no reads.
  */
 export const UNIT_WEIGHTS: Weights = Object.freeze({ read: 1, edit: 1, mention: 1 });
 

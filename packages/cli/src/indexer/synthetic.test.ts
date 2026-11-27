@@ -160,7 +160,10 @@ describe.each([1, 7])('replaying the synthetic brain (seed %i)', (seed) => {
     tmp.remove();
   });
 
-  it('logs exactly the events and renames each step implies', async () => {
+  // One test, 120 index passes in sequence (two per step: SQLite
+  // transactions over ~50 files): about a second on an idle machine, several
+  // on a loaded one, so the default 5 s timeout fails it from load alone.
+  it('logs exactly the events and renames each step implies', { timeout: 60_000 }, async () => {
     let checkedRenames = 0;
     let checkedCarry = 0;
     for (let i = 1; i < brain.steps.length; i++) {
@@ -244,7 +247,7 @@ describe.each([1, 7])('replaying the synthetic brain (seed %i)', (seed) => {
     expect(scores.size).toBeGreaterThan(0);
     const fresh = storage.createMemoryStores();
     await fresh.events.append(await stores.events.readAfter(0), { now });
-    await storage.foldPending(fresh.events, fresh.scores);
+    await storage.foldPending(fresh.events, fresh.scores, storage.foldOptions(config));
     expectScoresClose(scores, await fresh.scores.getAll());
     const s = await pass(true);
     expect(s.events).toEqual({ edit: 0, mention: 0, rename: 0 });

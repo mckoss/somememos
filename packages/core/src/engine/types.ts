@@ -132,7 +132,11 @@ export interface ResultView {
   /** The note path, or null for a dangling item. */
   readonly path: string | null;
   readonly dangling: boolean;
-  /** The note's title, or the dangling key. */
+  /**
+   * The note's title; for a dangling item, the link text as written
+   * (`DanglingCount.display`, capitals kept), or the key when no link to it
+   * is left.
+   */
   readonly title: string;
   /** The note's role; null for a dangling item. */
   readonly role: NoteRole | null;
@@ -296,6 +300,13 @@ export interface LogOptions {
   readonly limit?: number;
   /** Include changes that touch only `dated` files. Default false. */
   readonly all?: boolean;
+  /**
+   * Only changes whose message matches these words: every word (stemmed like
+   * search, with core's tokenizer) must occur in the message, and a quoted
+   * phrase must occur as written. Newest first, like every log. Blank: no
+   * filter. Change messages are searched here, never mixed into note search.
+   */
+  readonly query?: string;
 }
 
 export interface EngineStatus {
@@ -316,6 +327,8 @@ export interface EngineStatus {
     readonly weights: BrainConfig['weights'];
     readonly alpha: number;
     readonly halfLives: HalfLives;
+    /** The burst rule's window in seconds (`BrainConfig.burstWindow`). Always set by the engine. */
+    readonly burstWindow?: number;
     readonly roles: FolderRolesConfig;
     readonly analyzer: BrainConfig['analyzer'];
     readonly changeOps: readonly string[];
@@ -510,12 +523,16 @@ export interface Engine {
   deleteNote(path: string, options?: ChangeOptions): Promise<DeleteResult>;
   /** The local-mode commit: an index pass, then one change record for the uncommitted paths. */
   commit(options?: CommitOptions): Promise<CommitResult>;
-  /** Change records, newest first. */
+  /** Change records, newest first; `query` searches their messages. */
   log(options?: LogOptions): Promise<ChangeRecord[]>;
   status(): Promise<EngineStatus>;
   /** Every indexed note's path, title and role, sorted by path (for link autocomplete). */
   noteTitles(): Promise<NoteTitle[]>;
-  /** Dangling link targets, most linked first. */
+  /**
+   * Dangling link targets, most linked first: `{ key, display, count }`.
+   * `key` is the normalized (lower-cased) item; `display` is the link text
+   * as written, to show and to name a note created from it.
+   */
   danglingLinks(): Promise<DanglingCount[]>;
   /** The dated entry's path for `date` (default: today, in the host's local time zone). */
   diaryPath(date?: string): Promise<DiaryPath>;

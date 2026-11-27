@@ -4,8 +4,15 @@
 //
 // Every key is optional except `clientId`; missing keys take the defaults
 // below. Unknown keys are errors, so a typo never silently does nothing.
-// Weights, `alpha` and the keyword parameters are placeholders until
-// `somememos eval` measures them (PLAN.md section 5).
+//
+// The defaults are not restated here: they come from where each one lives
+// (`ranking.DEFAULT_RANKING_PARAMS` for `alpha`, `keyword.DEFAULT_BM25F_PARAMS`
+// for the keyword parameters, `storage.DEFAULT_BURST_WINDOW`), so they can't
+// drift apart. `alpha` 0.5, the one-hour burst window, title weight 5 and
+// body `b` 0.5 were measured with `somememos eval` on 2026-11-27 (PLAN.md
+// section 5, "First experiment results"); so were the mention weight 1 and
+// `hot` on the week half-life. The read weight (1) is an unmeasured
+// placeholder: imported history has no reads.
 
 import {
   type AnalyzerOptions,
@@ -21,10 +28,12 @@ import {
   type FolderRole,
   type FolderRolesConfig,
 } from '../markdown/roles.js';
+import { DEFAULT_RANKING_PARAMS } from '../ranking/params.js';
 import { HALF_LIVES } from '../timescore/halfLives.js';
 import { EVENT_KINDS } from '../timescore/kinds.js';
 import { UNIT_WEIGHTS, type Weights } from '../timescore/weights.js';
 import type { HalfLives } from './types.js';
+import { DEFAULT_BURST_WINDOW, assertValidBurstWindow } from './burst.js';
 import { DEFAULT_CHANGE_OPS, assertValidHalfLives } from './validate.js';
 
 /** The config format version this code reads and writes. */
@@ -43,9 +52,24 @@ export interface BrainConfig {
   readonly roles: FolderRolesConfig;
   /** Half-lives in seconds, by name. Default `timescore.HALF_LIVES`. Given, it replaces the table. */
   readonly halfLives: HalfLives;
-  /** Per-kind weights, applied at read time. Default 1 each; given kinds override. */
+  /**
+   * The burst rule's window in seconds (`storage.DEFAULT_BURST_WINDOW`, one
+   * hour, measured 2026-11-27): of one note's events of one kind, an event
+   * counts only if it is at least this long after the last counted one. 0
+   * turns the rule off. Applied when the log is folded; changing it rebuilds
+   * the scores from the log. Pass `foldOptions(config)` to the fold.
+   */
+  readonly burstWindow: number;
+  /**
+   * Per-kind weights, applied at read time. Default 1 each; given kinds
+   * override. Mention 1 was measured on 2026-11-27; read 1 is an unmeasured
+   * placeholder.
+   */
   readonly weights: Weights;
-  /** The weight of activation in the combined rank key `ln r + α · L`. Default 1. */
+  /**
+   * The weight of activation in the combined rank key `ln r + α · L`.
+   * Default `ranking.DEFAULT_RANKING_PARAMS.alpha` (0.5, measured 2026-11-27).
+   */
   readonly alpha: number;
   /** BM25F overrides (`keyword.resolveBm25fParams`). Default `{}`. */
   readonly keyword: Bm25fParamsOverride;
@@ -71,6 +95,7 @@ const TOP_KEYS = [
   'clientId',
   'roles',
   'halfLives',
+  'burstWindow',
   'weights',
   'alpha',
   'keyword',
@@ -169,6 +194,17 @@ export function parseBrainConfig(value: unknown, source = 'config'): BrainConfig
     }
   }
 
+  // burstWindow
+  let burstWindow = DEFAULT_BURST_WINDOW;
+  if (value.burstWindow !== undefined) {
+    try {
+      assertValidBurstWindow(value.burstWindow as number);
+      burstWindow = value.burstWindow as number;
+    } catch {
+      problems.push('burstWindow: must be a number of seconds >= 0 (0 turns the rule off)');
+    }
+  }
+
   // weights
   const weights: Record<string, number> = { ...UNIT_WEIGHTS };
   if (value.weights !== undefined) {
@@ -186,7 +222,7 @@ export function parseBrainConfig(value: unknown, source = 'config'): BrainConfig
   }
 
   // alpha
-  let alpha = 1;
+  let alpha = DEFAULT_RANKING_PARAMS.alpha;
   if (value.alpha !== undefined) {
     if (!isFiniteNumber(value.alpha) || value.alpha < 0)
       problems.push('alpha: must be a number >= 0');
@@ -255,6 +291,7 @@ export function parseBrainConfig(value: unknown, source = 'config'): BrainConfig
     clientId: clientId as string,
     roles,
     halfLives,
+    burstWindow,
     weights: weights as unknown as Weights,
     alpha,
     keyword,
@@ -270,6 +307,7 @@ export function serializeBrainConfig(config: BrainConfig): string {
     clientId: config.clientId,
     roles: config.roles,
     halfLives: config.halfLives,
+    burstWindow: config.burstWindow,
     weights: config.weights,
     alpha: config.alpha,
     keyword: config.keyword,
@@ -277,4 +315,16 @@ export function serializeBrainConfig(config: BrainConfig): string {
     changeOps: config.changeOps,
   };
   return `${JSON.stringify(out, null, 2)}\n`;
+}
+
+/**
+ * The fold options a brain's config sets: its half-lives and burst window.
+ * Every fold of the brain (`foldPending`, `rebuildScores`) should pass these,
+ * so the scores are always folded one way.
+ */
+export function foldOptions(config: Pick<BrainConfig, 'halfLives' | 'burstWindow'>): {
+  readonly halfLives: HalfLives;
+  readonly burstWindow: number;
+} {
+  return { halfLives: config.halfLives, burstWindow: config.burstWindow };
 }

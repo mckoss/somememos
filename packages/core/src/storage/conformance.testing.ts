@@ -25,6 +25,7 @@ import { EVENT_KINDS, type EventKind } from '../timescore/kinds.js';
 import { combine, combineAll, eventScore } from '../timescore/timescore.js';
 import { foldPending, rebuildScores } from './fold.js';
 import {
+  BurstWindowMismatchError,
   FoldConflictError,
   HalfLifeMismatchError,
   type Awaitable,
@@ -168,6 +169,7 @@ function toInputs(drafts: readonly Draft[], prefix = 'e'): LogInput[] {
 function modelScores(
   entries: readonly LogEntry[],
   halfLives: HalfLives = HALF_LIVES,
+  burstWindow = 0,
 ): Map<string, ItemScores<string>> {
   const known = entries.filter((e): e is StoredRename => e.kind === 'rename');
   const lists = new Map<string, { kind: EventKind; time: number }[]>();
@@ -192,8 +194,11 @@ function modelScores(
     for (const [name, h] of Object.entries(halfLives)) {
       const byKind: Partial<Record<EventKind, number>> = {};
       for (const kind of EVENT_KINDS) {
-        const mine = events.filter((x) => x.kind === kind);
-        if (mine.length > 0) byKind[kind] = combineAll(mine.map((x) => eventScore(1, x.time, h)));
+        const mine = keepBursts(
+          events.filter((x) => x.kind === kind).map((x) => x.time),
+          burstWindow,
+        );
+        if (mine.length > 0) byKind[kind] = combineAll(mine.map((t) => eventScore(1, t, h)));
       }
       scores[name] = byKind;
     }
@@ -201,6 +206,43 @@ function modelScores(
   }
   return out;
 }
+
+/**
+ * The burst rule, written out independently: in time order, keep a time
+ * when it is the first or at least `window` after the last kept one.
+ */
+function keepBursts(times: readonly number[], window: number): number[] {
+  if (window === 0) return [...times];
+  const kept: number[] = [];
+  for (const t of [...times].sort((a, b) => a - b)) {
+    const last = kept[kept.length - 1];
+    if (last === undefined || t - last >= window) kept.push(t);
+  }
+  return kept;
+}
+
+/** Drafts packed into a few hours, so that bursts, late events and merges are common. */
+const burstDraftArb: fc.Arbitrary<Draft> = fc.oneof(
+  {
+    weight: 8,
+    arbitrary: fc.record({
+      kind: fc.constantFrom(...EVENT_KINDS),
+      item: fc.constantFrom(...ITEMS),
+      time: fc.integer({ min: NOW - 6 * 3600, max: NOW }),
+    }),
+  },
+  {
+    weight: 1,
+    arbitrary: fc
+      .record({
+        kind: fc.constant('rename' as const),
+        item: fc.constantFrom(...ITEMS),
+        to: fc.constantFrom(...ITEMS),
+        time: fc.integer({ min: NOW - 6 * 3600, max: NOW }),
+      })
+      .filter((r) => r.item !== r.to),
+  },
+);
 
 const WORDS = [
   'lantern',
@@ -292,6 +334,7 @@ function wrapScores(inner: ScoreStore, overrides: Partial<ScoreStore>): ScoreSto
     getItem: (item) => inner.getItem(item),
     getAll: () => inner.getAll(),
     applyFold: (batch) => inner.applyFold(batch),
+    burstState: (items) => inner.burstState(items),
     clear: () => inner.clear(),
     ...overrides,
   };
@@ -824,6 +867,344 @@ export function describeStorageConformance(
       });
     });
 
+    describe('the burst rule', () => {
+      const H = 3600;
+      const day = HALF_LIVES.day as number;
+
+      it(
+        'counts one event per window per item and kind, and keeps the state',
+        { timeout },
+        async () => {
+          const s = await openStores();
+          await s.events.append([
+            ev('a', 'edit', 'memos/x.md', NOW - 5000),
+            ev('b', 'edit', 'memos/x.md', NOW - 4000), // within the hour after a: dropped
+            ev('c', 'edit', 'memos/x.md', NOW - 1400), // 3600 after a: counts
+            ev('d', 'read', 'memos/x.md', NOW - 4000), // another kind: counts
+            ev('e', 'edit', 'memos/y.md', NOW - 4000), // another item: counts
+            ev('f', 'edit', 'memos/x.md', NOW - 1400), // same second as c: dropped
+          ]);
+          const r = await foldPending(s.events, s.scores, { burstWindow: H });
+          expect(r).toMatchObject({ events: 6, collapsed: 2, cursor: 6, rebuilt: false });
+          expect(await s.scores.foldState()).toEqual({
+            cursor: 6,
+            halfLives: { ...HALF_LIVES },
+            burstWindow: H,
+          });
+          const x = await s.scores.getItem('memos/x.md');
+          expect(x?.day?.edit).toBe(
+            combineAll([NOW - 5000, NOW - 1400].map((t) => eventScore(1, t, day))),
+          );
+          expect(x?.day?.read).toBe(eventScore(1, NOW - 4000, day));
+          expect(await s.scores.burstState(['memos/x.md', 'memos/y.md', 'memos/none.md'])).toEqual(
+            new Map([
+              ['memos/x.md', { read: NOW - 4000, edit: NOW - 1400 }],
+              ['memos/y.md', { edit: NOW - 4000 }],
+            ]),
+          );
+          // Later events decide from the stored state.
+          await s.events.append([
+            ev('g', 'edit', 'memos/x.md', NOW - 1000), // dropped
+            ev('h', 'edit', 'memos/x.md', NOW), // 1400 after c: dropped
+            ev('i', 'edit', 'memos/y.md', NOW - 400), // 3600 after e: counts
+          ]);
+          const r2 = await foldPending(s.events, s.scores, { burstWindow: H });
+          expect(r2).toMatchObject({ events: 3, collapsed: 2 });
+          expect(r2.refolded).toBeUndefined();
+          expectScoresClose(
+            await s.scores.getAll(),
+            modelScores(await s.events.readAfter(0), HALF_LIVES, H),
+          );
+          // A rename carries the state with the scores.
+          await s.events.append([rn('r', 'memos/y.md', 'memos/z.md', NOW)]);
+          await foldPending(s.events, s.scores, { burstWindow: H });
+          expect(await s.scores.burstState(['memos/y.md', 'memos/z.md'])).toEqual(
+            new Map([['memos/z.md', { edit: NOW - 400 }]]),
+          );
+          await s.scores.clear();
+          expect(await s.scores.burstState(['memos/x.md', 'memos/z.md'])).toEqual(new Map());
+          expect(await s.scores.foldState()).toEqual({ cursor: 0, halfLives: null });
+        },
+      );
+
+      it(
+        'incremental folding equals a rebuild and the model, with renames and late events (property)',
+        { timeout },
+        async () => {
+          await fc.assert(
+            fc.asyncProperty(
+              fc.array(burstDraftArb, { maxLength: 50 }),
+              fc.array(fc.integer({ min: 1, max: 10 }), { minLength: 1, maxLength: 6 }),
+              fc.integer({ min: 1, max: 7 }),
+              fc.constantFrom(60, H),
+              async (drafts, chunks, batchSize, window) => {
+                const s = await openStores();
+                const inputs = toInputs(drafts);
+                let at = 0;
+                let c = 0;
+                while (at < inputs.length) {
+                  const n = chunks[c++ % chunks.length] as number;
+                  await s.events.append(inputs.slice(at, at + n));
+                  at += n;
+                  await foldPending(s.events, s.scores, { batchSize, burstWindow: window });
+                }
+                await foldPending(s.events, s.scores, { batchSize, burstWindow: window });
+                const incremental = await s.scores.getAll();
+                expect((await s.scores.foldState()).cursor).toBe(inputs.length);
+                const model = modelScores(await s.events.readAfter(0), HALF_LIVES, window);
+                expectScoresClose(incremental, model);
+                const state = await s.scores.burstState([...incremental.keys()]);
+
+                await rebuildScores(s.events, s.scores, { burstWindow: window });
+                expectScoresClose(await s.scores.getAll(), incremental);
+                expect(await s.scores.burstState([...incremental.keys()])).toEqual(state);
+                await s.close();
+              },
+            ),
+            { numRuns },
+          );
+        },
+      );
+
+      it(
+        'gives the same scores whatever order the entries arrive in (property)',
+        { timeout },
+        async () => {
+          await fc.assert(
+            fc.asyncProperty(
+              fc.array(burstDraftArb, { minLength: 1, maxLength: 30 }),
+              fc.integer({ min: 0, max: 1_000_000 }),
+              async (drafts, seed) => {
+                const inputs = toInputs(drafts);
+                // A seeded shuffle: a second arrival order of the same entries.
+                const shuffled = [...inputs];
+                let x = seed + 1;
+                for (let i = shuffled.length - 1; i > 0; i--) {
+                  x = (x * 1103515245 + 12345) % 2147483648;
+                  const j = x % (i + 1);
+                  [shuffled[i], shuffled[j]] = [shuffled[j] as LogInput, shuffled[i] as LogInput];
+                }
+                const results: Map<string, ItemScores<string>>[] = [];
+                for (const order of [inputs, shuffled]) {
+                  const s = await openStores();
+                  for (let i = 0; i < order.length; i += 3) {
+                    await s.events.append(order.slice(i, i + 3));
+                    await foldPending(s.events, s.scores, { burstWindow: H, batchSize: 2 });
+                  }
+                  results.push(await s.scores.getAll());
+                  expectScoresClose(
+                    results.at(-1) as Map<string, ItemScores<string>>,
+                    modelScores(await s.events.readAfter(0), HALF_LIVES, H),
+                  );
+                  await s.close();
+                }
+                expectScoresClose(
+                  results[1] as Map<string, ItemScores<string>>,
+                  results[0] as Map<string, ItemScores<string>>,
+                );
+              },
+            ),
+            { numRuns },
+          );
+        },
+      );
+
+      it(
+        'refolds canonically when a late event lands before a counted one',
+        { timeout },
+        async () => {
+          const s = await openStores();
+          await s.events.append([
+            ev('a', 'edit', 'memos/x.md', NOW - 7000),
+            ev('b', 'edit', 'memos/x.md', NOW - 3000), // counts (4000 after a)
+          ]);
+          await foldPending(s.events, s.scores, { burstWindow: H });
+          // Synced late: an edit between them. Now b is within the hour of it.
+          await s.events.append([ev('late', 'edit', 'memos/x.md', NOW - 5000)]);
+          const r = await foldPending(s.events, s.scores, { burstWindow: H });
+          expect(r.refolded).toBe(true);
+          const x = await s.scores.getItem('memos/x.md');
+          // a counts; late is 2000 after a: dropped; b is 4000 after a: counts. Same as before.
+          expect(x?.day?.edit).toBeCloseTo(
+            combineAll([NOW - 7000, NOW - 3000].map((t) => eventScore(1, t, day))),
+            9,
+          );
+          await s.events.append([ev('early', 'edit', 'memos/x.md', NOW - 9000)]);
+          await foldPending(s.events, s.scores, { burstWindow: H });
+          // early counts; a is 2000 after it: dropped; late is 4000 after early: counts; b is 2000 after late: dropped.
+          expect((await s.scores.getItem('memos/x.md'))?.day?.edit).toBeCloseTo(
+            combineAll([NOW - 9000, NOW - 5000].map((t) => eventScore(1, t, day))),
+            9,
+          );
+          expect(await s.scores.burstState(['memos/x.md'])).toEqual(
+            new Map([['memos/x.md', { edit: NOW - 5000 }]]),
+          );
+        },
+      );
+
+      it(
+        'refolds when a rename merges two items with events of one kind, following the history',
+        { timeout },
+        async () => {
+          const s = await openStores();
+          await s.events.append([
+            ev('m1', 'mention', 'ember plan', NOW - 5000),
+            ev('m2', 'mention', 'memos/ember.md', NOW - 4000),
+            ev('m3', 'mention', 'memos/ember.md', NOW - 1000),
+          ]);
+          await foldPending(s.events, s.scores, { burstWindow: H });
+          await s.events.append([rn('r', 'ember plan', 'memos/ember.md', NOW - 500)]);
+          const r = await foldPending(s.events, s.scores, { burstWindow: H });
+          expect(r.refolded).toBe(true);
+          // One history: m1 counts, m2 (1000 later) does not, m3 (4000 after m1) does.
+          expectScoresClose(
+            await s.scores.getAll(),
+            modelScores(await s.events.readAfter(0), HALF_LIVES, H),
+          );
+          expect((await s.scores.getItem('memos/ember.md'))?.day?.mention).toBeCloseTo(
+            combineAll([NOW - 5000, NOW - 1000].map((t) => eventScore(1, t, day))),
+            9,
+          );
+        },
+      );
+
+      it('rebuilds when the window changes, or throws if asked to', { timeout }, async () => {
+        const s = await openStores();
+        await s.events.append([
+          ev('a', 'read', 'memos/x.md', NOW - 90),
+          ev('b', 'read', 'memos/x.md', NOW - 50),
+        ]);
+        await foldPending(s.events, s.scores);
+        expect(await s.scores.foldState()).toEqual({ cursor: 2, halfLives: { ...HALF_LIVES } });
+        await expect(
+          foldPending(s.events, s.scores, { burstWindow: 60, onHalfLifeMismatch: 'throw' }),
+        ).rejects.toBeInstanceOf(BurstWindowMismatchError);
+        await expect(
+          settle(() =>
+            s.scores.applyFold({
+              fromCursor: 2,
+              toCursor: 2,
+              halfLives: HALF_LIVES,
+              burstWindow: 60,
+              ops: [],
+            }),
+          ),
+        ).rejects.toBeInstanceOf(BurstWindowMismatchError);
+        const r = await foldPending(s.events, s.scores, { burstWindow: 60 });
+        expect(r).toMatchObject({ rebuilt: true, events: 2, collapsed: 1 });
+        expect((await s.scores.foldState()).burstWindow).toBe(60);
+        expect((await s.scores.getItem('memos/x.md'))?.day?.read).toBe(
+          eventScore(1, NOW - 90, day),
+        );
+        const back = await foldPending(s.events, s.scores, { burstWindow: 0 });
+        expect(back).toMatchObject({ rebuilt: true, events: 2 });
+        expect(back.collapsed).toBeUndefined();
+        expect(await s.scores.foldState()).toEqual({ cursor: 2, halfLives: { ...HALF_LIVES } });
+        expect(await s.scores.burstState(['memos/x.md'])).toEqual(new Map());
+      });
+
+      it(
+        'with a window of 0, folds exactly as without the rule (property)',
+        { timeout },
+        async () => {
+          await fc.assert(
+            fc.asyncProperty(
+              fc.array(burstDraftArb, { maxLength: 40 }),
+              fc.integer({ min: 1, max: 5 }),
+              async (drafts, batchSize) => {
+                const inputs = toInputs(drafts);
+                const fold = async (options: Parameters<typeof foldPending>[2]) => {
+                  const s = await openStores();
+                  for (let i = 0; i < inputs.length; i += 4) {
+                    await s.events.append(inputs.slice(i, i + 4));
+                    await foldPending(s.events, s.scores, { batchSize, ...options });
+                  }
+                  const out = {
+                    scores: await s.scores.getAll(),
+                    state: await s.scores.foldState(),
+                    burst: await s.scores.burstState(ITEMS),
+                  };
+                  await s.close();
+                  return out;
+                };
+                const plain = await fold({});
+                const zero = await fold({ burstWindow: 0 });
+                expect(zero).toEqual(plain);
+                expect(zero.burst.size).toBe(0);
+                expect('burstWindow' in zero.state).toBe(false);
+                // And exactly the model's every-event scores (no event is dropped).
+                const s = await openStores();
+                await s.events.append(inputs);
+                await rebuildScores(s.events, s.scores, { burstWindow: 0 });
+                expectScoresClose(
+                  await s.scores.getAll(),
+                  modelScores(await s.events.readAfter(0)),
+                );
+                await s.close();
+              },
+            ),
+            { numRuns },
+          );
+        },
+      );
+
+      it(
+        'retries when another folder commits first, counting nothing twice',
+        { timeout },
+        async () => {
+          const s = await openStores();
+          await s.events.append([
+            ev('a', 'read', 'memos/x.md', NOW - 9000),
+            ev('b', 'read', 'memos/x.md', NOW - 8000),
+          ]);
+          let raced = false;
+          const racing = wrapScores(s.scores, {
+            applyFold: async (batch) => {
+              if (!raced) {
+                raced = true;
+                await foldPending(s.events, s.scores, { burstWindow: H });
+                await s.events.append([ev('c', 'read', 'memos/x.md', NOW - 100)]);
+              }
+              return s.scores.applyFold(batch);
+            },
+          });
+          const result = await foldPending(s.events, racing, { burstWindow: H });
+          expect(result).toMatchObject({ conflicts: 1, events: 1, collapsed: 0 });
+          expectScoresClose(
+            await s.scores.getAll(),
+            modelScores(await s.events.readAfter(0), HALF_LIVES, H),
+          );
+          expect(await s.scores.burstState(['memos/x.md'])).toEqual(
+            new Map([['memos/x.md', { read: NOW - 100 }]]),
+          );
+        },
+      );
+
+      it('rolls back a batch with an invalid burst op', { timeout }, async () => {
+        const s = await openStores();
+        await s.events.append([ev('a', 'read', 'memos/x.md', NOW - 9)]);
+        await foldPending(s.events, s.scores, { burstWindow: H });
+        const before = await snapshotAll(s);
+        const state = await s.scores.burstState(['memos/x.md']);
+        await expect(
+          settle(() =>
+            s.scores.applyFold({
+              fromCursor: 1,
+              toCursor: 2,
+              halfLives: HALF_LIVES,
+              burstWindow: H,
+              ops: [
+                { type: 'last', item: 'memos/x.md', kind: 'read', time: NOW },
+                { type: 'last', item: 'memos/x.md', kind: 'read', time: 1.5 },
+              ],
+            }),
+          ),
+        ).rejects.toBeInstanceOf(RangeError);
+        expect(await snapshotAll(s)).toEqual(before);
+        expect(await s.scores.burstState(['memos/x.md'])).toEqual(state);
+      });
+    });
+
     describe('renames', () => {
       const day = HALF_LIVES.day;
 
@@ -1038,8 +1419,8 @@ export function describeStorageConformance(
         ]);
         expect(await s.notes.backlinks('memos/b.md')).toEqual(['memos/a.md']);
         expect(await s.notes.danglingTargets()).toEqual([
-          { key: 'cobalt idea', count: 3 },
-          { key: 'ember plan', count: 2 },
+          { key: 'cobalt idea', display: 'cobalt idea', count: 3 },
+          { key: 'ember plan', display: 'ember plan', count: 2 },
         ]);
         await s.notes.replaceLinks('memos/a.md', [{ target: 'memos/c.md', dangling: false }]);
         expect(await s.notes.backlinks('memos/b.md')).toEqual([]);
@@ -1047,13 +1428,55 @@ export function describeStorageConformance(
         await s.notes.removeNote('memos/d.md');
         expect(await s.notes.linksFrom('memos/d.md')).toEqual([]);
         expect(await s.notes.danglingTargets()).toEqual([
-          { key: 'ember plan', count: 2 },
-          { key: 'cobalt idea', count: 1 },
+          { key: 'ember plan', display: 'ember plan', count: 2 },
+          { key: 'cobalt idea', display: 'cobalt idea', count: 1 },
         ]);
         await s.notes.replaceLinks('memos/b.md', []);
         await s.notes.replaceLinks('memos/c.md', []);
         expect(await s.notes.danglingTargets()).toEqual([]);
       });
+
+      it(
+        'keeps the display form of dangling links and picks one per key',
+        { timeout },
+        async () => {
+          const s = await openStores();
+          await s.notes.replaceLinks('memos/a.md', [
+            { target: 'cobalt idea', dangling: true, display: 'Cobalt Idea' },
+            { target: 'memos/b.md', dangling: false, display: 'ignored for resolved links' },
+          ]);
+          await s.notes.replaceLinks('memos/b.md', [
+            { target: 'cobalt idea', dangling: true, display: 'cobalt idea' },
+            { target: 'ember plan', dangling: true, display: '' },
+          ]);
+          await s.notes.replaceLinks('memos/c.md', [
+            { target: 'cobalt idea', dangling: true, display: 'COBALT idea' },
+          ]);
+          expect(await s.notes.linksFrom('memos/a.md')).toEqual([
+            { target: 'cobalt idea', dangling: true, display: 'Cobalt Idea' },
+            { target: 'memos/b.md', dangling: false },
+          ]);
+          expect(await s.notes.linksFrom('memos/b.md')).toEqual([
+            { target: 'cobalt idea', dangling: true, display: 'cobalt idea' },
+            { target: 'ember plan', dangling: true },
+          ]);
+          // One note each: the tie goes to the form that sorts first (compareStrings).
+          expect(await s.notes.danglingTargets()).toEqual([
+            { key: 'cobalt idea', display: 'COBALT idea', count: 3 },
+            { key: 'ember plan', display: 'ember plan', count: 1 },
+          ]);
+          await s.notes.replaceLinks('memos/d.md', [
+            { target: 'cobalt idea', dangling: true, display: 'cobalt idea' },
+          ]);
+          expect((await s.notes.danglingTargets())[0]).toEqual({
+            key: 'cobalt idea',
+            display: 'cobalt idea',
+            count: 4,
+          });
+          const again = await reopen(s);
+          expect((await again.notes.danglingTargets())[0]?.display).toBe('cobalt idea');
+        },
+      );
     });
 
     // -- Term index ------------------------------------------------------------

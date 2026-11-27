@@ -46,7 +46,7 @@ describe('brain config file', () => {
     );
     const config = loadBrainConfig(dir);
     expect(config.roles).toEqual({ excluded: ['private/'] });
-    expect(config.alpha).toBe(1);
+    expect(config.alpha).toBe(storage.defaultBrainConfig('x').alpha);
     expect(readFileSync(configPath(dir), 'utf8')).not.toContain('alpha');
   });
 });

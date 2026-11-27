@@ -221,9 +221,90 @@ export function assertValidScoreOp(op: ScoreOp, halfLives: HalfLives): void {
     ) {
       throw new RangeError('move items must be non-empty strings');
     }
+  } else if (op.type === 'last') {
+    if (typeof op.item !== 'string' || op.item === '') {
+      throw new RangeError('burst state item must be a non-empty string');
+    }
+    if (!['read', 'edit', 'mention'].includes(op.kind as EventKind)) {
+      throw new RangeError(`unknown event kind ${String(op.kind)}`);
+    }
+    if (!Number.isSafeInteger(op.time)) {
+      throw new RangeError(`burst state time must be an integer, not ${String(op.time)}`);
+    }
   } else {
     throw new RangeError(`unknown score op ${String((op as { type: unknown }).type)}`);
   }
+}
+
+/**
+ * The display form a store keeps for a link: a dangling link's non-empty
+ * `display`, else nothing. Resolved links keep none (their title is the note's).
+ */
+export function linkDisplay(link: {
+  readonly dangling: boolean;
+  readonly display?: string | undefined;
+}): string | undefined {
+  return link.dangling && typeof link.display === 'string' && link.display !== ''
+    ? link.display
+    : undefined;
+}
+
+/** The burst window recorded in a fold state: 0 when absent. */
+export function foldBurstWindow(state: { readonly burstWindow?: number }): number {
+  return state.burstWindow ?? 0;
+}
+
+/**
+ * The display form a dangling key's `DanglingCount` carries: of the forms
+ * written (`display`, with how many notes use it), the most used; ties to the
+ * form that sorts first by `compareStrings` (capitals before lower case).
+ * The key itself when no form is known. Every store uses this, so all agree.
+ */
+export function pickDanglingDisplay(
+  key: string,
+  forms: Iterable<{ readonly display: string | null | undefined; readonly count: number }>,
+): string {
+  let best: string | null = null;
+  let bestCount = 0;
+  for (const f of forms) {
+    if (typeof f.display !== 'string' || f.display === '') continue;
+    if (
+      f.count > bestCount ||
+      (f.count === bestCount && best !== null && compareStrings(f.display, best) < 0)
+    ) {
+      best = f.display;
+      bestCount = f.count;
+    }
+  }
+  return best ?? key;
+}
+
+/**
+ * Counts every dangling link per key and picks each key's display form:
+ * most linked first, then by key. `links` holds one entry per stored link.
+ */
+export function danglingCounts(
+  links: Iterable<{ readonly key: string; readonly display: string | null | undefined }>,
+): { key: string; display: string; count: number }[] {
+  const byKey = new Map<string, { count: number; forms: Map<string, number> }>();
+  for (const l of links) {
+    let entry = byKey.get(l.key);
+    if (!entry) byKey.set(l.key, (entry = { count: 0, forms: new Map() }));
+    entry.count++;
+    if (typeof l.display === 'string' && l.display !== '') {
+      entry.forms.set(l.display, (entry.forms.get(l.display) ?? 0) + 1);
+    }
+  }
+  return [...byKey]
+    .map(([key, { count, forms }]) => ({
+      key,
+      display: pickDanglingDisplay(
+        key,
+        [...forms].map(([display, n]) => ({ display, count: n })),
+      ),
+      count,
+    }))
+    .sort((a, b) => b.count - a.count || compareStrings(a.key, b.key));
 }
 
 /** Compares strings by UTF-16 code units, as `Array.prototype.sort` does. */

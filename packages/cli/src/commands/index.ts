@@ -1,7 +1,11 @@
 import { importGitCommand } from '../import-git/index.js';
+import { cloneCommand, syncCommand } from './clone.js';
 import { commitCommand } from './commit.js';
+import { connectCommand } from './connect.js';
 import { diaryCommand } from './diary.js';
 import { evalCommand } from './eval/command.js';
+import { mvCommand, rmCommand } from './files.js';
+import { historyCommand, restoreCommand } from './history.js';
 import { exportCommand, importLogCommand } from './export.js';
 import { indexCommand } from './index-command.js';
 import { initCommand } from './init.js';
@@ -17,9 +21,10 @@ export type { Command } from './types.js';
 /**
  * Every subcommand, in the order `--help` lists them. To add a command, write
  * `src/commands/<name>.ts` exporting a `Command`, then add it here. Parse its
- * arguments with `parseCommandArgs` and run it inside `withBrain` (both from
- * `src/brain`), so the global options and the automatic index pass behave
- * the same everywhere.
+ * arguments with `parseCommandArgs` and run it inside `withSession` (works in
+ * local and remote mode) or `withBrain` (local mode only), both from
+ * `src/brain`, so the global options, the automatic index pass and the
+ * reminder behave the same everywhere.
  */
 export const commands: readonly Command[] = [
   searchCommand,
@@ -28,10 +33,17 @@ export const commands: readonly Command[] = [
   neglectedCommand,
   readCommand,
   commitCommand,
+  rmCommand,
+  mvCommand,
   logCommand,
+  historyCommand,
+  restoreCommand,
   diaryCommand,
   statusCommand,
   initCommand,
+  connectCommand,
+  cloneCommand,
+  syncCommand,
   indexCommand,
   importGitCommand,
   exportCommand,

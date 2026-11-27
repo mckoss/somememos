@@ -4,13 +4,14 @@
 // the browser. Isomorphic.
 
 import { runIndexPass, type IndexSummary } from '../indexing/pass.js';
+import { matchesAllClauses, parseQuery } from '../keyword/query.js';
 import { firstIndexedAt, readUncommitted, writeUncommitted } from '../indexing/state.js';
 import * as markdown from '../markdown/index.js';
 import { decayed } from '../ranking/decayed.js';
 import { isRankMode, rankingParamsFromConfig, type RankMode } from '../ranking/params.js';
 import type { RankedResult } from '../ranking/rank.js';
 import { rankActivation, rankSearch } from '../ranking/stores.js';
-import type { BrainConfig } from '../storage/config.js';
+import { foldOptions, type BrainConfig } from '../storage/config.js';
 import { contentHash, type ContentStore } from '../storage/content.js';
 import { foldPending } from '../storage/fold.js';
 import type {
@@ -186,6 +187,10 @@ export function createEngine(options: EngineOptions): Engine {
     const at = now();
     const notes = new Map<string, NoteRecord>();
     const published = new Map<string, boolean | null>();
+    const displays = new Map<string, string>();
+    if (results.some((r) => r.dangling)) {
+      for (const d of await stores.notes.danglingTargets()) displays.set(d.key, d.display);
+    }
     for (const r of results) {
       if (r.path === null || notes.has(r.path)) continue;
       const n = await stores.notes.getNote(r.path);
@@ -204,7 +209,7 @@ export function createEngine(options: EngineOptions): Engine {
           item: r.item,
           path: r.path,
           dangling: r.dangling,
-          title: r.title,
+          title: r.dangling ? (displays.get(r.item) ?? r.title) : r.title,
           role: note?.role ?? null,
           date: note?.date ?? null,
           published: r.path === null ? null : (published.get(r.path) ?? null),
@@ -352,7 +357,7 @@ export function createEngine(options: EngineOptions): Engine {
             client: config.clientId,
           };
           await stores.events.append([event], { now: time });
-          await foldPending(stores.events, stores.scores, { halfLives: config.halfLives });
+          await foldPending(stores.events, stores.scores, foldOptions(config));
           recorded = true;
         }
         return {
@@ -471,16 +476,28 @@ export function createEngine(options: EngineOptions): Engine {
 
     log: (opts: LogOptions = {}) =>
       serial(async () => {
+        if (opts.query !== undefined && typeof opts.query !== 'string') {
+          throw new EngineError('invalid-argument', 'query must be a string');
+        }
+        const query = opts.query?.trim() ? parseQuery(opts.query, stores.terms.analyzer) : null;
         const changes = await stores.events.changes({
           ...(opts.path !== undefined ? { path: opts.path } : {}),
           ...(opts.op !== undefined ? { op: opts.op } : {}),
           ...(opts.since !== undefined ? { since: opts.since } : {}),
           ...(opts.until !== undefined ? { until: opts.until } : {}),
-          ...(opts.all && opts.limit !== undefined ? { limit: opts.limit } : {}),
+          ...(opts.all && opts.limit !== undefined && !query ? { limit: opts.limit } : {}),
         });
+        // A message search scans the change records, newest first; at personal-brain
+        // scale (thousands of records) that is a few milliseconds, so there is no index.
+        const matching = query
+          ? changes.filter(
+              (c) =>
+                c.message !== null && matchesAllClauses(c.message, query, stores.terms.analyzer),
+            )
+          : changes;
         const shown = opts.all
-          ? changes
-          : changes.filter(
+          ? matching
+          : matching.filter(
               (c) =>
                 c.paths.length === 0 ||
                 c.paths.some((p) => classifier.classify(p)?.role !== 'dated'),
@@ -510,6 +527,7 @@ export function createEngine(options: EngineOptions): Engine {
             weights: config.weights,
             alpha: config.alpha,
             halfLives: config.halfLives,
+            burstWindow: config.burstWindow,
             roles: config.roles,
             analyzer: config.analyzer,
             changeOps: config.changeOps,
@@ -630,7 +648,7 @@ export function createEngine(options: EngineOptions): Engine {
         }
         const appendedLog = await stores.events.append(log);
         const appendedChanges = await stores.events.appendChanges(changes);
-        const f = await foldPending(stores.events, stores.scores, { halfLives: config.halfLives });
+        const f = await foldPending(stores.events, stores.scores, foldOptions(config));
         return {
           log: appendedLog,
           changes: appendedChanges,

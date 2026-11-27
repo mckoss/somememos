@@ -1,6 +1,6 @@
 {
   "name": "@somememos/cli",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "The somememos command-line tool.",
   "license": "Apache-2.0",
@@ -25,7 +25,8 @@
   "scripts": {
     "build": "tsc -p tsconfig.build.json",
     "typecheck": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "vitest run",
+    "bundle": "node scripts/bundle.mjs"
   },
   "dependencies": {
     "@somememos/core": "*",

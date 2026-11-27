@@ -9,7 +9,13 @@ import { HALF_LIVES } from '../timescore/halfLives.js';
 import type { EventKind } from '../timescore/kinds.js';
 import { linkGraphFromMaps } from './activation.js';
 import { decayed } from './decayed.js';
-import { resolveRankingParams, type RankMode, type RankingParamsInput } from './params.js';
+import { parseBrainConfig } from '../storage/config.js';
+import {
+  DEFAULT_RANKING_PARAMS,
+  resolveRankingParams,
+  type RankMode,
+  type RankingParamsInput,
+} from './params.js';
 import {
   classifyItem,
   rankByActivation,
@@ -79,6 +85,17 @@ function ctxFrom(
 }
 
 const memo = (path: string): NoteMeta => ({ path, title: path, role: 'memo' });
+
+describe('defaults', () => {
+  it('are the values measured on 2026-11-27 (PLAN.md section 5)', () => {
+    const p = resolveRankingParams();
+    expect(p.alpha).toBe(0.5);
+    expect(p.halfLives.hot).toBe('week');
+    expect(p.weights).toEqual({ read: 1, edit: 1, mention: 1 });
+    expect(p.spreading.direction).toBe('off');
+    expect(DEFAULT_RANKING_PARAMS.alpha).toBe(parseBrainConfig({ clientId: 'c' }).alpha);
+  });
+});
 
 describe('classifyItem', () => {
   const notes = new Map<string, NoteMeta>([

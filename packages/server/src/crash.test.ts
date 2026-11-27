@@ -95,9 +95,20 @@ describePg('crash safety', () => {
       );
       writeFileSync(join(dir, 'memos', 'half.md'), '# Half');
 
-      // The next request (from any process) recovers first.
+      // A pure read takes no lock and leaves the repository alone, but sees
+      // only what the database recorded (the note text from the recorded commit).
       const titles = await server.request('GET', '/api/brains/killed/titles');
       expect(titles.body.notes.map((n: { path: string }) => n.path)).toEqual(['memos/kept.md']);
+      const kept = await server.request(
+        'GET',
+        '/api/brains/killed/notes/memos/kept.md?record=false',
+      );
+      expect(kept.body.text).toBe('# Kept\n');
+      expect(await repo.head()).toBe(lost);
+
+      // The next request that holds the brain (from any process) recovers first.
+      const read = await server.request('GET', '/api/brains/killed/notes/memos/kept.md');
+      expect(read.body).toMatchObject({ recorded: true, text: '# Kept\n' });
       expect(await repo.head()).toBe(recorded);
       expect(await content.read('memos/kept.md')).toBe('# Kept\n');
       expect(await content.read('memos/ghost.md')).toBeUndefined();

@@ -9,6 +9,8 @@ const { compareStrings } = storage;
 /** Internal keys in the index file's `meta` table. */
 export const META_FOLD_CURSOR = 'fold_cursor';
 export const META_FOLD_HALF_LIVES = 'fold_half_lives';
+/** Set only when the scores were folded with a burst window > 0. */
+export const META_FOLD_BURST_WINDOW = 'fold_burst_window';
 export const META_ANALYZER = 'analyzer';
 
 function getMeta(db: Db, key: string): string | undefined {
@@ -59,7 +61,27 @@ export class SqliteScoreStore implements storage.ScoreStore {
   foldState(): storage.FoldState {
     const cursor = Number(getMeta(this.db, META_FOLD_CURSOR) ?? 0);
     const hl = getMeta(this.db, META_FOLD_HALF_LIVES);
-    return { cursor, halfLives: hl === undefined ? null : (JSON.parse(hl) as storage.HalfLives) };
+    const halfLives = hl === undefined ? null : (JSON.parse(hl) as storage.HalfLives);
+    const bw = halfLives === null ? undefined : getMeta(this.db, META_FOLD_BURST_WINDOW);
+    return bw === undefined || Number(bw) === 0
+      ? { cursor, halfLives }
+      : { cursor, halfLives, burstWindow: Number(bw) };
+  }
+
+  burstState(items: readonly string[]): storage.BurstState {
+    const out: storage.BurstState = new Map();
+    const get = this.db.prepare(`SELECT kind, time FROM burst_last WHERE item = :item`);
+    for (const item of new Set(items)) {
+      const rows = get.all<{ kind: timescore.EventKind; time: number }>({ item });
+      if (rows.length === 0) continue;
+      const kinds: Partial<Record<timescore.EventKind, number>> = {};
+      for (const k of timescore.EVENT_KINDS) {
+        const row = rows.find((r) => r.kind === k);
+        if (row) kinds[k] = row.time;
+      }
+      out.set(item, kinds);
+    }
+    return out;
   }
 
   getItem(item: string): timescore.ItemScores<string> | undefined {
@@ -105,6 +127,15 @@ export class SqliteScoreStore implements storage.ScoreStore {
       if (state.halfLives && !storage.sameHalfLives(state.halfLives, batch.halfLives)) {
         throw new storage.HalfLifeMismatchError(state.halfLives, batch.halfLives);
       }
+      const window = batch.burstWindow ?? 0;
+      storage.assertValidBurstWindow(window);
+      if (state.halfLives && storage.foldBurstWindow(state) !== window) {
+        throw new storage.BurstWindowMismatchError(storage.foldBurstWindow(state), window);
+      }
+      const putLast = db.prepare(
+        `INSERT INTO burst_last (item, kind, time) VALUES (:item, :kind, :time)
+         ON CONFLICT (item, kind) DO UPDATE SET time = max(time, excluded.time)`,
+      );
       const get = db.prepare(
         `SELECT log_score FROM scores WHERE item = :item AND kind = :kind AND half_life = :hl`,
       );
@@ -126,6 +157,8 @@ export class SqliteScoreStore implements storage.ScoreStore {
         storage.assertValidScoreOp(op, batch.halfLives);
         if (op.type === 'add') {
           add(op.item, op.kind, op.halfLife, op.logScore);
+        } else if (op.type === 'last') {
+          putLast.run({ item: op.item, kind: op.kind, time: op.time });
         } else if (op.from !== op.to) {
           const rows = db.all<ScoreRow>(
             `SELECT item, kind, half_life, log_score FROM scores WHERE item = :item`,
@@ -133,18 +166,28 @@ export class SqliteScoreStore implements storage.ScoreStore {
           );
           for (const row of rows) add(op.to, row.kind, row.half_life, row.log_score);
           db.run(`DELETE FROM scores WHERE item = :item`, { item: op.from });
+          const lasts = db.all<{ kind: string; time: number }>(
+            `SELECT kind, time FROM burst_last WHERE item = :item`,
+            { item: op.from },
+          );
+          for (const row of lasts) putLast.run({ item: op.to, kind: row.kind, time: row.time });
+          db.run(`DELETE FROM burst_last WHERE item = :item`, { item: op.from });
         }
       }
       setMeta(db, META_FOLD_CURSOR, String(batch.toCursor));
       setMeta(db, META_FOLD_HALF_LIVES, storage.halfLivesToJson(batch.halfLives));
+      if (window > 0) setMeta(db, META_FOLD_BURST_WINDOW, String(window));
+      else deleteMeta(db, META_FOLD_BURST_WINDOW);
     });
   }
 
   clear(): void {
     atomic(this.db, () => {
       this.db.run(`DELETE FROM scores`);
+      this.db.run(`DELETE FROM burst_last`);
       deleteMeta(this.db, META_FOLD_CURSOR);
       deleteMeta(this.db, META_FOLD_HALF_LIVES);
+      deleteMeta(this.db, META_FOLD_BURST_WINDOW);
     });
   }
 }
@@ -215,31 +258,39 @@ export class SqliteNoteStore implements storage.NoteStore {
   }
 
   replaceLinks(source: string, links: readonly storage.NoteLink[]): void {
-    const byTarget = new Map<string, boolean>();
+    const byTarget = new Map<string, { dangling: boolean; display: string | null }>();
     for (const link of links) {
       if (typeof link.target !== 'string' || link.target === '') {
         throw new RangeError('link target must be a non-empty string');
       }
-      byTarget.set(link.target, Boolean(link.dangling));
+      byTarget.set(link.target, {
+        dangling: Boolean(link.dangling),
+        display: storage.linkDisplay(link) ?? null,
+      });
     }
     atomic(this.db, () => {
       this.db.run(`DELETE FROM links WHERE source = :source`, { source });
       const insert = this.db.prepare(
-        `INSERT INTO links (source, target, dangling) VALUES (:source, :target, :dangling)`,
+        `INSERT INTO links (source, target, dangling, display)
+         VALUES (:source, :target, :dangling, :display)`,
       );
-      for (const [target, dangling] of byTarget) {
-        insert.run({ source, target, dangling: dangling ? 1 : 0 });
+      for (const [target, { dangling, display }] of byTarget) {
+        insert.run({ source, target, dangling: dangling ? 1 : 0, display });
       }
     });
   }
 
   linksFrom(source: string): storage.NoteLink[] {
     return this.db
-      .all<{ target: string; dangling: number }>(
-        `SELECT target, dangling FROM links WHERE source = :source`,
+      .all<{ target: string; dangling: number; display: string | null }>(
+        `SELECT target, dangling, display FROM links WHERE source = :source`,
         { source },
       )
-      .map((r) => ({ target: r.target, dangling: r.dangling !== 0 }))
+      .map((r) =>
+        r.display === null
+          ? { target: r.target, dangling: r.dangling !== 0 }
+          : { target: r.target, dangling: r.dangling !== 0, display: r.display },
+      )
       .sort((a, b) => compareStrings(a.target, b.target));
   }
 
@@ -251,12 +302,11 @@ export class SqliteNoteStore implements storage.NoteStore {
   }
 
   danglingTargets(): storage.DanglingCount[] {
-    return this.db
-      .all<{ key: string; count: number }>(
-        `SELECT target AS key, count(*) AS count FROM links WHERE dangling = 1 GROUP BY target`,
-      )
-      .sort((a, b) => b.count - a.count || compareStrings(a.key, b.key))
-      .map((r) => ({ key: r.key, count: r.count }));
+    return storage.danglingCounts(
+      this.db.all<{ key: string; display: string | null }>(
+        `SELECT target AS key, display FROM links WHERE dangling = 1`,
+      ),
+    );
   }
 }
 

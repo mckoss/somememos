@@ -2,8 +2,8 @@
 // Porter stemmer, section analysis, BM25F, query parsing, an in-memory
 // reference index and snippets. Storage only keeps the term index; all
 // tokenizing and ranking happens here, so results match on every platform.
-// Every scoring parameter is a tunable placeholder until `somememos eval`
-// measures it.
+// Every scoring parameter is tunable and set by `somememos eval`; see
+// `DEFAULT_BM25F_PARAMS` for which defaults were measured (PLAN.md section 5).
 
 export { type Token, foldText, tokenize } from './tokenize.js';
 export { isStemmable, porterStem } from './porter.js';
@@ -38,7 +38,7 @@ export {
   resolveBm25fParams,
   validateBm25fParams,
 } from './bm25f.js';
-export { type ParsedQuery, type QueryClause, parseQuery } from './query.js';
+export { type ParsedQuery, type QueryClause, matchesAllClauses, parseQuery } from './query.js';
 export {
   type Awaitable,
   type GatheredPostings,

@@ -60,24 +60,24 @@ Goal: on one machine, Mike indexes his vault, imports its git history, gets usef
 ### Querying
 
 - [x] **1.12 Ranking (core).** Given candidate items, their per-kind scores, weights, `α`, a half-life and a mode, return ranked results with the score components. Pure functions with no database access, so the evaluation harness can call them with any parameters.
-- [ ] **1.13 `search`.** Core's keyword scoring over the stored term index gives a relevance `r` per section, combined with activation and grouped so a note appears once with its best section. Modes `hot`, `trending`, `neglected`, `all`.
-- [ ] **1.14 `hot`, `trending`, `neglected`.** Activation-only lists, including dangling links, marked as such.
-- [ ] **1.15 `read` and `commit`.** `read` prints the note and logs a `read` event at the current time. It refuses excluded paths, and reading a note that isn't a scored item prints it and logs nothing. `commit [-m message]` runs the index pass, so its edits are logged at once, and writes one change record (time, client, changed notes, message) beside the event log; it exists in local mode so agents follow the same search, read, edit, commit flow they will use against the server.
-- [ ] **1.16 Output.** Plain text by default: one result per line (path, heading, snippet), stable across runs. `--json` gives full records with score components. Exit codes 0, 1 and 2. Complete `--help` for every command.
-- [ ] **1.16a Roles and `diary`.** Only `memo` files are scored items. A `dated` pattern yields the entry's date from its path, and `search` accepts `--since` and `--until` on it. A changed `source` file is reported, not logged as an edit. `somememos diary` prints today's entry path, creating the file if needed. `somememos init` in an empty directory creates `memos/`, `diary/` and `sources/`.
-- [ ] **1.16b `log`.** Show change records newest first, as plain text or `--json`. Filters: a note path, `--op`, `--since` and `--until`, and `--all` to include changes that touch only `dated` files. Changes found by the index pass without a `commit` appear with no message. Index messages for `search`. `import-git` also writes a change record per imported commit, using the commit message.
-- [ ] **1.17 `status` and `export`.** `status` shows note and section counts, events by kind, and the weights in effect. `export` writes `events.jsonl`, change records included; a round-trip test imports it into an empty brain and compares scores.
-- [ ] **1.18 Concurrency.** WAL mode and a busy timeout on both databases, so several agents can run commands at once. A test runs parallel `read` commands and checks that no event is lost or folded twice.
+- [x] **1.13 `search`.** Core's keyword scoring over the stored term index gives a relevance `r` per section, combined with activation and grouped so a note appears once with its best section. Modes `hot`, `trending`, `neglected`, `all`.
+- [x] **1.14 `hot`, `trending`, `neglected`.** Activation-only lists, including dangling links, marked as such.
+- [x] **1.15 `read` and `commit`.** `read` prints the note and logs a `read` event at the current time. It refuses excluded paths, and reading a note that isn't a scored item prints it and logs nothing. `commit [-m message]` runs the index pass, so its edits are logged at once, and writes one change record (time, client, changed notes, message) beside the event log; it exists in local mode so agents follow the same search, read, edit, commit flow they will use against the server.
+- [x] **1.16 Output.** Plain text by default: one result per line (path, heading, snippet), stable across runs. `--json` gives full records with score components. Exit codes 0, 1 and 2. Complete `--help` for every command.
+- [x] **1.16a Roles and `diary`.** Only `memo` files are scored items. A `dated` pattern yields the entry's date from its path, and `search` accepts `--since` and `--until` on it. A changed `source` file is reported, not logged as an edit. `somememos diary` prints today's entry path, creating the file if needed. `somememos init` in an empty directory creates `memos/`, `diary/` and `sources/`.
+- [x] **1.16b `log`.** Show change records newest first, as plain text or `--json`. Filters: a note path, `--op`, `--since` and `--until`, and `--all` to include changes that touch only `dated` files. Changes found by the index pass without a `commit` appear with no message. Index messages for `search`. `import-git` also writes a change record per imported commit, using the commit message.
+- [x] **1.17 `status` and `export`.** `status` shows note and section counts, events by kind, and the weights in effect. `export` writes `events.jsonl`, change records included; a round-trip test imports it into an empty brain and compares scores.
+- [x] **1.18 Concurrency.** WAL mode and a busy timeout on both databases, so several agents can run commands at once. A test runs parallel `read` commands and checks that no event is lost or folded twice.
 
 ### Evaluation
 
 - [x] **1.19 Metrics (core).** Recall@k and MRR, with unit tests on hand-computed cases.
 - [x] **1.20 Replay (core).** Fold the event log up to a given time into in-memory scores, with the weights, half-lives and folding rules of one experiment setting. This is the same folding code as 1.3, given different parameters.
-- [ ] **1.21 Case builders.**
+- [x] **1.21 Case builders.**
   - Orientation cases: at a sampled time, the answers are the notes with events in the following day and week.
   - Search cases from imported git history: for a sampled commit, the query is its message plus any changelog text it added; the answers are the scored notes it changed that already existed. The keyword index is built from the parent commit's tree (`git ls-tree` plus `git cat-file --batch`, in an in-memory database), with no working-tree checkout.
   - Hand-written cases: a JSONL file of `{query, time?, answers}` kept in the brain.
-- [ ] **1.22 `somememos eval`.** Run a named set of parameter settings over the cases and print a table of recall@k and MRR per setting, with a `--json` form. Sampling is seeded so runs repeat. Per-case detail is shown only on request, written only inside the brain's `.somememos/` directory, and refused if the target is inside a somememos source checkout. The default report is aggregate numbers that are safe to paste into this repo.
+- [x] **1.22 `somememos eval`.** Run a named set of parameter settings over the cases and print a table of recall@k and MRR per setting, with a `--json` form. Sampling is seeded so runs repeat. Per-case detail is shown only on request, written only inside the brain's `.somememos/` directory, and refused if the target is inside a somememos source checkout. The default report is aggregate numbers that are safe to paste into this repo.
 - [ ] **1.22a Prepare the vault.** In `mckoss/2nd-brain` (not here), before the first import: rename `wiki/` to `memos/` and rewrite the links and instructions that name it, in one commit; add `.somememos/config.json` with the roles and exclusions; ignore the two database files in git. Then run `import-git`, ignoring the rename commit.
 - [ ] **1.23 First experiments on Mike's vault.** Run in the vault's own directory, in this order, and record only the aggregate numbers and the chosen defaults in PLAN.md (no queries, paths, titles or examples):
   1. Check the search cases. Read a sample of generated cases to see whether they describe their tasks. If they don't, write 30 to 50 cases by hand first.
@@ -98,33 +98,33 @@ Done when: `somememos index` and `import-git` run cleanly on the vault with the 
 Goal: the installable PWA of PLAN.md section 6, working entirely on data in the browser, on phone and desktop.
 
 - [x] **2.0 Shared packages.** Move the SQLite store out of the CLI into a package with a small driver interface (one driver for `node:sqlite`, one for SQLite in the browser), and move the "a note changed: update the index and log events" logic into core, so the CLI, the browser and the server use one copy.
-- [ ] **2.1 In-browser storage.** The storage interfaces on SQLite compiled for the browser, in a background worker with persistent storage, passing the shared conformance suite in a real browser. Note bodies are stored locally too.
-- [ ] **2.2 Brain engine in the worker.** Indexing, folding, ranking and search run in the worker behind a small request interface the pages call.
-- [ ] **2.3 Editor.** CodeMirror 6 source editor that stores exactly what was typed, with a live preview, `[[link]]` autocomplete, and create, save and rename. Side by side on desktop, one pane with a toggle on a phone.
-- [ ] **2.3a Blog posts.** The `blog` folder role in core and the app. In the editor, a note in the blog folder shows a draft or published badge and a control that sets or removes `published: true` in its front matter, with a confirmation before publishing.
-- [ ] **2.4 Search and activation views.** The four modes, results with score breakdowns, the hot, trending and neglected lists, and dangling links.
-- [ ] **2.5 Note view.** Rendered markdown, backlinks, and the note's change history. Opening a note logs a read.
-- [ ] **2.6 Folder import.** Bring a folder of markdown files into the app from the device, honoring roles and exclusions.
-- [ ] **2.7 Installable and offline.** Manifest, service worker, and an update prompt when a new version is available. The header shows the version.
-- [ ] **2.8 Browser tests.** Playwright at phone and desktop sizes: import, search, edit, reload, and use with the network off.
+- [x] **2.1 In-browser storage.** The storage interfaces on SQLite compiled for the browser, in a background worker with persistent storage, passing the shared conformance suite in a real browser. Note bodies are stored locally too.
+- [x] **2.2 Brain engine in the worker.** Indexing, folding, ranking and search run in the worker behind a small request interface the pages call.
+- [x] **2.3 Editor.** CodeMirror 6 source editor that stores exactly what was typed, with a live preview, `[[link]]` autocomplete, and create, save and rename. Side by side on desktop, one pane with a toggle on a phone.
+- [x] **2.3a Blog posts.** The `blog` folder role in core and the app. In the editor, a note in the blog folder shows a draft or published badge and a control that sets or removes `published: true` in its front matter, with a confirmation before publishing.
+- [x] **2.4 Search and activation views.** The four modes, results with score breakdowns, the hot, trending and neglected lists, and dangling links.
+- [x] **2.5 Note view.** Rendered markdown, backlinks, and the note's change history. Opening a note logs a read.
+- [x] **2.6 Folder import.** Bring a folder of markdown files into the app from the device, honoring roles and exclusions.
+- [x] **2.7 Installable and offline.** Manifest, service worker, and an update prompt when a new version is available. The header shows the version.
+- [x] **2.8 Browser tests.** Playwright at phone and desktop sizes: import, search, edit, reload, and use with the network off.
 
 Done when Mike can import his vault into the app and use it offline for reading, searching and editing.
 
 ## M3 — Server and sync (outline)
 
 - [ ] **3.0 Design review.** Settle the sync request API, single-user sign-in, how commits are attributed, and how an existing vault's repository becomes the server's. Update PLAN.md section 7 before coding.
-- [ ] **3.1 Postgres storage.** Implement core's storage interfaces for Postgres, with a brain id on every row, and run the shared conformance suite against it in CI with a Postgres service.
-- [ ] **3.2 Server storage.** One git repository per brain on the server's filesystem, with one commit per accepted change, and one mutation counter that numbers every change.
-- [ ] **3.3 Sync API.** Catch up by mutation counter; push events (ids the server has are ignored) and edits with base hashes; refuse a stale base and return the current version.
+- [x] **3.1 Postgres storage.** Implement core's storage interfaces for Postgres, with a brain id on every row, and run the shared conformance suite against it in CI with a Postgres service.
+- [x] **3.2 Server storage.** One git repository per brain on the server's filesystem, with one commit per accepted change, and one mutation counter that numbers every change.
+- [x] **3.3 Sync API.** Catch up by mutation counter; push events (ids the server has are ignored) and edits with base hashes; refuse a stale base and return the current version.
 - [ ] **3.4 Sync in the app,** with conflict files, and in `somememos clone`.
-- [ ] **3.5 Property tests.** Repeated pushes count nothing twice, and any interleaving of clients ends with the same events and scores everywhere.
-- [ ] **3.6 Version history.** List a note's versions and restore one, as a new commit.
+- [x] **3.5 Property tests.** Repeated pushes count nothing twice, and any interleaving of clients ends with the same events and scores everywhere.
+- [x] **3.6 Version history.** List a note's versions and restore one, as a new commit.
 - [ ] **3.7 Deploy.** Railway with `adapter-node`, managed Postgres, a volume for the git repositories with its own backup, and a health endpoint that reports the version.
 
 ## M4 — Agents everywhere (outline)
 
-- [ ] **4.1 One-file CLI build** and a one-line install.
-- [ ] **4.2 Remote mode.** `search`, the activation lists, `read`, `commit` and `log` as requests to the server, with a working folder and a reminder about uncommitted edits.
+- [x] **4.1 One-file CLI build** and a one-line install.
+- [x] **4.2 Remote mode.** `search`, the activation lists, `read`, `commit` and `log` as requests to the server, with a working folder and a reminder about uncommitted edits.
 - [ ] **4.3 Agent instructions.** An `AGENTS.md` snippet and a skill: `somememos hot` to orient, `somememos search` before grep, `somememos read` in place of `cat`, and `somememos commit -m` after editing.
 - [ ] **4.4 Amend the vault** (in `mckoss/2nd-brain`, not here): remove the log-writing rules and the grep orientation step, and update the text about RAG and Obsidian Sync.
 - [ ] **4.5 Cloud sessions.** Add the CLI install and credential to the cloud environment's setup (Mike changes the environment; give him the exact lines).

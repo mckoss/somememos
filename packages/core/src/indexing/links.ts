@@ -10,7 +10,12 @@
 //   no dangling item, no mention.
 // - A note linking to itself links nothing.
 
-import { createLinkResolver, resolutionItem, type LinkResolver } from '../markdown/resolve.js';
+import {
+  createLinkResolver,
+  danglingDisplay,
+  resolutionItem,
+  type LinkResolver,
+} from '../markdown/resolve.js';
 import {
   dirName,
   hasNonMarkdownExtension,
@@ -102,7 +107,8 @@ export function countsAsLink(
 /**
  * The distinct link items of `targets` linked from `source`, in first-link
  * order, as stored links: self-links, links into excluded territory and
- * attachment links dropped.
+ * attachment links dropped. A dangling link carries its `display` form
+ * (`markdown.danglingDisplay`) as first written in the note.
  */
 export function linkItemsOf(
   targets: readonly string[],
@@ -110,14 +116,21 @@ export function linkItemsOf(
   resolver: LinkResolver,
   excluded: ExcludedLinks,
 ): NoteLink[] {
-  const out = new Map<string, boolean>();
+  const out = new Map<string, NoteLink>();
   for (const target of targets) {
     if (excluded.has(target, source)) continue;
     const r = resolver.resolve(target, source);
     if (r.kind === 'resolved' && r.path === source) continue;
     if (r.kind === 'dangling' && hasNonMarkdownExtension(target)) continue;
     const item = resolutionItem(r);
-    if (!out.has(item)) out.set(item, r.kind === 'dangling');
+    if (out.has(item)) continue;
+    const display = r.kind === 'dangling' ? danglingDisplay(target) : '';
+    out.set(
+      item,
+      display !== ''
+        ? { target: item, dangling: true, display }
+        : { target: item, dangling: r.kind === 'dangling' },
+    );
   }
-  return [...out].map(([target, dangling]) => ({ target, dangling }));
+  return [...out.values()];
 }

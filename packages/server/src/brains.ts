@@ -35,9 +35,22 @@
 // commits first. (If the data volume is restored from a backup older than
 // the database, the recorded commit is missing; requests then fail with a
 // clear error rather than guess.)
+//
+// Pure reads take neither the lock nor the repository check. `readBrain`
+// runs a request that logs nothing (search, lists, status, titles, dangling
+// links, the change log, history, a note read with `record=false`) in a
+// `REPEATABLE READ READ ONLY` transaction: one snapshot of the database, in
+// which the index, scores and `git_head` were all committed together. Note
+// text comes from git's object store at that recorded commit
+// (`snapshotContentStore`), never from the working tree a concurrent write
+// may be changing, and git objects never change, so a read sees exactly one
+// committed state of the brain. Postgres refuses any write in the
+// transaction. A read that would need one (a brain without an index
+// baseline yet, or a note whose index entry is stale) gives up and runs as
+// an ordinary locked request instead (`NeedsLockError`).
 
 import { join } from 'node:path';
-import { engine as coreEngine, indexing, storage, type engine as Eng } from '@somememos/core';
+import { engine as coreEngine, indexing, storage, sync, type engine as Eng } from '@somememos/core';
 import {
   advanceMutationSeq,
   createPgStores,
@@ -125,6 +138,42 @@ export interface CommittedChanges {
   readonly changes: StagedChange[];
   /** The mutation numbers the change set took, in `changes` order. */
   readonly mutations: number[];
+}
+
+/** A pure read found it must write after all; it is re-run under the brain's lock. */
+export class NeedsLockError extends Error {
+  override name = 'NeedsLockError';
+}
+
+/** Postgres: "cannot execute … in a read-only transaction". */
+const READ_ONLY_SQL_TRANSACTION = '25006';
+
+/**
+ * A read-only `ContentStore` over the brain's notes as `commit` stored them,
+ * read from git's object store (immutable, so safe without the brain's lock).
+ * Only `read` is supported: anything else is a write path and throws
+ * `NeedsLockError`. Texts are cached for the request.
+ */
+export function snapshotContentStore(repo: BrainRepo, commit: string): storage.ContentStore {
+  const cache = new Map<string, string | undefined>();
+  const refuse = (): never => {
+    throw new NeedsLockError('this request needs the working tree');
+  };
+  return {
+    list: refuse,
+    stat: refuse,
+    write: refuse,
+    remove: refuse,
+    rename: refuse,
+    async read(path: string): Promise<string | undefined> {
+      if (sync.syncPathProblem(path) !== null) return undefined;
+      if (!cache.has(path)) {
+        const [text] = await repo.readAt([{ commit, path }]);
+        cache.set(path, text);
+      }
+      return cache.get(path);
+    },
+  };
 }
 
 const configOf = (config: storage.BrainConfig): StoredConfig => {
@@ -374,6 +423,80 @@ export class BrainService {
         throw error;
       }
     });
+  }
+
+  /**
+   * Runs `fn`, which must only read, without the brain's lock (see the top of
+   * this file): on one read-only snapshot of the database, with note text
+   * from the recorded commit. `commitChanges` and `numberEntries` refuse. If
+   * `fn` turns out to need a write, it runs again under `withBrain`.
+   */
+  async readBrain<T>(
+    owner: string,
+    brainId: unknown,
+    options: { readonly clientId?: string },
+    fn: (ctx: BrainContext) => Promise<T>,
+  ): Promise<T> {
+    const id = this.checkId(brainId);
+    const clientId = options.clientId ?? SERVER_CLIENT_ID;
+    if (!CLIENT_ID.test(clientId)) throw new BrainError('invalid-config', 'bad client id', 400);
+    await ensureMigrated(this.options.pool);
+    const now = this.now();
+    try {
+      return await this.tx.run(async (client) => {
+        await client.query('SET TRANSACTION ISOLATION LEVEL REPEATABLE READ READ ONLY');
+        const { rows } = await client.query<{
+          owner_id: string;
+          config: string;
+          git_head: string | null;
+        }>('SELECT owner_id, config, git_head FROM server_brains WHERE brain_id = $1', [id]);
+        const row = rows[0];
+        if (!row || row.owner_id !== owner)
+          throw new BrainError('brain-not-found', 'no such brain', 404);
+        const recorded = row.git_head;
+        if (recorded === null) throw new NeedsLockError('the brain has no commit yet');
+        const repo = new BrainRepo(this.repoDir(id));
+        if (!repo.exists()) throw new NeedsLockError('the repository is missing');
+        const config = storage.parseBrainConfig({ ...JSON.parse(row.config), clientId });
+        const stores = await createPgStores({
+          pool: this.tx.asPool(),
+          brainId: id,
+          now: this.now,
+          analyzer: config.analyzer,
+          readOnly: true,
+        });
+        if ((await stores.indexMeta.get(indexing.META_BASELINE)) === undefined) {
+          throw new NeedsLockError('the brain has no index baseline yet');
+        }
+        const content = snapshotContentStore(repo, recorded);
+        const engine = coreEngine.createEngine({ stores, content, config, now: this.now });
+        const refuse = (): never => {
+          throw new NeedsLockError('a read-only request cannot commit');
+        };
+        const ctx: BrainContext = {
+          brainId: id,
+          engine,
+          stores,
+          content,
+          repo,
+          config,
+          now,
+          query: async <R extends pg.QueryResultRow>(
+            text: string,
+            values: readonly unknown[] = [],
+          ) => (await client.query<R>(text, values as unknown[])).rows,
+          commitChanges: refuse,
+          numberEntries: refuse,
+        };
+        return await fn(ctx);
+      });
+    } catch (error) {
+      const code = (error as { code?: unknown }).code;
+      if (error instanceof NeedsLockError || code === READ_ONLY_SQL_TRANSACTION) {
+        return this.withBrain(owner, id, options, fn);
+      }
+      throw error;
+    }
   }
 
   private async commitChanges(

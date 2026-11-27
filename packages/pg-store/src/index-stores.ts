@@ -34,14 +34,17 @@ function ordered(scores: timescore.ItemScores<string>): timescore.ItemScores<str
   return out;
 }
 
+interface IndexStateRow {
+  fold_cursor: number;
+  half_lives: string | null;
+  burst_window: number | null;
+}
+
 /** Locks the brain's `index_state` row (the fold cursor) until the transaction ends. */
-async function lockIndexState(
-  q: Queryable,
-  brainId: string,
-): Promise<{ fold_cursor: number; half_lives: string | null }> {
-  const { rows } = await query<{ fold_cursor: number; half_lives: string | null }>(
+async function lockIndexState(q: Queryable, brainId: string): Promise<IndexStateRow> {
+  const { rows } = await query<IndexStateRow>(
     q,
-    `SELECT fold_cursor, half_lives FROM index_state WHERE brain_id = $1 FOR UPDATE`,
+    `SELECT fold_cursor, half_lives, burst_window FROM index_state WHERE brain_id = $1 FOR UPDATE`,
     [brainId],
   );
   if (!rows[0]) throw new Error(`no such brain: ${brainId}`);
@@ -50,22 +53,106 @@ async function lockIndexState(
 
 const SCORE_KEY_SEPARATOR = '\0';
 
+/**
+ * Applies a batch's `last` ops and the burst state half of its `move` ops,
+ * in op order, to the current state of the items they touch, and writes
+ * those items' state back. Runs inside `applyFold`'s transaction.
+ */
+async function applyBurstOps(
+  q: Queryable,
+  brainId: string,
+  items: string[],
+  ops: readonly storage.ScoreOp[],
+): Promise<void> {
+  // item -> kind -> last counted time
+  const current = new Map<string, Map<string, number>>();
+  for (const item of items) current.set(item, new Map());
+  const { rows } = await query<{ item: string; kind: string; time: number }>(
+    q,
+    `SELECT item, kind, time FROM burst_last WHERE brain_id = $1 AND item = ANY($2::text[])`,
+    [brainId, items],
+  );
+  for (const r of rows) (current.get(r.item) as Map<string, number>).set(r.kind, Number(r.time));
+  const put = (item: string, kind: string, time: number): void => {
+    const state = current.get(item) as Map<string, number>;
+    state.set(kind, Math.max(state.get(kind) ?? -Infinity, time));
+  };
+  for (const op of ops) {
+    if (op.type === 'last') put(op.item, op.kind, op.time);
+    else if (op.type === 'move' && op.from !== op.to) {
+      const from = current.get(op.from) as Map<string, number>;
+      for (const [kind, time] of from) put(op.to, kind, time);
+      from.clear();
+    }
+  }
+  const outItems: string[] = [];
+  const outKinds: string[] = [];
+  const outTimes: number[] = [];
+  for (const [item, state] of current) {
+    for (const [kind, time] of state) {
+      outItems.push(item);
+      outKinds.push(kind);
+      outTimes.push(time);
+    }
+  }
+  await query(q, `DELETE FROM burst_last WHERE brain_id = $1 AND item = ANY($2::text[])`, [
+    brainId,
+    items,
+  ]);
+  if (outItems.length > 0) {
+    await query(
+      q,
+      `INSERT INTO burst_last (brain_id, item, kind, time)
+       SELECT $1, u.* FROM unnest($2::text[], $3::text[], $4::bigint[]) AS u(item, kind, time)`,
+      [brainId, outItems, outKinds, outTimes],
+    );
+  }
+}
+
 export class PgScoreStore implements storage.ScoreStore {
   constructor(private readonly db: BrainDb) {}
 
   async foldState(): Promise<storage.FoldState> {
-    const { rows } = await this.db.derived<{ fold_cursor: number; half_lives: string | null }>(
-      `SELECT fold_cursor, half_lives FROM index_state WHERE brain_id = $1`,
+    const { rows } = await this.db.derived<IndexStateRow>(
+      `SELECT fold_cursor, half_lives, burst_window FROM index_state WHERE brain_id = $1`,
       [this.db.brainId],
     );
     const row = rows[0];
-    return {
-      cursor: row?.fold_cursor ?? 0,
-      halfLives:
-        row?.half_lives === null || row?.half_lives === undefined
-          ? null
-          : (JSON.parse(row.half_lives) as storage.HalfLives),
-    };
+    const cursor = row?.fold_cursor ?? 0;
+    const halfLives =
+      row?.half_lives === null || row?.half_lives === undefined
+        ? null
+        : (JSON.parse(row.half_lives) as storage.HalfLives);
+    const window = halfLives === null ? 0 : (row?.burst_window ?? 0);
+    return window > 0 ? { cursor, halfLives, burstWindow: window } : { cursor, halfLives };
+  }
+
+  async burstState(items: readonly string[]): Promise<storage.BurstState> {
+    const out: storage.BurstState = new Map();
+    const wanted = [...new Set(items)];
+    if (wanted.length === 0) return out;
+    const { rows } = await this.db.derived<{
+      item: string;
+      kind: timescore.EventKind;
+      time: number;
+    }>(`SELECT item, kind, time FROM burst_last WHERE brain_id = $1 AND item = ANY($2::text[])`, [
+      this.db.brainId,
+      wanted,
+    ]);
+    const byItem = new Map<string, Partial<Record<timescore.EventKind, number>>>();
+    for (const r of rows) {
+      let kinds = byItem.get(r.item);
+      if (!kinds) byItem.set(r.item, (kinds = {}));
+      kinds[r.kind] = Number(r.time);
+    }
+    for (const item of wanted) {
+      const kinds = byItem.get(item);
+      if (!kinds) continue;
+      const ordered: Partial<Record<timescore.EventKind, number>> = {};
+      for (const k of timescore.EVENT_KINDS) if (kinds[k] !== undefined) ordered[k] = kinds[k];
+      out.set(item, ordered);
+    }
+    return out;
   }
 
   async getItem(item: string): Promise<timescore.ItemScores<string> | undefined> {
@@ -123,12 +210,23 @@ export class PgScoreStore implements storage.ScoreStore {
       if (stored && !storage.sameHalfLives(stored, batch.halfLives)) {
         throw new storage.HalfLifeMismatchError(stored, batch.halfLives);
       }
+      const window = batch.burstWindow ?? 0;
+      storage.assertValidBurstWindow(window);
+      const storedWindow = state.burst_window ?? 0;
+      if (stored && storedWindow !== window) {
+        throw new storage.BurstWindowMismatchError(storedWindow, window);
+      }
       // Every check that can throw runs before the first write.
       const touched = new Set<string>();
+      const burstTouched = new Set<string>();
       for (const op of batch.ops) {
         storage.assertValidScoreOp(op, batch.halfLives);
         if (op.type === 'add') touched.add(op.item);
-        else if (op.from !== op.to) touched.add(op.from).add(op.to);
+        else if (op.type === 'last') burstTouched.add(op.item);
+        else if (op.from !== op.to) {
+          touched.add(op.from).add(op.to);
+          burstTouched.add(op.from).add(op.to);
+        }
       }
 
       if (touched.size > 0) {
@@ -156,6 +254,8 @@ export class PgScoreStore implements storage.ScoreStore {
         for (const op of batch.ops) {
           if (op.type === 'add') {
             add(op.item, `${op.kind}${SCORE_KEY_SEPARATOR}${op.halfLife}`, op.logScore);
+          } else if (op.type === 'last') {
+            continue;
           } else if (op.from !== op.to) {
             const from = current.get(op.from) as Map<string, number>;
             for (const [key, score] of from) add(op.to, key, score);
@@ -190,10 +290,17 @@ export class PgScoreStore implements storage.ScoreStore {
           );
         }
       }
+      if (burstTouched.size > 0) await applyBurstOps(q, brainId, [...burstTouched], batch.ops);
       await query(
         q,
-        `UPDATE index_state SET fold_cursor = $2, half_lives = $3 WHERE brain_id = $1`,
-        [brainId, batch.toCursor, storage.halfLivesToJson(batch.halfLives)],
+        `UPDATE index_state SET fold_cursor = $2, half_lives = $3, burst_window = $4
+         WHERE brain_id = $1`,
+        [
+          brainId,
+          batch.toCursor,
+          storage.halfLivesToJson(batch.halfLives),
+          window > 0 ? window : null,
+        ],
       );
     });
   }
@@ -203,9 +310,11 @@ export class PgScoreStore implements storage.ScoreStore {
     await this.db.derivedAtomic(async (q) => {
       await lockIndexState(q, brainId);
       await query(q, `DELETE FROM scores WHERE brain_id = $1`, [brainId]);
+      await query(q, `DELETE FROM burst_last WHERE brain_id = $1`, [brainId]);
       await query(
         q,
-        `UPDATE index_state SET fold_cursor = 0, half_lives = NULL WHERE brain_id = $1`,
+        `UPDATE index_state SET fold_cursor = 0, half_lives = NULL, burst_window = NULL
+         WHERE brain_id = $1`,
         [brainId],
       );
     });
@@ -285,33 +394,52 @@ export class PgNoteStore implements storage.NoteStore {
   }
 
   async replaceLinks(source: string, links: readonly storage.NoteLink[]): Promise<void> {
-    const byTarget = new Map<string, boolean>();
+    const byTarget = new Map<string, { dangling: boolean; display: string | null }>();
     for (const link of links) {
       if (typeof link.target !== 'string' || link.target === '') {
         throw new RangeError('link target must be a non-empty string');
       }
-      byTarget.set(link.target, Boolean(link.dangling));
+      byTarget.set(link.target, {
+        dangling: Boolean(link.dangling),
+        display: storage.linkDisplay(link) ?? null,
+      });
     }
     const brainId = this.db.brainId;
     await this.db.derivedAtomic(async (q) => {
       await query(q, `DELETE FROM links WHERE brain_id = $1 AND source = $2`, [brainId, source]);
       if (byTarget.size === 0) return;
+      const values = [...byTarget.values()];
       await query(
         q,
-        `INSERT INTO links (brain_id, source, target, dangling)
-         SELECT $1, $2, u.* FROM unnest($3::text[], $4::bool[]) AS u(target, dangling)`,
-        [brainId, source, [...byTarget.keys()], [...byTarget.values()]],
+        `INSERT INTO links (brain_id, source, target, dangling, display)
+         SELECT $1, $2, u.* FROM unnest($3::text[], $4::bool[], $5::text[])
+           AS u(target, dangling, display)`,
+        [
+          brainId,
+          source,
+          [...byTarget.keys()],
+          values.map((v) => v.dangling),
+          values.map((v) => v.display),
+        ],
       );
     });
   }
 
   async linksFrom(source: string): Promise<storage.NoteLink[]> {
-    const { rows } = await this.db.derived<{ target: string; dangling: boolean }>(
-      `SELECT target, dangling FROM links WHERE brain_id = $1 AND source = $2`,
-      [this.db.brainId, source],
-    );
+    const { rows } = await this.db.derived<{
+      target: string;
+      dangling: boolean;
+      display: string | null;
+    }>(`SELECT target, dangling, display FROM links WHERE brain_id = $1 AND source = $2`, [
+      this.db.brainId,
+      source,
+    ]);
     return rows
-      .map((r) => ({ target: r.target, dangling: r.dangling }))
+      .map((r) =>
+        r.display === null
+          ? { target: r.target, dangling: r.dangling }
+          : { target: r.target, dangling: r.dangling, display: r.display },
+      )
       .sort((a, b) => compareStrings(a.target, b.target));
   }
 
@@ -324,14 +452,11 @@ export class PgNoteStore implements storage.NoteStore {
   }
 
   async danglingTargets(): Promise<storage.DanglingCount[]> {
-    const { rows } = await this.db.derived<{ key: string; count: number }>(
-      `SELECT target AS key, count(*) AS count FROM links
-       WHERE brain_id = $1 AND dangling GROUP BY target`,
+    const { rows } = await this.db.derived<{ key: string; display: string | null }>(
+      `SELECT target AS key, display FROM links WHERE brain_id = $1 AND dangling`,
       [this.db.brainId],
     );
-    return rows
-      .sort((a, b) => b.count - a.count || compareStrings(a.key, b.key))
-      .map((r) => ({ key: r.key, count: r.count }));
+    return storage.danglingCounts(rows);
   }
 }
 
