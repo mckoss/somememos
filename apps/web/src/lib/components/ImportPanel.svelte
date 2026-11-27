@@ -12,6 +12,7 @@
     filesFromDirectoryPicker,
     filesFromDrop,
     filesFromInput,
+    isHiddenPath,
     normalizePicked,
     roleProblems,
     rolesFromText,
@@ -82,18 +83,17 @@
   async function chooseZip(file: File) {
     error = null;
     try {
-      const entries = await readZip(new Uint8Array(await file.arrayBuffer()));
+      const entries = readZip(new Uint8Array(await file.arrayBuffer()));
       const log = entries.find((e) => e.name === 'events.jsonl');
       const decoder = new TextDecoder('utf-8', { fatal: true });
       zipLog = log ? decoder.decode(log.data) : null;
+      // Each note becomes its own Blob, so the archive's buffer can go.
       choose(
         entries
-          .filter((e) => e.name !== 'events.jsonl')
+          .filter((e) => e.name !== 'events.jsonl' && !isHiddenPath(e.name))
           .map((e) => ({
             path: e.name,
-            file: new File([e.data as Uint8Array<ArrayBuffer>], e.name.split('/').pop() ?? e.name, {
-              lastModified: e.modified.getTime(),
-            }),
+            file: new File([e.data as Uint8Array<ArrayBuffer>], e.name.split('/').pop() ?? e.name),
           })),
       );
     } catch (err) {

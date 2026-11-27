@@ -1,4 +1,4 @@
-// "Export everything" on the More screen: a store-only zip of every stored
+// "Export everything" on the More screen: a deflated zip of every stored
 // note plus events.jsonl, built in the worker. The zip is parsed here with a
 // reader of its own (not the app's), and every file is compared byte for byte.
 
@@ -23,7 +23,10 @@ function crc32(data: Buffer): number {
   return (c ^ 0xffffffff) >>> 0;
 }
 
-/** Parses a zip by its central directory, checking every local header and CRC. */
+/**
+ * Parses a zip by its central directory, checking every local header, data
+ * descriptor and CRC, and that the files sit back to back.
+ */
 function parseZip(zip: Buffer): Entry[] {
   const end = zip.length - 22;
   expect(zip.readUInt32LE(end), 'end of central directory').toBe(0x06054b50);
@@ -43,19 +46,37 @@ function parseZip(zip: Buffer): Entry[] {
     const nameLen = zip.readUInt16LE(p + 28);
     const extra = zip.readUInt16LE(p + 30) + zip.readUInt16LE(p + 32);
     const local = zip.readUInt32LE(p + 42);
-    const name = zip.subarray(p + 46, p + 46 + nameLen).toString('utf8');
-    expect(flags & 0x0800, `${name}: UTF-8 flag`).toBe(0x0800);
-    expect(method, `${name}: stored`).toBe(0);
+    const nameBytes = zip.subarray(p + 46, p + 46 + nameLen);
+    const name = nameBytes.toString('utf8');
+    // An ASCII name reads the same in every encoding; any other must be flagged UTF-8.
+    if (nameBytes.some((b) => b > 0x7f)) {
+      expect(flags & 0x0800, `${name}: UTF-8 flag`).toBe(0x0800);
+    }
+    expect(method, `${name}: deflated`).toBe(8);
     expect(local, `${name}: files are back to back`).toBe(expectedLocal);
     expect(zip.readUInt32LE(local)).toBe(0x04034b50);
-    expect(zip.readUInt32LE(local + 14)).toBe(crc);
+    expect(
+      zip.subarray(local + 30, local + 30 + nameLen).equals(nameBytes),
+      `${name}: local name`,
+    ).toBe(true);
     const start = local + 30 + zip.readUInt16LE(local + 26) + zip.readUInt16LE(local + 28);
+    let next = start + csize;
+    if (flags & 0x0008) {
+      // Sizes and CRC follow the data, in a data descriptor (its signature is optional).
+      if (zip.readUInt32LE(next) === 0x08074b50) next += 4;
+      expect(zip.readUInt32LE(next), `${name}: descriptor CRC`).toBe(crc);
+      expect(zip.readUInt32LE(next + 4)).toBe(csize);
+      expect(zip.readUInt32LE(next + 8)).toBe(usize);
+      next += 12;
+    } else {
+      expect(zip.readUInt32LE(local + 14)).toBe(crc);
+    }
     const raw = zip.subarray(start, start + csize);
     const data = method === 8 ? inflateRawSync(raw) : Buffer.from(raw);
     expect(data.length).toBe(usize);
     expect(crc32(data), `${name}: CRC-32`).toBe(crc);
     out.push({ name, data });
-    expectedLocal = start + csize;
+    expectedLocal = next;
     p += 46 + nameLen + extra;
   }
   expect(expectedLocal).toBe(zip.readUInt32LE(end + 16));
