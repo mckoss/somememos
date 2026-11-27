@@ -1,0 +1,10 @@
+node_modules/
+dist/
+coverage/
+*.log
+.env
+.env.*
+
+# Rebuildable sidecar index (the scores snapshot is NOT ignored)
+.somememos/index.sqlite
+.somememos/index.sqlite-*
