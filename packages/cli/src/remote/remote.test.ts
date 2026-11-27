@@ -630,6 +630,21 @@ describePg(
         await ok(b, ['sync']);
       });
 
+      it('sync names the notes too large to sync, which stay in the copy', async () => {
+        const copy = newDir('clone-big');
+        await ok(tmp.dir, ['clone', server.url, 'garden', copy]);
+        writeFileSync(join(copy, 'memos/huge.md'), `# Huge\n\n${'y'.repeat(2 * 1024 * 1024)}\n`);
+        await ok(copy, ['commit', '-m', 'ingest a huge note']);
+        const r = await ok(copy, ['sync']);
+        expect(r.stderr).toMatch(
+          /warning: 1 note too large to sync \(over 2 MB\) stays in this copy only: memos\/huge\.md; split it to sync/,
+        );
+        const record = await json<{ tooLarge: string[] }>(copy, ['sync']);
+        expect(record.tooLarge).toEqual(['memos/huge.md']);
+        expect(existsSync(join(copy, 'memos/huge.md'))).toBe(true);
+        rmSync(join(copy, 'memos/huge.md'));
+      });
+
       it('sync in a brain with no server says how to set one', async () => {
         const dir = newDir('plain');
         await ok(tmp.dir, ['init', dir]);

@@ -116,4 +116,12 @@ test('roles changed on one device reach the server and the other device; a confl
   await b.page.locator('#roles').scrollIntoViewIfNeeded();
   await b.page.screenshot({ path: join(SHOTS, `roles-synced-${info.project.name}.png`) });
   await b.context.close();
+
+  // A note too large to sync is named in the sync details, and stays here.
+  await engineCall(a, 'saveNote', 'memos/enormous.md', `# Enormous\n\n${'z'.repeat(2_100_000)}\n`);
+  await syncCall(a, 'syncNow');
+  await clientGo(a, '/more#sync');
+  const tooLarge = a.getByTestId('sync-too-large');
+  await expect(tooLarge).toContainText('too large to sync');
+  await expect(tooLarge).toContainText('memos/enormous.md');
 });

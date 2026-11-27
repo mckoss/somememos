@@ -28,7 +28,7 @@ import { readPendingRemote } from '../indexing/state.js';
 import { SYNC_LIMITS, truncateChangeMessage } from '../sync/protocol.js';
 import { createEngine, localDate } from './engine.js';
 import { applyConfigChange, reconcileConfig } from './reconfigure.js';
-import { toSyncChange, toSyncEvent } from './sync.js';
+import { runSync, toSyncChange, toSyncEvent } from './sync.js';
 import { EngineError, type ResultView } from './types.js';
 
 /** What a host provides for one test: fresh, empty stores and content. */
@@ -993,6 +993,37 @@ export function describeEngineConformance(
           await expect(
             b.engine.applyRemote({ notes: [{ path: 'memos/bad.md', hash: 'nope', text: 'x' }] }),
           ).rejects.toBeInstanceOf(EngineError);
+        },
+      );
+
+      it(
+        'runSync reports the notes too large to sync, and pushes the rest',
+        { timeout },
+        async () => {
+          const b = await brain();
+          await b.engine.index();
+          b.tick();
+          await b.engine.saveNote('memos/small.md', '# Small\n');
+          const big = `# Big\n\n${'x'.repeat(SYNC_LIMITS.maxNoteBytes)}\n`;
+          await b.engine.saveNote('memos/big.md', big);
+          let mutation = 0;
+          const sent: string[] = [];
+          const result = await runSync(b.engine, async (request) => {
+            sent.push(...request.edits.map((e) => e.path));
+            mutation += request.edits.length + 1;
+            return {
+              mutation,
+              more: false,
+              results: request.edits.map((e) => ({ id: e.id, status: 'applied' as const })),
+              notes: [],
+              events: [],
+              changes: [],
+            };
+          });
+          expect(result.tooLarge).toEqual(['memos/big.md']);
+          expect(sent).toEqual(['memos/small.md']);
+          expect(result.config).toBeNull();
+          expectJsonSafe(result.tooLarge);
         },
       );
 

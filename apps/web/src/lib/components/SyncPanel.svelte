@@ -308,6 +308,22 @@
         The last sync sent {plural(view.lastRun.pushed.edits, 'note change')}.
       </p>
     {/if}
+    {#if view.lastRun && view.lastRun.tooLarge.length > 0}
+      <div class="notice" data-testid="sync-too-large">
+        <p>
+          {view.lastRun.tooLarge.length === 1
+            ? 'One note is too large to sync (over 2 MB), so it stays on this device only:'
+            : `${view.lastRun.tooLarge.length} notes are too large to sync (over 2 MB each), so they stay on this device only:`}
+        </p>
+        <ul>
+          {#each view.lastRun.tooLarge.slice(0, 20) as p (p)}<li><code>{p}</code></li>{/each}
+        </ul>
+        {#if view.lastRun.tooLarge.length > 20}
+          <p>…and {view.lastRun.tooLarge.length - 20} more.</p>
+        {/if}
+        <p>Split a note into smaller ones to sync it.</p>
+      </div>
+    {/if}
 
     <div class="row">
       <button

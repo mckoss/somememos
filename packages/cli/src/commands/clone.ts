@@ -100,7 +100,8 @@ ${GLOBAL_OPTIONS_HELP}
 Output: one summary line, then one line per conflict. With --json: {server,
 brainId, rounds, mutation, pushed: {edits, applied, duplicates, events,
 changes}, received: {notes, events, changes}, conflicts: [{path, status, code,
-conflictPath}], waiting, config: "in-step"|"pushed"|"pulled"}.
+conflictPath}], waiting, config: "in-step"|"pushed"|"pulled", tooLarge}.
+A note too large to sync (over 2 MB) stays in this copy, and sync names it.
 
 Examples:
   somememos sync
@@ -118,7 +119,11 @@ export interface SyncRecord {
   waiting: string[];
   /** The shared config: unchanged, this copy's change sent, or the server's taken. */
   config: engine.ConfigStep;
+  /** Notes too large to sync: they stay in this copy only. */
+  tooLarge: string[];
 }
+
+const SYNC_MAX_MB = coreSync.SYNC_LIMITS.maxNoteBytes / (1024 * 1024);
 
 /**
  * The shared config's side of sync for an offline copy (core's
@@ -212,6 +217,7 @@ export async function syncWithServer(
     conflicts: result.conflicts,
     waiting: result.waiting,
     config: result.config ?? 'in-step',
+    tooLarge: result.tooLarge,
   };
 }
 
@@ -349,6 +355,13 @@ export const syncCommand: Command = {
           warn(
             ctx,
             `${plural(record.waiting.length, 'note')} changed on both sides is still waiting; run somememos sync again`,
+          );
+        }
+        if (record.tooLarge.length > 0) {
+          const one = record.tooLarge.length === 1;
+          warn(
+            ctx,
+            `${plural(record.tooLarge.length, 'note')} too large to sync (over ${SYNC_MAX_MB} MB) ${one ? 'stays' : 'stay'} in this copy only: ${record.tooLarge.map((p) => brain.displayPath(p)).join(', ')}; split ${one ? 'it' : 'them'} to sync`,
           );
         }
       }
