@@ -24,6 +24,15 @@
 // same entries agree, whatever order each received them in. A rename logged
 // locally is dated now, after everything before it, and folds as a move.
 //
+// Ties are part of the rule (./renames.ts): renames at the same second are
+// simultaneous and never chain into each other, and of several renames of
+// one item at one second the smallest id applies. Moves applied one by one
+// are not simultaneous, so a rename that interacts with an earlier rename of
+// the same second (it starts where that one ends, or it renames the same
+// item and has the smaller id) also refolds (`outOfOrderRename`). Nothing
+// here uses `seq`, which differs on every copy, to decide where an event
+// lands.
+//
 // The burst rule (`burstWindow`, ./burst.ts). Of one item's events of one
 // kind, an event counts only if it is at least the window after the last
 // counted one; the item is the one the event lands on after renames. The
@@ -64,8 +73,14 @@ import {
   type ScoreOp,
   type ScoreStore,
   type StoredEvent,
+  type StoredRename,
 } from './types.js';
-import { assertValidHalfLives, foldBurstWindow, sameHalfLives } from './validate.js';
+import {
+  assertValidHalfLives,
+  compareStrings,
+  foldBurstWindow,
+  sameHalfLives,
+} from './validate.js';
 
 export interface FoldPendingOptions {
   /** Half-lives in seconds, by name. Default `timescore.HALF_LIVES`. */
@@ -487,26 +502,48 @@ export async function foldPending(
 }
 
 /**
- * True when a rename record among `entries` (the batch after `cursor`) is
- * dated before some entry that precedes it in the log, so folding it as a
- * move could count differently than its time says.
+ * True when folding the renames among `entries` (the batch after `cursor`)
+ * as moves, in arrival order, could give other scores than the canonical
+ * rule (./renames.ts). A move is exact when the rename is dated at or after
+ * every entry before it, and no rename before it at the same second
+ * interacts with it, since renames at one second are simultaneous while
+ * moves are not. Two such renames interact when this one starts where the
+ * earlier one ends (moving it would carry the earlier one's history
+ * further), or when both rename one item and this one has the smaller id
+ * (it, not the earlier one, is the rename that applies). Renames at one
+ * second that touch other items commute, so their arrival order never matters.
  */
 async function outOfOrderRename(
   log: EventLog,
   cursor: number,
-  entries: readonly { readonly kind: string; readonly time: number; readonly seq: number }[],
+  entries: readonly LogEntry[],
 ): Promise<boolean> {
   const firstRename = entries.findIndex((e) => e.kind === 'rename');
   if (firstRename < 0) return false;
   let latest = -Infinity;
-  if (cursor > 0) {
-    for (const e of await log.readAfter(0, { limit: cursor })) {
-      if (e.seq <= cursor && e.time > latest) latest = e.time;
+  /** Renames dated `latest`, in arrival order. */
+  let sameSecond: StoredRename[] = [];
+  const see = (e: LogEntry): void => {
+    if (e.time > latest) {
+      latest = e.time;
+      sameSecond = [];
     }
+    if (e.kind === 'rename' && e.time === latest) sameSecond.push(e);
+  };
+  if (cursor > 0) {
+    for (const e of await log.readAfter(0, { limit: cursor })) if (e.seq <= cursor) see(e);
   }
   for (const e of entries) {
-    if (e.kind === 'rename' && e.time < latest) return true;
-    if (e.time > latest) latest = e.time;
+    if (e.kind === 'rename') {
+      if (e.time < latest) return true;
+      if (e.time === latest) {
+        for (const r of sameSecond) {
+          if (r.to === e.item) return true;
+          if (r.item === e.item && compareStrings(e.id, r.id) < 0) return true;
+        }
+      }
+    }
+    see(e);
   }
   return false;
 }
