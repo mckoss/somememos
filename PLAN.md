@@ -207,10 +207,11 @@ A brain's config maps **roles** to path patterns. somememos works with whatever 
 | `memo`     | `memos/`       | A lasting note. Scored and searchable; what `hot`, `trending` and `neglected` show |
 | `dated`    | `diary/`       | An entry for one day, with the date known from the path. Searchable and a source of mentions. Whether dated entries are scored is an experiment |
 | `source`   | `sources/`     | Immutable source material. Searchable; a commit that changes one is refused        |
+| `blog`     | `blog/`        | A dated post the owner can publish on the somememos website (section 8). Scored and searchable like a memo, with its date known from the path |
 | `excluded` | (none)         | Never indexed, logged or shown                                                     |
 
 - **A lasting note is called a memo**, in keeping with the name somememos. (Elsewhere in this plan, "note" means any markdown file in a brain.)
-- **New brains start with `memos/`, `diary/` and `sources/`.** The layout is a default, not a requirement: any brain can map the roles to its own folders.
+- **New brains start with `memos/`, `diary/`, `blog/` and `sources/`.** The layout is a default, not a requirement: any brain can map the roles to its own folders.
 - **A dated entry's date is content, not an event time.** It is used to filter and display (for example, "what did I write last week"). The TimeScore event is still dated when the entry was actually written.
 - `somememos diary` prints the path of today's dated entry, creating it if needed, so agents always write to the right place.
 
@@ -477,6 +478,18 @@ Git is an internal detail of the server. Clients send and receive whole notes wi
 - **Export:** the user's markdown plus the event log (`events.jsonl`).
 - **Event log retention.** A person's reading history is sensitive. Decide at milestone 5 how long the hosted service keeps it and what control the user gets.
 
+### Publishing a blog
+
+Decided 2026-11-27: a brain has a `blog/` folder of dated posts that its owner can publish directly on the somememos website.
+
+- **A post is an ordinary note** in `blog/`, with its date in the path (for example `blog/2026/2026-11-27-why-memos.md`). It is written, edited, searched and scored like any memo, in the same editor, online or offline.
+- **Publishing happens on the server**, when the post syncs. The site serves the rendered post at a public address under the owner's name, with an index of posts and a feed.
+- **It is the one public part of an otherwise private brain, so the boundary has to be strict:**
+  - Only files in the blog folder can ever be public. Nothing else in a brain is reachable from a public page.
+  - A `[[link]]` from a post to another published post becomes a normal link. A link to anything private is shown as plain text and exposes neither the note's content nor its path. An embed of a private note is never inlined.
+  - Public page views are not events and never change a score.
+- **To settle before building:** how a post becomes public (see section 12), the address scheme, images and other attachments in posts, a custom domain, and whether an unpublished post leaves any public trace.
+
 ## 9. Technical stack
 
 Decided by Mike on 2026-11-26:
@@ -517,7 +530,7 @@ Each milestone should leave something usable. [IMPLEMENTATION.md](IMPLEMENTATION
 - **M2 — Web app, local first.** The installable PWA of section 6, working entirely on data in the browser: editor with live preview, search with score breakdowns, activation views, backlinks and folder import, on phone and desktop. Done when Mike can import his vault into the app and use it offline in place of Obsidian for reading, searching and editing.
 - **M3 — Server and sync.** A SvelteKit server on Railway with Postgres and one git repository per brain; the app and an optional `somememos clone` sync with it by mutation counter; single-user sign-in. Done when the same brain stays in step across a phone and a desktop.
 - **M4 — Agents everywhere.** A one-file CLI build with remote mode (`search`, `read` and `commit` as requests to the server, with a working folder), the `AGENTS.md` snippet and skill, and the vault's instructions amended. Done when Mike's agents on any machine, including disposable cloud sessions, use the brain with only the CLI and a credential, and record their reasons with `somememos commit -m`.
-- **M5 — Hosted multi-user and MCP.** Accounts, per-user storage, remote MCP with authentication plus local stdio MCP, privacy policy, event log retention, and export. Launch at the somememos domain.
+- **M5 — Hosted multi-user and MCP.** Accounts, per-user storage, published blogs (section 8), remote MCP with authentication plus local stdio MCP, privacy policy, event log retention, and export. Launch at the somememos domain.
 
 ## 11. Dogfooding on Mike's vault
 
@@ -538,6 +551,7 @@ Each milestone should leave something usable. [IMPLEMENTATION.md](IMPLEMENTATION
 Settled on 2026-11-27, and removed from this list: the primary purpose (agent memory), dangling links (in from M1), the look-ahead channel (events are dated by interaction, so calendar dates are just content), how scoring choices get made (by experiment), raw activity (an event log is kept), git (the server's version store, one repository per brain, with no git interface exposed), and the change log (kept by somememos from commit messages, not written by agents).
 
 0. **Image and file embeds.** `![[photo.png]]` is not treated as a link to a note, so attachments don't appear as dangling items. Settled as a default on 2026-11-27; revisit if attachments need their own handling.
+0a. **How a blog post becomes public.** Either every synced file in `blog/` is public, or a post is public only when its front matter says `published: true`. The second is safer, because a draft saved in the folder can't go public by accident.
 1. **Evaluation queries.** Changelog entries and commit messages give some usable search cases, but not all of them describe their task well enough, so a hand-written case file is also needed. How many cases are enough for a stable comparison?
 2. **Ranking parameters, all to be answered by experiment:** per-kind weights, `α`, half-lives per mode, how bursts of edits count, heading vs body weight, link spreading (whether, which direction, how strong), and section-level vs note-level scoring.
 3. **The read feedback loop.** Does counting agent reads make the hot list reinforce itself, and does the read weight need a guard?
