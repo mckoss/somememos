@@ -448,15 +448,14 @@ test('a new app version waits until the page asks it to take over', async ({ pag
     expect(await page.evaluate(() => caches.keys())).toContain(before[0]);
 
     // What #lib/brain/updates.ts applyUpdate() does: ask it to take over.
+    // The app (whose layout loads updates.ts) then reloads itself.
+    const reloaded = page.waitForEvent('load');
     await page.evaluate(async () => {
       const registration =
         (await navigator.serviceWorker.getRegistration()) as ServiceWorkerRegistration;
-      const changed = new Promise((r) =>
-        navigator.serviceWorker.addEventListener('controllerchange', r),
-      );
       registration.waiting?.postMessage({ type: 'skip-waiting' });
-      await changed;
     });
+    await reloaded;
     await expect.poll(() => page.evaluate(() => caches.keys())).toEqual([`${before[0]}.next`]);
   } finally {
     await page.close();

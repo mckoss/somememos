@@ -7,7 +7,8 @@
     "skipLibCheck": true,
     "sourceMap": true,
     "strict": true,
-    "noUncheckedIndexedAccess": true
+    "noUncheckedIndexedAccess": true,
+    "customConditions": ["source"]
   },
   "include": ["src", "test", "*"],
   "exclude": ["src/service-worker"]
