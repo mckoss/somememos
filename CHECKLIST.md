@@ -20,23 +20,23 @@ Status key: `[x]` merged to `main` with CI green, `[~]` in progress, `[ ]` not s
 
 - [x] `search`, `hot`, `trending`, `neglected`, `read`, `log`, `export`, `import-log`, `eval`
 - [x] `blog` folder role in core
-- [~] First experiments on the vault: run, results in PLAN.md section 5. The chosen defaults and the burst rule are applied in code (v0.4.0 PR)
+- [x] First experiments on the vault: run, results in PLAN.md section 5, and the chosen defaults and the burst rule are in the code (v0.4.0)
 
 ## Server and sync (milestone 3)
 
 - [x] Sync design written into PLAN.md section 7
 - [x] Postgres implementation of the storage interfaces, passing the shared conformance suite in CI
 - [x] Server: one git repository per brain, sync API, engine over HTTP, note history and restore
-- [~] Sync in the web app (agent running in a separate worktree)
+- [~] Sync in the web app (v0.5.0 PR)
 - [x] Single-user access token, with a seam for real sign-in
 - [!] Deploy to Railway (needs Mike: see QUESTIONS.md). Dockerfile, railway.json and docs/deploy.md are written; the image has not been built, because this environment has no Docker daemon
 
 ## Agents (milestone 4)
 
-- [~] One-file CLI build (v0.4.0 PR)
-- [~] CLI remote mode against the server, plus `clone`, `sync`, `history` and `restore` (v0.4.0 PR)
-- [~] Agent guide: `somememos help agents` and `help setup` (v0.4.0 PR). A packaged skill is not written
+- [x] One-file CLI build (v0.4.0)
+- [x] CLI remote mode against the server, plus `clone`, `sync`, `history` and `restore` (v0.4.0)
+- [x] Agent guide: `somememos help agents` and `help setup` (v0.4.0). A packaged skill is not written
 
 ## Blog publishing (milestone 5, pulled forward if time allows)
 
-- [~] Public pages for posts marked `published: true`, with the privacy rules in PLAN.md section 8 (agent running in a separate worktree)
+- [~] Public pages for posts marked `published: true`, with the privacy rules in PLAN.md section 8 (v0.5.0 PR)

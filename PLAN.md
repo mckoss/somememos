@@ -538,6 +538,18 @@ Implemented on 2026-11-27 in `packages/server`, mounted by the web app under `/a
 - **Without a database** the server still serves the web app, and the API answers 503.
 - **Folder roles are set when a brain is created** on the server, and a syncing copy takes them from there.
 
+### Sync in the web app (v0.5.0)
+
+- **Sync runs in the brain's worker, in the tab that owns the brain,** so only one copy ever syncs and the access token never needs to reach the page. Other tabs see its status.
+- **The server is the one the app was loaded from.** The settings are an access token and a brain, picked from the brains that token can see or created new.
+- **The token is kept on the device only,** with the brain's data. It is never put in a URL, in `localStorage`, in an error message or in the exported log, and is shown masked. Disconnect removes it; a reset wipes it with the notes.
+- **Connecting is explicit about what will happen.** An empty device downloads the brain and takes its folder roles. A device with notes creates the brain and uploads. When both sides have notes, the app explains that both sets are combined and that a note differing on both sides is kept twice, and asks before going ahead. Connecting to a different brain than before is never merged silently.
+- **When it syncs:** on request; about 3 seconds after a save, rename, delete or import settles; 15 seconds after a read; when the browser comes back online; when the app returns after being hidden; and every 5 minutes while open. Failures back off from 5 seconds up to 5 minutes. A refused token stops automatic sync until the person fixes it.
+- **Status** is a small indicator in the header (synced, syncing, changes waiting, offline, needs attention), with detail in More. Not being connected is a normal state with no indicator and no nagging.
+- **Conflicts** are listed with both versions side by side, and the person keeps theirs, the server's, or both. The conflict copy syncs like any note, so every device shows it until one resolves it.
+- **A blog post's badge** reads "Published, waiting to sync" until the server has the note's current version.
+- **Known gap:** folder roles changed on one device while connected are not pushed to the server, so devices can drift. The app warns that the change applies to that device only.
+
 ### Edits and conflicts
 
 - Every file version is identified by its content hash. An edit arrives with the **base hash** it was made against.
@@ -578,7 +590,17 @@ Decided 2026-11-27: a brain has a `blog/` folder of dated posts that its owner c
   - Only files in the blog folder can ever be public. Nothing else in a brain is reachable from a public page.
   - A `[[link]]` from a post to another published post becomes a normal link. A link to anything private is shown as plain text and exposes neither the note's content nor its path. An embed of a private note is never inlined.
   - Public page views are not events and never change a score.
-- **To settle before building:** the address scheme, images and other attachments in posts, a custom domain, and whether an unpublished post leaves any public trace.
+- **Still to settle:** images and other attachments in posts (not served at all yet), redirects after a post is renamed, a custom domain, and a screen in the app for the blog settings (today they are set through the API).
+
+**Public pages as built (v0.5.0):**
+
+- **Off until turned on.** A brain's blog is served only after its owner enables it and gives it a public name (a slug) and a title. The slug is never the brain's id.
+- **Addresses.** `/blog/{slug}/` is the index. A post dated by its path is at `/blog/{slug}/{YYYY}/{MM}/{DD}/{post}`; a post with no date in its path is at `/blog/{slug}/p/{post}`. There is an Atom feed at `/blog/{slug}/feed.xml` and a sitemap. An address depends only on the file's path, so editing a post never moves it; renaming a post makes its old address a 404.
+- **Published state is read from the brain's git repository at its recorded commit,** on each request, with no separate table to keep in step. A sync or save moves that commit, so publishing and unpublishing take effect on the next request. Pages may stay in a browser or proxy cache for up to a minute.
+- **Every miss is the same 404.** A draft, a private note, an excluded file, a post in a disabled blog and an address that never existed are indistinguishable in status, headers and body.
+- **Links resolve among published posts only.** A link to anything else shows its visible text and nothing more, so whether a private note of that name exists cannot change a page. That text is something the author typed into a public post, so showing it is acceptable.
+- **Pages are plain server-rendered HTML** with no script, raw HTML in markdown switched off, and a strict content security policy. Public requests log no events, take no lock that could block the owner, and are rate-limited.
+- **Search engines** may index published pages only. `robots.txt` lists the sitemap of each enabled blog.
 
 ## 9. Technical stack
 

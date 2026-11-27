@@ -22,3 +22,22 @@ Collected while Mike was away overnight (from 2026-11-27). None of these blocked
 
 7. **Safari on iOS and Firefox.** Only Chromium is available here, so the web app's on-device storage is untested in other browsers. It should work on Safari 16.4 or later and Firefox 114 or later.
    - *Meanwhile:* the app falls back to in-memory storage, with a visible warning, wherever on-device storage is unavailable.
+
+8. **Blog images and attachments.** Public pages show a post's text only; images and attached files are not served.
+   - *Meanwhile:* an image shows its alt text. Decide whether attachments should be served, and from where.
+
+9. **Blog addresses after a rename.** Renaming a post makes its old address return 404, because there is no redirect table.
+   - *Meanwhile:* left as is. Say if old addresses should redirect.
+
+10. **Listing blogs in `robots.txt`.** It lists the sitemap of every enabled blog, which lets anyone see which blogs exist on the server.
+    - *Meanwhile:* left as is, since blogs are meant to be found.
+
+11. **Time in caches after unpublishing.** A page can stay in a browser or proxy cache for up to a minute after its post is unpublished.
+    - *Meanwhile:* one minute. It can be shorter at the cost of more requests.
+
+12. **Folder roles across devices.** Roles are set when a brain is created on the server. Changing them later on one device is not pushed to the server or to other devices.
+    - *Meanwhile:* the app warns that the change applies to that device only. Decide whether roles should be editable on the server and pushed out.
+
+13. **Blog settings screen.** Turning a blog on and naming it is done through the API for now; the app has no screen for it.
+    - *Meanwhile:* the routes are described in PLAN.md section 8.
+
