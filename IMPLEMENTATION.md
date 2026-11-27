@@ -26,7 +26,7 @@ Goal: an empty but working workspace, with the TimeScore math proven correct.
 - [x] **0.5 `apps/web` skeleton.** SvelteKit with `adapter-node`, one page whose header shows the version from the root `package.json`.
 - [x] **0.6 CI.** A GitHub Actions workflow that runs lint, type-check, tests and the web build on every PR and on `main`.
 - [x] **0.7 Confirm `node:sqlite`.** A test suite that checks what the CLI's local store needs from the built-in `node:sqlite`: typed values at full precision, transactions, `INSERT … ON CONFLICT` with the `ln` and `exp` functions, WAL mode, a busy timeout, and concurrent writers in separate processes. Record the result in PLAN.md section 9. FTS5 is not required.
-- [ ] **0.8 Storage interfaces.** Define storage interfaces in core as operations (event log, scores, notes and links, term index), not SQL, so SQLite and Postgres can each implement them. Implement them for SQLite in the CLI, with a shared test suite that a Postgres implementation will also have to pass in M3.
+- [x] **0.8 Storage interfaces.** Define storage interfaces in core as operations (event log, scores, notes and links, term index), not SQL, so SQLite and Postgres can each implement them. Implement them for SQLite in the CLI, with a shared test suite that a Postgres implementation will also have to pass in M3.
 - [x] **0.9 Keyword scoring (core).** Tokenizer, Porter stemmer, BM25 with title, heading and body weights, an in-memory reference index, and snippets. All parameters are tunable placeholders until the experiments set them.
 
 Done when: CI is green, `npx somememos --version` prints `0.1.0`, the web skeleton shows the same version, and PLAN.md section 9 records the SQLite decision.
@@ -38,9 +38,9 @@ Goal: on one machine, Mike indexes his vault, imports its git history, gets usef
 ### Event log and scores
 
 - [ ] **1.1 Config.** `.somememos/config.json` with folder roles (`memo`, `dated`, `source`, `excluded`) as path patterns, with every file a `memo` when none are declared, half-lives, per-kind weights and `α`. `somememos init` writes defaults and a client id. Excluded paths must never reach the event log, the index, the scores or any CLI output; test that explicitly.
-- [ ] **1.2 Event log.** `events.sqlite` with the `events` table from PLAN.md section 4. An `appendEvent` function in core that assigns a unique id (a random UUID for live events), rejects future-dated events, and is idempotent on id.
-- [ ] **1.3 Folding (core).** Fold events after a stored cursor into per-kind scores in `index.sqlite`, cursor and scores in one transaction. Apply rename records by moving an item's scores. A full refold after deleting `index.sqlite` must give the same scores as incremental folding; property-test that with random event sequences, including renames.
-- [ ] **1.4 Schema versions.** A `schema_version` in each database. A mismatch in `index.sqlite` triggers a rebuild. A mismatch in `events.sqlite` runs an explicit migration and never drops data.
+- [x] **1.2 Event log.** `events.sqlite` with the `events` table from PLAN.md section 4. An `appendEvent` function in core that assigns a unique id (a random UUID for live events), rejects future-dated events, and is idempotent on id.
+- [x] **1.3 Folding (core).** Fold events after a stored cursor into per-kind scores in `index.sqlite`, cursor and scores in one transaction. Apply rename records by moving an item's scores. A full refold after deleting `index.sqlite` must give the same scores as incremental folding; property-test that with random event sequences, including renames.
+- [x] **1.4 Schema versions.** (Done as far as it can be: no older schema exists yet, so an event log mismatch stops with a "migration required" error and changes nothing.) A `schema_version` in each database. A mismatch in `index.sqlite` triggers a rebuild. A mismatch in `events.sqlite` runs an explicit migration and never drops data.
 
 ### Indexing
 

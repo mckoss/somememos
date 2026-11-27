@@ -1,6 +1,6 @@
 {
   "name": "@somememos/core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "private": true,
   "description": "Isomorphic somememos logic: TimeScore, chunking, links, ranking, evaluation.",
   "license": "Apache-2.0",
@@ -10,6 +10,9 @@
       "source": "./src/index.ts",
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
+    },
+    "./testing/storage": {
+      "source": "./src/storage/conformance.testing.ts"
     }
   },
   "files": [
