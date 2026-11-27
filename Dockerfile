@@ -17,11 +17,15 @@ COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/packages ./packages
 COPY --from=build /app/apps/web/package.json ./apps/web/package.json
 COPY --from=build /app/apps/web/build ./apps/web/build
+COPY --from=build /app/scripts/docker-start.sh ./scripts/docker-start.sh
 # A sync request may carry up to 32 MiB (core's sync.SYNC_LIMITS); adapter-node's default limit is 512K.
 ENV NODE_ENV=production \
     PORT=3000 \
     SOMEMEMOS_DATA_DIR=/data \
     BODY_SIZE_LIMIT=34M
 EXPOSE 3000
-# Runs as root so it can write to a mounted volume, whose ownership the host decides.
-CMD ["node", "apps/web/build"]
+# Starts as root only to hand the mounted volume (owned by root on most hosts)
+# to the unprivileged `node` user, then runs the server as that user
+# (scripts/docker-start.sh). The app's own files stay owned by root, so the
+# server cannot change them.
+CMD ["/app/scripts/docker-start.sh"]
