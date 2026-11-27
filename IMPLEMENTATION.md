@@ -29,95 +29,105 @@ Done when: CI is green, `npx somememos --version` prints `0.1.0`, the web skelet
 
 ## M1 — Local CLI and evaluation
 
-Goal: Mike indexes his vault, gets useful activation lists, and the first experiments set the default weights. Git-backed brains only.
+Goal: on one machine, Mike indexes his vault, imports its git history, gets useful activation lists, and the first experiments set the default weights.
+
+### Event log and scores
+
+- [ ] **1.1 Config.** `.somememos/config.json` with `exclude` globs, `score` globs (which notes are scored items; default all), half-lives, per-kind weights and `α`. `somememos init` writes defaults and a client id. Excluded paths must never reach the event log, the index, the scores or any CLI output; test that explicitly.
+- [ ] **1.2 Event log.** `events.sqlite` with the `events` table from PLAN.md section 4. An `appendEvent` function in core that assigns a unique id (a random UUID for live events), rejects future-dated events, and is idempotent on id.
+- [ ] **1.3 Folding (core).** Fold events after a stored cursor into per-kind scores in `index.sqlite`, cursor and scores in one transaction. Apply rename records by moving an item's scores. A full refold after deleting `index.sqlite` must give the same scores as incremental folding; property-test that with random event sequences, including renames.
+- [ ] **1.4 Schema versions.** A `schema_version` in each database. A mismatch in `index.sqlite` triggers a rebuild. A mismatch in `events.sqlite` runs an explicit migration and never drops data.
 
 ### Indexing
 
-- [ ] **1.1 Config.** `.somememos/config.json` with `exclude` globs, `score` globs (which notes are scored items; default all), half-lives, per-kind weights and `α`. `somememos init` writes defaults and adds `index.sqlite` to the brain's `.gitignore`. Excluded paths must never reach the index, the scores, CLI output or `scores.tsv`; test that explicitly.
-- [ ] **1.2 Markdown chunker (core).** Split a note into a preamble plus one chunk per `##` heading. Extract the title (front matter `title`, else first `#` heading, else file name). Ignore headings inside code fences.
-- [ ] **1.3 Link parser (core).** Find `[[target]]`, `[[target|alias]]` and `[[target#heading]]`, skipping code fences and inline code. Resolve targets to paths with the vault's rules (read the vault's `AGENTS.md` for its link conventions before fixing these); unresolved targets are dangling links keyed by their normalized text.
-- [ ] **1.4 Schema and migrations.** Create the tables in PLAN.md section 4, with a `schema_version` in `meta`. A version mismatch on a derived table triggers a rebuild, never a silent reuse.
-- [ ] **1.5 Keyword indexing.** `somememos index` scans the working tree (path, size, mtime, then content hash for changed files) and updates `notes`, `links` and the FTS `chunks` table. Deleted and renamed files are handled. `--rebuild` drops the derived tables first.
-- [ ] **1.6 Git-derived events.** Read commits after the stored watermark with one `git log` call (`--name-status -M`, author time, patch for added lines). For each commit: one `edit` event per changed scored note, one `mention` event per `[[link]]` added in the commit, both at the commit's author time clamped to now. Follow renames by moving every score row of the old path. Move a dangling target's scores to the note's path when a commit creates the note. Store the new watermark in the same transaction as the scores.
-  - Tests use small fixture repos built in a temp directory: a rename, a note created after being linked, a merge commit, an excluded folder, and a second `index` run that must change nothing.
-- [ ] **1.7 Rebuild and history rewrites.** `index --rebuild` clears `edit` and `mention` scores and replays all history, leaving `read` scores untouched. If the watermark commit is no longer an ancestor of `HEAD` (a rebase or force-push), do the same automatically and say so.
-- [ ] **1.8 Auto-index.** Every command that reads the brain runs the incremental index first. It must be fast when nothing changed (target: under 100 ms on Mike's vault). `--no-index` skips it.
+- [ ] **1.5 Markdown chunker (core).** Split a note into a preamble plus one chunk per `##` heading. Extract the title (front matter `title`, else first `#` heading, else file name). Ignore headings inside code fences.
+- [ ] **1.6 Link parser (core).** Find `[[target]]`, `[[target|alias]]` and `[[target#heading]]`, skipping code fences and inline code. Resolve targets to paths with the vault's rules (read the vault's `AGENTS.md` for its link conventions before fixing these); unresolved targets are dangling links keyed by their normalized text.
+- [ ] **1.7 Keyword indexing.** `somememos index` scans the working tree (path, size, mtime, then content hash for changed files) and updates `notes`, `links` and the FTS `chunks` table. `--rebuild` deletes `index.sqlite` first.
+- [ ] **1.8 Edit detection.** During the scan, for each scored note whose content hash changed since the last pass: log an `edit` event at the file's modification time (at most now), and a `mention` event for each link target in the new version that the old version lacked. A new file counts as an edit. The very first index of a brain logs nothing, since nothing is known to have changed.
+- [ ] **1.9 Renames and dangling links.** A path that disappears while a new path appears with the same content hash is a rename: log a rename record instead of an edit. When a new note resolves a dangling target, log a rename from the dangling key to the note's path.
+  - Tests use small fixture directories: an edit, a rename, a rename with an edit (treated as delete plus new note; document that), a note created after being linked, an excluded folder, and a second `index` run that must log nothing.
+- [ ] **1.10 Auto-index.** Every command that reads the brain runs the incremental index and fold first. It must be fast when nothing changed (target: under 100 ms on Mike's vault). `--no-index` skips it.
+
+### Git import
+
+- [ ] **1.11 `import-git`.** Read the whole history with one `git log` call (`--name-status -M`, author time, patch for added lines). For each commit: an `edit` event per changed scored note and a `mention` event per `[[link]]` added, at the commit's author time, with rename records for renames. Event ids are a hash of commit, path, kind and target, so a second run adds nothing. Stop at the moment the brain was first indexed, so a commit and its live-detected edit are never both counted.
+  - Tests build fixture repos in a temp directory: a rename, a merge commit, a note linked before it existed, an excluded folder, and a repeated import.
 
 ### Querying
 
-- [ ] **1.9 Ranking (core).** Given candidate items, their per-kind scores, weights, `α`, a half-life and a mode, return ranked results with the score components. Pure functions, no database access, so the evaluation harness can call them with any parameters.
-- [ ] **1.10 `search`.** FTS5 query built safely from the user's words (quote terms, so punctuation can't break the query syntax), `r = −bm25()` clamped, combined with activation, grouped so a note appears once with its best section. Modes `hot`, `trending`, `neglected`, `all`.
-- [ ] **1.11 `hot`, `trending`, `neglected`.** Activation-only lists, including dangling links, marked as such.
-- [ ] **1.12 `read`.** Print the note and record a `read` event at the current time. Refuse excluded paths. Reading a note that isn't a scored item prints it and records nothing.
-- [ ] **1.13 Output.** Plain text by default: one result per line (path, heading, snippet), stable across runs. `--json` gives full records with score components. Exit codes 0, 1 and 2. Complete `--help` for every command.
-- [ ] **1.14 `status`.** Note and section counts, items with scores, the last commit processed, and the weights in effect.
-- [ ] **1.15 Concurrency.** WAL mode and a busy timeout, so several agents can run commands at once. A test runs parallel `read` commands and checks that no event is lost.
-
-### Snapshot
-
-- [ ] **1.16 `snapshot` and import.** Write `scores.tsv` in the PLAN.md section 4 format, sorted and deterministic. On a fresh sidecar in a git-backed brain, import only the `read` rows, then derive the rest from git. Round-trip test: snapshot, delete the sidecar, rebuild, compare scores.
+- [ ] **1.12 Ranking (core).** Given candidate items, their per-kind scores, weights, `α`, a half-life and a mode, return ranked results with the score components. Pure functions with no database access, so the evaluation harness can call them with any parameters.
+- [ ] **1.13 `search`.** FTS5 query built safely from the user's words (quote terms, so punctuation can't break the query syntax), `r = −bm25()` clamped, combined with activation, grouped so a note appears once with its best section. Modes `hot`, `trending`, `neglected`, `all`.
+- [ ] **1.14 `hot`, `trending`, `neglected`.** Activation-only lists, including dangling links, marked as such.
+- [ ] **1.15 `read`.** Print the note and log a `read` event at the current time. Refuse excluded paths. Reading a note that isn't a scored item prints it and logs nothing.
+- [ ] **1.16 Output.** Plain text by default: one result per line (path, heading, snippet), stable across runs. `--json` gives full records with score components. Exit codes 0, 1 and 2. Complete `--help` for every command.
+- [ ] **1.17 `status` and `export`.** `status` shows note and section counts, events by kind, and the weights in effect. `export` writes `events.jsonl`; a round-trip test imports it into an empty brain and compares scores.
+- [ ] **1.18 Concurrency.** WAL mode and a busy timeout on both databases, so several agents can run commands at once. A test runs parallel `read` commands and checks that no event is lost or folded twice.
 
 ### Evaluation
 
-- [ ] **1.17 Metrics (core).** Recall@k and MRR, with unit tests on hand-computed cases.
-- [ ] **1.18 Historical state.** A function that returns the scores as of a past commit (replay events up to it) and a keyword index built from that commit's tree (`git ls-tree` plus `git cat-file --batch`, in an in-memory database). No working-tree checkout, so the vault is never disturbed.
-- [ ] **1.19 Case builders.**
-  - Replay cases: for a sampled commit, the query is its message plus any changelog text it added; the answers are the scored notes it changed that already existed.
-  - Orientation cases: at a sampled time, the answers are the notes changed in the following day and week.
-  - Hand-written cases: a JSONL file of `{query, answers}` kept in the brain.
-- [ ] **1.20 `somememos eval`.** Run a named set of parameter settings over the cases and print a table of recall@k and MRR per setting, with a `--json` form. Sampling is seeded so runs repeat. Per-case detail is shown only on request and never written outside the brain.
-- [ ] **1.21 First experiments on Mike's vault.** Run, in this order, and record the aggregate results and chosen defaults in PLAN.md:
-  1. Check the replay queries. Read a sample of generated cases to see whether they describe their tasks. If they don't, write 30 to 50 cases by hand first.
+- [ ] **1.19 Metrics (core).** Recall@k and MRR, with unit tests on hand-computed cases.
+- [ ] **1.20 Replay (core).** Fold the event log up to a given time into in-memory scores, with the weights, half-lives and folding rules of one experiment setting. This is the same folding code as 1.3, given different parameters.
+- [ ] **1.21 Case builders.**
+  - Orientation cases: at a sampled time, the answers are the notes with events in the following day and week.
+  - Search cases from imported git history: for a sampled commit, the query is its message plus any changelog text it added; the answers are the scored notes it changed that already existed. The keyword index is built from the parent commit's tree (`git ls-tree` plus `git cat-file --batch`, in an in-memory database), with no working-tree checkout.
+  - Hand-written cases: a JSONL file of `{query, time?, answers}` kept in the brain.
+- [ ] **1.22 `somememos eval`.** Run a named set of parameter settings over the cases and print a table of recall@k and MRR per setting, with a `--json` form. Sampling is seeded so runs repeat. Per-case detail is shown only on request and never written outside the brain.
+- [ ] **1.23 First experiments on Mike's vault.** Run, in this order, and record the aggregate results and chosen defaults in PLAN.md:
+  1. Check the search cases. Read a sample of generated cases to see whether they describe their tasks. If they don't, write 30 to 50 cases by hand first.
   2. Baseline: keyword only (`all` mode) vs keyword plus activation.
   3. `edit` and `mention` weights, and `α`.
-  4. Which half-life (or mix) drives `hot`, measured on orientation cases.
-  5. Heading vs body weight in `bm25`.
-  6. Link spreading: off, outgoing, backlinks, at a few strengths.
-  7. Section-level edit attribution (from diffs) vs note-level.
-  
-  The read weight can't be measured yet, because history holds no reads. It stays at the placeholder until M2 has collected some.
+  4. Half-lives, and which of them (or what mix) drives `hot`, on orientation cases.
+  5. How bursts of edits to one note should count.
+  6. Heading vs body weight in `bm25`.
+  7. Link spreading: off, outgoing, backlinks, at a few strengths.
+  8. Section-level edit attribution (from diffs in the imported history) vs note-level.
 
-Done when: `somememos index` on the vault finishes cleanly with the private folders absent from every output, the three activation lists look right to Mike, and PLAN.md records the first experiment results with the defaults they chose.
+  The read weight can't be measured yet, because imported history holds no reads. It stays at the placeholder until M2 has collected some.
 
-## M2 — Agent use via the CLI
+Done when: `somememos index` and `import-git` run cleanly on the vault with the private folders absent from the event log and every output, the three activation lists look right to Mike, and PLAN.md records the first experiment results with the defaults they chose.
 
-Goal: Mike's agents use somememos for orientation and reading, on every machine they run on.
+## M2 — Agent use on one machine
+
+Goal: Mike's agents on his main machine use somememos for orientation and reading. Other machines wait for sync in M3.
 
 - [ ] **2.1 One-file build.** Bundle the CLI and core into a single JavaScript file that needs only Node. Smoke-test the bundle in CI on a clean Node install.
-- [ ] **2.2 Distribution.** Attach the bundle to a GitHub release and document a one-line install. Decide here whether to also publish to npm. Add the install step to the cloud environment's setup script (Mike changes the environment; give him the exact lines).
-- [ ] **2.3 Agent instructions.** A short `AGENTS.md` snippet and a skill, shipped in this repo: `somememos hot` to orient at session start, `somememos search` before grep, `somememos read` in place of `cat`, edit and commit as usual.
-- [ ] **2.4 Amend the vault.** In `mckoss/2nd-brain` (not here): add `.somememos/config.json` with the exclusions, replace the `rg "^## " logs | tail -40` step, and update the "No RAG pipeline" and Obsidian Sync text.
-- [ ] **2.5 Snapshot owner.** Name the one machine that writes and commits `scores.tsv`, and document that other machines never do. Reads on disposable machines are lost until M3; say so in the instructions.
+- [ ] **2.2 Distribution.** Attach the bundle to a GitHub release and document a one-line install. Decide here whether to also publish to npm.
+- [ ] **2.3 Agent instructions.** A short `AGENTS.md` snippet and a skill, shipped in this repo: `somememos hot` to orient at session start, `somememos search` before grep, `somememos read` in place of `cat`, and edit notes as usual.
+- [ ] **2.4 Amend the vault.** In `mckoss/2nd-brain` (not here): add `.somememos/config.json` with the exclusions, ignore the two database files in git, replace the `rg "^## " logs | tail -40` step, and update the "No RAG pipeline" and Obsidian Sync text.
+- [ ] **2.5 Back up the event log.** Until the server exists, the log lives on one machine. Schedule `somememos export` to a backed-up location and document it.
 - [ ] **2.6 Dogfood review.** After two weeks of use: is `hot` output the right size and shape for a session start, do agents follow the instructions, and how fast is the CLI in practice? Adjust output and instructions from what the sessions show.
-- [ ] **2.7 Read weight experiment.** With committed snapshots now holding read scores, evaluate later commits against them: the read weight, and whether agent reads make the hot list reinforce itself.
+- [ ] **2.7 Read experiments.** With reads now in the log, measure the read weight on orientation cases, and check whether agent reads make the hot list reinforce itself.
 
-Done when: Claude Code and Hermes sessions orient with `somememos hot` and read with `somememos read` without being reminded, and the read weight has a measured default.
+Done when: Claude Code and Hermes sessions on the main machine orient with `somememos hot` and read with `somememos read` without being reminded, and the read weight has a measured default.
 
 ## M3 — Server and sync (outline)
 
-- [ ] **3.0 Design review.** Settle PLAN.md open questions 7 and 8: how the server gets a git-backed brain's commits, how edits become events without git, and the conflict policy. Update PLAN.md section 7 before coding.
-- [ ] **3.1 Pending deltas in the CLI.** Per `(item, kind, half-life)` deltas since the last sync, with `client_id` and `batch_seq`.
-- [ ] **3.2 Sync API.** SvelteKit server routes: push a delta batch (idempotent), pull canonical scores, push and pull edits by content hash with a base hash.
-- [ ] **3.3 Property tests for sync.** Replayed batches don't double-count; any interleaving of clients converges to the same scores.
-- [ ] **3.4 Server-owned snapshot.** The server writes `scores.tsv`; the designated-machine rule from M2 ends.
-- [ ] **3.5 Deploy.** Railway with `adapter-node`, a volume for the SQLite file, backups, single-user authentication, and a health endpoint that reports the version.
-- [ ] **3.6 `somememos sync`.** Including from disposable cloud sessions, so their reads are kept.
+Goal: the server's filesystem becomes the home of the vault, and agents on any machine use it without git.
+
+- [ ] **3.0 Design review.** Settle version history (how long, what clients hold offline), the conflict policy, single-user authentication, and how the vault moves from git to the server. Update PLAN.md section 7 before coding.
+- [ ] **3.1 Server storage.** Notes on the server's filesystem, a version store keyed by content hash with timestamps, and the server's own `events.sqlite`.
+- [ ] **3.2 Event sync.** Push events (the server ignores ids it has), pull events after a cursor, fold locally.
+- [ ] **3.3 Edit sync.** Push and pull edits by content hash with a base hash; conflict files; explicit deletes and renames. A received edit logs no event on the receiving client.
+- [ ] **3.4 Property tests for sync.** Repeated pushes count nothing twice; any interleaving of clients ends with the same events and the same scores everywhere.
+- [ ] **3.5 Version history commands.** List a note's versions and restore one.
+- [ ] **3.6 Deploy.** Railway with `adapter-node`, a volume for the notes and databases, backups, and a health endpoint that reports the version.
+- [ ] **3.7 `somememos sync` and first-time clone.** A fresh machine, including a disposable cloud session, gets the whole brain with one command and pushes its events before it ends. Add the install and sync steps to the cloud environment's setup (Mike changes the environment; give him the exact lines).
+- [ ] **3.8 Move the vault.** Upload the vault and its event log to the server, and update the vault's agent instructions so git is no longer how it travels.
 
 ## M4 — PWA client (outline)
 
-- [ ] **4.0 Design review.** Editor choice, sqlite-wasm with OPFS (confirm FTS5 and the VFS), and how a person's reads and edits are recorded (open question 5).
+- [ ] **4.0 Design review.** Editor choice, sqlite-wasm with OPFS (confirm FTS5 and the VFS), and whether a person's events should be told apart from an agent's (open question 5).
 - [ ] **4.1 Local store.** The core `Db` interface over sqlite-wasm in a Web Worker.
 - [ ] **4.2 Offline shell.** Service worker, manifest, install to home screen.
-- [ ] **4.3 Notes.** Editor with `[[wiki-links]]`, backlinks, quick search.
+- [ ] **4.3 Notes.** Editor with `[[wiki-links]]`, backlinks, quick search, and version history.
 - [ ] **4.4 Activation views.** Hot, trending, neglected, and dangling links worth writing.
 - [ ] **4.5 Sync.** The same protocol as the CLI.
 - [ ] **4.6 Playwright tests.** Including offline edits that sync later.
 
 ## M5 — Hosted multi-user and MCP (outline)
 
-- [ ] **5.0 Design review.** Accounts, storage default (open question 9), privacy policy, pricing.
-- [ ] **5.1 Accounts and per-user SQLite.**
-- [ ] **5.2 Brains without git.** Hosted storage with export.
+- [ ] **5.0 Design review.** Accounts, privacy policy, event log retention, pricing.
+- [ ] **5.1 Accounts and per-user storage.**
+- [ ] **5.2 Export and account deletion.**
 - [ ] **5.3 MCP.** A thin adapter over core: remote endpoint with authentication, and local stdio (`somememos mcp`).
-- [ ] **5.4 Optional GitHub-repo storage.**
-- [ ] **5.5 Launch** at the somememos domain.
+- [ ] **5.4 Launch** at the somememos domain.
