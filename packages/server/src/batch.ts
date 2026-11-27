@@ -15,87 +15,28 @@
 import { engine as coreEngine, markdown, storage, sync } from '@somememos/core';
 import type { BrainContext } from './brains.js';
 import { HttpError } from './errors.js';
+import { batchCodes, parseRequest } from './requests.js';
 
-const HASH = /^[0-9a-f]{64}$/;
-
-const invalid = (message: string): HttpError => new HttpError(400, 'invalid-request', message);
-
-/** Validates a batch body (shapes, paths, sizes, distinct paths). Roles are checked when it runs. */
+/**
+ * Validates a batch body: its shape, paths and sizes (`sync.BatchRequestSchema`),
+ * then that no path appears in two ops. Roles are checked when it runs.
+ */
 export function parseBatch(body: unknown): sync.BatchRequest {
-  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
-    throw invalid('the body must be a JSON object');
-  }
-  const b = body as Record<string, unknown>;
-  for (const key of Object.keys(b)) {
-    if (key !== 'message' && key !== 'ops') throw invalid(`unknown field "${key}"`);
-  }
-  let message: string | null = null;
-  if (b.message !== undefined && b.message !== null) {
-    if (typeof b.message !== 'string') throw invalid('message must be a string');
-    if (b.message.length > sync.SYNC_LIMITS.maxMessageLength) throw invalid('message is too long');
-    message = b.message;
-  }
-  if (!Array.isArray(b.ops) || b.ops.length === 0) throw invalid('ops must be a non-empty array');
-  if (b.ops.length > sync.MAX_BATCH_OPS) {
-    throw new HttpError(413, 'too-large', `at most ${sync.MAX_BATCH_OPS} ops per change set`);
-  }
+  const batch = parseRequest(sync.BatchRequestSchema, body, batchCodes);
   const used = new Set<string>();
-  const path = (value: unknown, where: string): string => {
-    const problem = sync.syncPathProblem(value);
-    if (problem !== null) throw new HttpError(400, 'invalid-path', `${where}: ${problem}`);
-    if (used.has(value as string)) throw invalid(`${where}: a path may appear in only one op`);
-    used.add(value as string);
-    return value as string;
-  };
-  const hash = (value: unknown, where: string, nullable: boolean): string | null => {
-    if (value === null && nullable) return null;
-    if (typeof value === 'string' && HASH.test(value)) return value;
-    throw invalid(`${where}: baseHash must be a SHA-256 hex hash${nullable ? ' or null' : ''}`);
-  };
-  const ops: sync.BatchOp[] = b.ops.map((raw, i): sync.BatchOp => {
-    const where = `op ${i + 1}`;
-    if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-      throw invalid(`${where} must be an object`);
-    }
-    const o = raw as Record<string, unknown>;
-    for (const key of Object.keys(o)) {
-      if (!['op', 'path', 'to', 'text', 'baseHash'].includes(key)) {
-        throw invalid(`${where}: unknown field "${key}"`);
+  batch.ops.forEach((op, i) => {
+    for (const path of op.op === 'rename' ? [op.path, op.to] : [op.path]) {
+      if (used.has(path)) {
+        throw new HttpError(
+          400,
+          'invalid-request',
+          `op ${i + 1}: a path may appear in only one op`,
+        );
       }
+      used.add(path);
     }
-    if (o.op === 'write') {
-      if (typeof o.text !== 'string') throw invalid(`${where}: a write needs text`);
-      if (storage.utf8Length(o.text) > sync.SYNC_LIMITS.maxNoteBytes) {
-        throw new HttpError(413, 'too-large', `${where}: the note is too large`);
-      }
-      if (o.to !== undefined) throw invalid(`${where}: only a rename has "to"`);
-      return {
-        op: 'write',
-        path: path(o.path, where),
-        text: o.text,
-        baseHash: hash(o.baseHash, where, true),
-      };
-    }
-    if (o.text !== undefined) throw invalid(`${where}: only a write has text`);
-    if (o.op === 'delete') {
-      if (o.to !== undefined) throw invalid(`${where}: only a rename has "to"`);
-      return {
-        op: 'delete',
-        path: path(o.path, where),
-        baseHash: hash(o.baseHash, where, false) as string,
-      };
-    }
-    if (o.op === 'rename') {
-      return {
-        op: 'rename',
-        path: path(o.path, where),
-        to: path(o.to, `${where} (to)`),
-        baseHash: hash(o.baseHash, where, false) as string,
-      };
-    }
-    throw invalid(`${where}: op must be "write", "delete" or "rename"`);
   });
-  return { message, ops };
+  return batch;
 }
 
 /** Applies a validated batch to a held brain (see the top of this file). */

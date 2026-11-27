@@ -3,11 +3,10 @@
 // blog folder has (`GET /api/brains/{brain}/blog/slug` and `…/blog/address`).
 // Owner-only, like the settings; nothing here is public.
 
-import { markdown, storage, sync } from '@somememos/core';
+import { markdown, storage } from '@somememos/core';
 import type pg from 'pg';
 import { postKey } from './blog.js';
 import { blogSlugProblem } from './blog-settings.js';
-import { HttpError } from './errors.js';
 
 export interface SlugCheck {
   readonly slug: string;
@@ -41,16 +40,14 @@ export async function checkBlogSlug(
 /**
  * The public address a note at `path` has (or would have, once published
  * and synced) in `brainId`'s blog: null when the blog is off, the path is
- * not in the blog folder, or its name gives it no address.
+ * not in the blog folder, or its name gives it no address. The caller has
+ * checked that `path` is a note path (`AddressQuery`).
  */
 export async function postAddress(
   pool: pg.Pool,
   brainId: string,
   path: string,
 ): Promise<{ url: string | null }> {
-  if (sync.syncPathProblem(path) !== null) {
-    throw new HttpError(400, 'invalid-path', 'not a note path');
-  }
   const { rows } = await pool.query<{ slug: string | null; enabled: boolean; config: string }>(
     `SELECT b.slug, b.enabled, s.config FROM server_brains s
      LEFT JOIN server_blogs b USING (brain_id) WHERE s.brain_id = $1`,

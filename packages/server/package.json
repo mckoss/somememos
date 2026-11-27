@@ -1,6 +1,6 @@
 {
   "name": "@somememos/server",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "private": true,
   "description": "The somememos server logic: brains kept as git repositories, the sync protocol and access checks.",
   "license": "Apache-2.0",
@@ -26,7 +26,8 @@
   "dependencies": {
     "@somememos/core": "*",
     "@somememos/pg-store": "*",
-    "pg": "^8.23.1"
+    "pg": "^8.23.1",
+    "valibot": "^1.5.0"
   },
   "devDependencies": {
     "@types/pg": "^8.23.1"

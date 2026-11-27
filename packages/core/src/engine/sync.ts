@@ -30,6 +30,7 @@ import {
   type SyncNote,
   type SyncResponse,
 } from '../sync/protocol.js';
+import { SyncResponseSchema, issueMessage, parseWith } from '../sync/schema.js';
 import { readSyncState, writeSyncState, clearSyncState, type SyncState } from '../sync/state.js';
 import {
   ConfigChangedError,
@@ -413,13 +414,13 @@ export function createSyncMethods(ctx: SyncContext) {
         break;
       }
       if (plan.op !== 'write') {
-        edits.push({
-          id: await editId([plan.op, plan.path, plan.to ?? null, plan.baseHash]),
-          op: plan.op,
-          path: plan.path,
-          ...(plan.to !== undefined ? { to: plan.to } : {}),
-          baseHash: plan.baseHash,
-        });
+        const id = await editId([plan.op, plan.path, plan.to ?? null, plan.baseHash]);
+        const baseHash = plan.baseHash as string; // a delete or rename always has a base
+        edits.push(
+          plan.op === 'rename'
+            ? { id, op: 'rename', path: plan.path, to: plan.to as string, baseHash }
+            : { id, op: 'delete', path: plan.path, baseHash },
+        );
         continue;
       }
       const text = await content.read(plan.path);
@@ -488,15 +489,25 @@ export function createSyncMethods(ctx: SyncContext) {
 
   const applySync = async (
     prepared: PreparedSync,
-    response: SyncResponse,
+    untrusted: SyncResponse,
   ): Promise<SyncOutcome> => {
     const edits = prepared?.request?.edits;
-    if (!Array.isArray(edits) || !response || !Array.isArray(response.results)) {
+    if (!Array.isArray(edits)) {
       throw new EngineError(
         'invalid-argument',
         'applySync needs a prepared request and its response',
       );
     }
+    // The server's answer is checked once, here, for every copy (the web
+    // app, a clone, tests); the message never repeats note text.
+    const checked = parseWith(SyncResponseSchema, untrusted);
+    if (!checked.ok) {
+      throw new EngineError(
+        'invalid-argument',
+        `the server's sync response is malformed (${issueMessage(checked.issue, 'the response')})`,
+      );
+    }
+    const response = checked.value;
     if (!Number.isSafeInteger(response.mutation) || response.mutation < prepared.request.since) {
       throw new EngineError(
         'invalid-argument',
@@ -615,7 +626,7 @@ export function createSyncMethods(ctx: SyncContext) {
     const clashing = [...state.nameClash, ...nameClash];
     const nestedInClash = (path: string): boolean =>
       clashing.some((p) => path.startsWith(`${p}/`) || p.startsWith(`${path}/`));
-    for (const note of response.notes ?? []) {
+    for (const note of response.notes) {
       if (!accepts(note.path) || ('text' in note && nestedInClash(note.path))) {
         skipped++;
         continue;
@@ -655,7 +666,7 @@ export function createSyncMethods(ctx: SyncContext) {
     const pushedChangeSeq = Math.max(state.pushedChangeSeq, prepared.cursor.changeSeq);
     const eventsCaughtUp = (await stores.events.lastSeq()) === pushedEventSeq;
     const changesCaughtUp = (await lastChangeSeq()) === pushedChangeSeq;
-    const appended = await appendRemote(response.events ?? [], response.changes ?? []);
+    const appended = await appendRemote(response.events, response.changes);
     skipped += appended.skipped;
     const nextEventSeq = eventsCaughtUp ? await stores.events.lastSeq() : pushedEventSeq;
     const nextChangeSeq = changesCaughtUp ? await lastChangeSeq() : pushedChangeSeq;
@@ -693,8 +704,7 @@ export function createSyncMethods(ctx: SyncContext) {
     return {
       mutation: response.mutation,
       // A conflict file, or a note waiting behind a local change, is pushed next round.
-      more:
-        Boolean(response.more) || prepared.more || conflictFiles.length > 0 || waiting.length > 0,
+      more: response.more || prepared.more || conflictFiles.length > 0 || waiting.length > 0,
       pushed: {
         edits: edits.length,
         applied,
@@ -704,7 +714,7 @@ export function createSyncMethods(ctx: SyncContext) {
       },
       conflicts,
       received: {
-        notes: (response.notes ?? []).length,
+        notes: response.notes.length,
         events: appended.events.appended,
         changes: appended.changes.appended,
       },

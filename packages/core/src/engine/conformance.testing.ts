@@ -1075,7 +1075,7 @@ export function describeEngineConformance(
               prepared.request.edits.map(async (e) => ({
                 id: e.id,
                 status: 'applied' as const,
-                hash: await hashOf(e.text as string),
+                hash: await hashOf('text' in e ? e.text : ''),
               })),
             ),
             notes: [],
@@ -1101,7 +1101,9 @@ export function describeEngineConformance(
           await b.engine.renameNote('memos/b.md', 'memos/bee.md');
           await b.engine.saveNote('memos/a.md', '# A\n\n[[bee]]\n');
           const third = await b.engine.prepareSync();
-          expect(third.request.edits.map((e) => [e.op, e.path, e.to ?? null, e.baseHash])).toEqual([
+          expect(
+            third.request.edits.map((e) => [e.op, e.path, 'to' in e ? e.to : null, e.baseHash]),
+          ).toEqual([
             ['rename', 'memos/b.md', 'memos/bee.md', baseB],
             [
               'write',

@@ -576,6 +576,14 @@ Implemented on 2026-11-27 in `packages/server`, mounted by the web app under `/a
 - **Public blog pages drop HTML comments** from a post's body, title and summary.
 - **The note page no longer gets stuck** on "No note here yet" when the note arrives after the page opened, and a sync request that never answers now times out.
 
+### Packages in place of bespoke code (v0.6.2)
+
+Mike asked for three hand-written pieces to be replaced by well-known packages.
+
+- **Request validation uses `valibot`.** Every request body, query string and path parameter is checked by a schema before a route runs. The sync protocol's wire shapes are schemas in `packages/core/src/sync/schema.ts`, and their TypeScript types are derived from them, so each shape has one definition. A copy checks the server's sync response with the same schemas. Requests are strict (unknown fields are refused and every limit is enforced); responses are lenient, so a newer server can add fields.
+- **Zip export and import use `fflate`.** Exports are now compressed and streamed in the worker. `fflate` cannot write the zip64 format, so an export is still limited to 65,535 files and 4 GB, and it refuses plainly beyond that. Import refuses unsafe archives (path traversal, duplicate names, zip bombs) before unpacking anything. Imported notes are dated at import time, because `fflate` does not expose the times stored in an archive.
+- **The shared conformance suites run in the browser under Vitest's browser mode,** inside a dedicated worker on the browser's private file storage, using Vitest's own runner and assertions. The hand-written stand-in for Vitest is gone. Playwright keeps the page-level storage tests.
+
 ### Security review (2026-11-27)
 
 An independent review of the server found 11 issues; the write-up is `docs/security-review-2026-11-27.md`. The one high-severity issue, a way to freeze the server with a single specially shaped note, is fixed, as are slow rendering of hostile links, missing security headers, the container running as root, and two inputs that caused server errors. The remaining items are low severity and listed in QUESTIONS.md.

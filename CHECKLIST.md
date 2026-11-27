@@ -46,11 +46,16 @@ Status key: `[x]` merged to `main` with CI green, `[~]` in progress, `[ ]` not s
 - [x] Shared settings (folder roles) that sync between devices, a blog settings screen, one remote commit as one change, `history` and `restore` from a clone (v0.5.0)
 - [x] Independent security review of the server, with fixes (v0.5.0)
 - [x] README and user guides under `docs/` (v0.5.0)
-- [~] Fix for the sync browser test that failed once on CI: a real note-page bug fixed, exact CI cause not reproduced (v0.6.0 PR)
-- [~] Final polish: lockout fix, export of notes from the app, and nine smaller fixes (v0.6.0 PR)
-- [~] Scores could depend on arrival order when two renames share a timestamp, found by a property test (agent fixing; blocks the v0.6.0 PR)
+- [x] Fix for the sync browser test that failed once on CI: a real note-page bug fixed, exact CI cause not reproduced (v0.6.0)
+- [x] Final polish: lockout fix, export of notes from the app, and nine smaller fixes (v0.6.0)
+- [x] Scores could depend on arrival order when two renames share a timestamp, found by a property test: fixed in v0.6.0, and its concurrent case in v0.6.1
 
 ## Interruptions
 
 - The coding agents hit the account's usage limit at about 10:10 UTC and stopped until it reset at 11:40 UTC. Their work was saved and they were resumed.
+
+## After Mike returned (27 November, daytime)
+
+- [x] Move to Node 26 LTS for development, CI and the server, with the CLI still supported on Node 22.13 or later (v0.6.1)
+- [~] Replace three bespoke pieces with packages: `valibot` for request validation, `fflate` for zip, Vitest browser mode for the in-browser conformance suites (v0.6.2 PR)
 
