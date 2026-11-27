@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
 import {
   clientGo,
@@ -29,7 +30,11 @@ async function someMemo(page: Parameters<typeof engineCall>[0]): Promise<NoteVie
 
 test('the header shows the app version', async ({ page }) => {
   await page.goto('/');
-  await expect(page.locator('header .version')).toHaveText(/^v\d+\.\d+\.\d+/);
+  // The root package.json is the single source of the version.
+  const { version } = JSON.parse(
+    readFileSync(new URL('../../../package.json', import.meta.url), 'utf8'),
+  ) as { version: string };
+  await expect(page.locator('header .version')).toHaveText(`v${version}`);
   await expect(page.getByText('Your brain is empty')).toBeVisible();
 });
 
