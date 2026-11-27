@@ -18,7 +18,8 @@
     "test": "vitest run",
     "e2e:ui": "playwright test -c playwright.config.ts --trace off",
     "e2e:storage": "playwright test -c playwright.storage.config.ts --trace off",
-    "e2e": "npm run e2e:ui && STORAGE_SKIP_BUILD=1 npm run e2e:storage"
+    "e2e:sync": "playwright test -c playwright.sync.config.ts --trace off",
+    "e2e": "npm run e2e:ui && STORAGE_SKIP_BUILD=1 npm run e2e:storage && npm run e2e:sync"
   },
   "devDependencies": {
     "@playwright/test": "1.63.0",
