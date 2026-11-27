@@ -65,6 +65,7 @@ export const READ_ONLY_METHODS: ReadonlySet<string> = new Set([
   'syncHint',
   'syncConflicts',
   'syncNoteState',
+  'exportArchive',
 ]);
 
 /** Where the open brain keeps its data. */
@@ -82,11 +83,22 @@ export interface OpenRequest {
   readonly reason?: string;
 }
 
+/** A whole-brain export: the zip, and what is in it. */
+export interface ExportArchive {
+  readonly archive: Blob;
+  /** Notes in the archive. */
+  readonly notes: number;
+  /** Lines of `events.jsonl`. */
+  readonly records: number;
+}
+
 /** The worker's own operations, beside the engine's. */
 export interface HostCalls {
   open(request: OpenRequest): { storage: WorkerStorage; config: engine.Engine['config'] };
   config(): engine.Engine['config'];
   storageKind(): WorkerStorage;
+  /** Every stored note at its path, plus `events.jsonl`, as a store-only zip. */
+  exportArchive(): ExportArchive;
   /** Starts an import: returns its id. */
   importBegin(): number;
   /** Writes one chunk of files. */

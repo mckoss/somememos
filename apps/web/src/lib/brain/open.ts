@@ -450,6 +450,9 @@ function createHost(conn: BrainConnection): BrainHost {
       await conn.call('host', 'updateConfig', [config]);
     },
 
+    exportArchive: () =>
+      conn.call('host', 'exportArchive', []) as ReturnType<BrainHost['exportArchive']>,
+
     async storageInfo(): Promise<StorageInfo> {
       const kind = (await conn.call('host', 'storageKind', [])) as WorkerStorage;
       let persisted = false;
