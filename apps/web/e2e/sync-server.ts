@@ -8,7 +8,7 @@
 // message (SYNC_E2E_SKIP), so `npm run check` passes on such a machine.
 
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -109,8 +109,14 @@ export async function startServer(options: {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
-  child.stdout?.on('data', (d) => (output += String(d)));
-  child.stderr?.on('data', (d) => (output += String(d)));
+  // SYNC_E2E_SERVER_LOG: a file to append the server's output to, for diagnosis.
+  const logFile = process.env.SYNC_E2E_SERVER_LOG;
+  const keep = (d: unknown) => {
+    output += String(d);
+    if (logFile) appendFileSync(logFile, `[${options.port}] ${String(d)}`);
+  };
+  child.stdout?.on('data', keep);
+  child.stderr?.on('data', keep);
   const url = `http://127.0.0.1:${options.port}`;
   const deadline = Date.now() + 30_000;
   for (;;) {

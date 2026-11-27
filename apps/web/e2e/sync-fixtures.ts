@@ -3,7 +3,7 @@
 
 import {
   expect,
-  test,
+  test as base,
   type Browser,
   type BrowserContext,
   type Page,
@@ -12,7 +12,33 @@ import {
 import { clientGo, engineCall, importBrain, status, type Status } from './fixtures.ts';
 import { TEST_TOKEN } from './sync-server.ts';
 
-export { TEST_TOKEN };
+export { TEST_TOKEN, expect };
+
+/**
+ * Slows every page's main thread by this factor (CDP
+ * `Emulation.setCPUThrottlingRate`) when SYNC_E2E_CPU_THROTTLE is set, to
+ * shake out timing assumptions a fast machine hides.
+ */
+const THROTTLE = Number(process.env.SYNC_E2E_CPU_THROTTLE ?? 0);
+
+async function throttle(page: Page): Promise<void> {
+  if (THROTTLE > 1) {
+    const cdp = await page.context().newCDPSession(page);
+    await cdp.send('Emulation.setCPUThrottlingRate', { rate: THROTTLE });
+  }
+}
+
+/** Playwright's `test`, with every page of the default context throttled as above. */
+export const test = base.extend<{ throttled: void }>({
+  throttled: [
+    async ({ context, page }, use) => {
+      await throttle(page);
+      context.on('page', (p) => void throttle(p));
+      await use();
+    },
+    { auto: true },
+  ],
+});
 
 /** Skips the calling test file when there is no Postgres (see sync-setup.ts). */
 export function skipWithoutServer(): void {
@@ -46,7 +72,9 @@ export async function newDevice(
     deviceScaleFactor: 2,
     serviceWorkers: 'block',
   });
+  context.on('page', (p) => void throttle(p));
   const page = await context.newPage();
+  await throttle(page);
   return { context, page };
 }
 
@@ -124,9 +152,15 @@ export async function connectViaUi(
 
 /** Waits until the header says synced (the first sync has finished, nothing waiting). */
 export async function expectSynced(page: Page): Promise<void> {
-  await expect(page.getByTestId('sync-indicator')).toHaveAttribute('data-state', 'synced', {
-    timeout: 60_000,
-  });
+  try {
+    await expect(page.getByTestId('sync-indicator')).toHaveAttribute('data-state', 'synced', {
+      timeout: 60_000,
+    });
+  } catch (error) {
+    // Say why: the sync view carries the problem in plain words (never the token).
+    const view = await syncCall(page, 'status').catch((e: unknown) => String(e));
+    throw new Error(`not synced; sync view: ${JSON.stringify(view)}`, { cause: error });
+  }
 }
 
 /** The server's engine status for a brain. */
