@@ -1,7 +1,9 @@
-// Browser tests of the on-device brain (apps/web/e2e-storage): the SQLite
-// driver and the shared conformance suites on OPFS, persistence, offline
-// use, several tabs, a large import, the in-memory fallback and timings.
-// Separate from the UI's end-to-end tests (playwright.config.ts, e2e/).
+// Browser tests of the on-device brain (apps/web/e2e-storage): persistence
+// on OPFS, offline use, several tabs, a large import, the in-memory fallback,
+// the SAH pool's exclusive access and timings. Separate from the UI's
+// end-to-end tests (playwright.config.ts, e2e/). The SQLite driver and the
+// shared conformance suites on OPFS run under Vitest's browser mode instead
+// (vitest.storage.config.ts, e2e-storage/conformance).
 //
 //   npx playwright test -c apps/web/playwright.storage.config.ts --trace off
 //

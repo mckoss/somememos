@@ -1,8 +1,8 @@
 // Direct tests of the guarantees in packages/sqlite-store/src/driver.ts, for
 // any `SqlDriver`. Test-only (imports vitest): `sqlite-driver.test.ts` runs
-// them in Node on an in-memory database, and the browser storage tests
-// (apps/web/e2e-storage) run them in a worker on OPFS, with `vitest` replaced
-// by a small shim. All data here is invented.
+// them in Node on an in-memory database, and the browser conformance run
+// (apps/web/e2e-storage/conformance, Vitest's browser mode) runs them in a
+// worker on OPFS. All data here is invented.
 
 import { afterEach, describe, expect, it } from 'vitest';
 import type { SqlDriver } from '@somememos/sqlite-store';
