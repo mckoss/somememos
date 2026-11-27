@@ -15,6 +15,14 @@ export {
   pathCovers,
 } from './engine.js';
 export {
+  type RunSyncResult,
+  type SyncTransport,
+  isExcludedItem,
+  runSync,
+  toSyncChange,
+  toSyncEvent,
+} from './sync.js';
+export {
   EngineError,
   isEngineError,
   type ChangeOptions,
@@ -42,6 +50,13 @@ export {
   type SearchOptions,
   type SearchResponse,
   type SectionView,
+  type PrepareSyncOptions,
+  type PreparedSync,
+  type RemoteApplyInput,
+  type RemoteApplyResult,
+  type SyncConflict,
+  type SyncOutcome,
+  type SyncStatus,
   type ChangeRecord,
   type DanglingCount,
   type IndexSummary,

@@ -14,6 +14,13 @@ import type { RankComponents } from '../ranking/rank.js';
 import type { RankMode } from '../ranking/params.js';
 import type { BrainConfig } from '../storage/config.js';
 import type {
+  SyncChange,
+  SyncEvent,
+  SyncNote,
+  SyncRequest,
+  SyncResponse,
+} from '../sync/protocol.js';
+import type {
   AppendResult,
   ChangeRecord,
   DanglingCount,
@@ -374,6 +381,110 @@ export interface ImportResult {
 }
 
 // ---------------------------------------------------------------------------
+// Sync (PLAN.md section 7, "Sync protocol (first version)")
+
+/**
+ * Changes that arrived from elsewhere, to store as they are: note states
+ * (written, deleted or renamed without any base check), log entries and change
+ * records. Nothing is logged for them (PLAN.md section 4, "What does not
+ * count"): the client that made them logged their events, which are among
+ * `events` here or arrive later.
+ */
+export interface RemoteApplyInput {
+  readonly notes?: readonly SyncNote[];
+  readonly events?: readonly SyncEvent[];
+  readonly changes?: readonly SyncChange[];
+}
+
+export interface RemoteApplyResult {
+  /** Paths written, removed and moved, in the order applied. */
+  readonly written: string[];
+  readonly removed: string[];
+  readonly renamed: { readonly from: string; readonly to: string }[];
+  /**
+   * Notes and log entries left out because they name an excluded path, a
+   * path with no role, or a path sync never carries (`sync.syncPathProblem`).
+   */
+  readonly skipped: number;
+  readonly events: AppendResult;
+  readonly changes: AppendResult;
+  /** The index pass over the written paths (it logged nothing). */
+  readonly index: IndexSummary;
+}
+
+/** `Engine.syncStatus()`: where this copy stands with its server. */
+export interface SyncStatus {
+  /** The last server mutation number applied; 0 before the first sync. */
+  readonly since: number;
+  readonly pushedEventSeq: number;
+  readonly pushedChangeSeq: number;
+  /** Notes whose server version is known (they have a base hash). */
+  readonly synced: number;
+  /** When a sync last completed, Unix seconds; null if never. */
+  readonly lastSyncAt: number | null;
+  /** What the next sync would push: notes changed, created or deleted since their base; log entries and change records. */
+  readonly pending: { readonly notes: number; readonly events: number; readonly changes: number };
+}
+
+export interface PrepareSyncOptions {
+  /** At most this many edits. Default 200. */
+  readonly maxEdits?: number;
+  /** At most about this many bytes of note text (one edit is always taken). Default 8 MiB. */
+  readonly maxEditBytes?: number;
+  /** At most this many log entries. Default 5000. */
+  readonly maxEvents?: number;
+  /** At most this many change records. Default 1000. */
+  readonly maxChanges?: number;
+}
+
+/** `Engine.prepareSync()`: the request to send, plus what `applySync` needs to finish it. */
+export interface PreparedSync {
+  readonly request: SyncRequest;
+  /** The local seq of the last event and change record in the request (or the previous cursor). */
+  readonly cursor: { readonly eventSeq: number; readonly changeSeq: number };
+  /** True when there was more to push than fits in one request. */
+  readonly more: boolean;
+  /** Notes too large to sync (over `sync.SYNC_LIMITS.maxNoteBytes`); they stay local. */
+  readonly tooLarge: string[];
+}
+
+export interface SyncConflict {
+  /** The note's path; the server's version is now there (or it was removed, if the server has none). */
+  readonly path: string;
+  readonly status: 'conflict' | 'refused';
+  /** For `refused`: why (e.g. `source-immutable`). */
+  readonly code: string | null;
+  /** Where this copy's version was kept; null when it had none to keep (a delete). */
+  readonly conflictPath: string | null;
+}
+
+/** `Engine.applySync()`: what one round did. */
+export interface SyncOutcome {
+  /** The server mutation number this copy is now at (the next `since`). */
+  readonly mutation: number;
+  /** True when another round is needed: the server has more, or there is more to push. */
+  readonly more: boolean;
+  readonly pushed: {
+    readonly edits: number;
+    readonly applied: number;
+    readonly duplicates: number;
+    readonly events: number;
+    readonly changes: number;
+  };
+  /** Edits the server refused; tell the person. Nothing was lost. */
+  readonly conflicts: SyncConflict[];
+  readonly received: { readonly notes: number; readonly events: number; readonly changes: number };
+  /**
+   * Notes the server sent that were not applied because this copy changed
+   * them since the last sync. The next round pushes this copy's version,
+   * which then conflicts and is kept beside the server's.
+   */
+  readonly waiting: string[];
+  /** Notes and entries from the server left out (excluded, no role, or not syncable). */
+  readonly skipped: number;
+}
+
+// ---------------------------------------------------------------------------
 // The engine
 
 /**
@@ -414,4 +525,37 @@ export interface Engine {
   exportLog(): Promise<string>;
   /** Appends exported records (JSON lines, or parsed), skipping ids already stored, then folds. */
   importLog(entries: string | readonly ExportRecord[]): Promise<ImportResult>;
+
+  // --- Sync. An offline copy calls `prepareSync`, sends `request` to the
+  // server, and passes the response to `applySync`, repeating while the
+  // outcome says `more` (`runSync` does the loop). The server calls
+  // `applyRemote` to store pushed edits and entries.
+
+  /**
+   * Stores changes that arrived from elsewhere without logging events:
+   * writes, deletes and renames notes, re-indexes them (relinking other notes
+   * and resolving dangling links as usual), appends the log entries and
+   * change records (ids already stored are skipped), and folds. Local changes
+   * not yet indexed are indexed (and logged) first, so they are never taken
+   * for remote ones. Does not change the sync state.
+   */
+  applyRemote(input: RemoteApplyInput): Promise<RemoteApplyResult>;
+  /** Where this copy stands with its server, and what is waiting to be pushed. */
+  syncStatus(): Promise<SyncStatus>;
+  /**
+   * Indexes local changes, then builds the next sync request: notes changed
+   * since their base hash (as writes, deletes and renames), and the log
+   * entries and change records after the pushed cursors. Changes nothing.
+   */
+  prepareSync(options?: PrepareSyncOptions): Promise<PreparedSync>;
+  /**
+   * Applies the server's response to a prepared request: records the
+   * results (a conflicting or refused edit keeps this copy's text as a
+   * conflict file and takes the server's version), writes the notes the
+   * server sent unless this copy changed them since the last sync, appends
+   * the entries and change records, folds, and advances the sync state.
+   */
+  applySync(prepared: PreparedSync, response: SyncResponse): Promise<SyncOutcome>;
+  /** Forgets the sync state: the next sync starts from `since: 0` and pushes every note. */
+  resetSync(): Promise<void>;
 }

@@ -22,7 +22,9 @@ import {
   type Step,
   type SyntheticBrain,
 } from '../testing/brain.js';
-import { createEngine } from './engine.js';
+import { contentHash } from '../storage/content.js';
+import { createEngine, localDate } from './engine.js';
+import { toSyncChange, toSyncEvent } from './sync.js';
 import { EngineError, type ResultView } from './types.js';
 
 /** What a host provides for one test: fresh, empty stores and content. */
@@ -714,6 +716,314 @@ export function describeEngineConformance(
       expect(saves.map((s) => s.status)).toEqual(Array(8).fill('saved'));
       expect((await b.engine.status()).notes.total).toBe(8);
       expect(await b.engine.danglingLinks()).toEqual([]);
+    });
+
+    describe('sync', () => {
+      const hashOf = (text: string) => contentHash(text);
+
+      it(
+        'applies remote notes and entries without logging events, relinking and resolving',
+        { timeout },
+        async () => {
+          const a = await brain();
+          await a.engine.index();
+          a.tick();
+          await a.engine.saveNote('memos/garden.md', '# Garden\n\nTry [[Compost Tea]].\n', {
+            message: 'ingest garden',
+          });
+          const events = (await a.stores.events.readAfter(0)).map(toSyncEvent);
+          const changes = (await a.engine.log({ all: true })).map(toSyncChange);
+
+          const b = await brain();
+          b.setNow(T + 120);
+          await b.engine.index();
+          const gardenText = (await a.content.read('memos/garden.md')) as string;
+          const first = await b.engine.applyRemote({
+            notes: [{ path: 'memos/garden.md', hash: await hashOf(gardenText), text: gardenText }],
+            events,
+            changes,
+          });
+          expectJsonSafe(first);
+          expect(first.written).toEqual(['memos/garden.md']);
+          expect(first.events).toEqual({ appended: events.length, duplicates: 0 });
+          expect(first.changes.appended).toBe(1);
+          expect(first.index.events).toEqual({ edit: 0, mention: 0, rename: 0 });
+          // Exactly the origin's entries: nothing logged for the arrival.
+          expect((await b.stores.events.readAfter(0)).map((e) => e.id)).toEqual(
+            events.map((e) => e.id),
+          );
+          expectScoresClose(await b.stores.scores.getAll(), await a.stores.scores.getAll());
+          expect(await b.engine.danglingLinks()).toEqual([{ key: 'compost tea', count: 1 }]);
+          expect((await b.engine.status()).uncommitted).toEqual([]);
+
+          // A new note resolves the dangling link; a rename and a delete relink.
+          const tea = '# Compost tea\n';
+          const second = await b.engine.applyRemote({
+            notes: [{ path: 'memos/compost tea.md', hash: await hashOf(tea), text: tea }],
+          });
+          expect(second.index.events).toEqual({ edit: 0, mention: 0, rename: 0 });
+          expect(await b.engine.danglingLinks()).toEqual([]);
+          expect(
+            (await b.engine.readNote('memos/compost tea.md', { record: false })).backlinks,
+          ).toEqual(['memos/garden.md']);
+          const third = await b.engine.applyRemote({
+            notes: [
+              { path: 'memos/compost tea.md', renamedTo: 'memos/tea.md' },
+              { path: 'memos/tea.md', hash: await hashOf(tea), text: tea },
+            ],
+          });
+          expect(third.renamed).toEqual([{ from: 'memos/compost tea.md', to: 'memos/tea.md' }]);
+          expect(await b.engine.danglingLinks()).toEqual([{ key: 'compost tea', count: 1 }]);
+          await b.engine.applyRemote({ notes: [{ path: 'memos/garden.md', deleted: true }] });
+          expect(await b.engine.danglingLinks()).toEqual([]);
+          expect((await b.engine.noteTitles()).map((t) => t.path)).toEqual(['memos/tea.md']);
+          expect(await b.entries()).toHaveLength(events.length);
+
+          // Repeating changes nothing; excluded paths and entries are left out.
+          const again = await b.engine.applyRemote({ events, changes });
+          expect(again.events).toEqual({ appended: 0, duplicates: events.length });
+          const hidden = await b.engine.applyRemote({
+            notes: [{ path: 'private/x.md', hash: await hashOf('x'), text: 'x' }],
+            events: [{ id: 'hidden-1', kind: 'read', item: 'private/x.md', time: T, client: 'c' }],
+          });
+          expect(hidden.skipped).toBe(2);
+          expect(await b.content.read('private/x.md')).toBeUndefined();
+          expect(JSON.stringify(await b.engine.exportLog())).not.toContain('private/');
+          await expect(
+            b.engine.applyRemote({ notes: [{ path: 'memos/bad.md', hash: 'nope', text: 'x' }] }),
+          ).rejects.toBeInstanceOf(EngineError);
+        },
+      );
+
+      it(
+        'prepares every note, entry and change record for a first push, then nothing',
+        { timeout },
+        async () => {
+          const b = await brain();
+          await b.engine.index();
+          b.tick();
+          await b.engine.saveNote('memos/a.md', '# A\n\n[[b]]\n', { message: 'ingest a' });
+          await b.engine.saveNote('memos/b.md', '# B\n');
+          await b.engine.saveNote('.hidden/c.md', '# C\n').catch(() => undefined);
+          await b.engine.readNote('memos/a.md');
+          const prepared = await b.engine.prepareSync();
+          expectJsonSafe(prepared);
+          expect(prepared.request.since).toBe(0);
+          expect(prepared.request.client).toBe('conformance-client');
+          expect(prepared.request.edits.map((e) => [e.op, e.path, e.baseHash])).toEqual([
+            ['write', 'memos/a.md', null],
+            ['write', 'memos/b.md', null],
+          ]);
+          expect(prepared.request.events.length).toBe(await b.stores.events.lastSeq());
+          expect(prepared.request.changes.length).toBe(2);
+          expect(prepared.more).toBe(false);
+          // Deterministic: preparing again gives the same request.
+          expect(await b.engine.prepareSync()).toEqual(prepared);
+          expect((await b.engine.syncStatus()).pending.notes).toBe(2);
+
+          const response = {
+            mutation: 7,
+            more: false,
+            results: await Promise.all(
+              prepared.request.edits.map(async (e) => ({
+                id: e.id,
+                status: 'applied' as const,
+                hash: await hashOf(e.text as string),
+              })),
+            ),
+            notes: [],
+            events: [],
+            changes: [],
+          };
+          const outcome = await b.engine.applySync(prepared, response);
+          expectJsonSafe(outcome);
+          expect(outcome).toMatchObject({ mutation: 7, more: false, conflicts: [], waiting: [] });
+          expect(outcome.pushed).toMatchObject({ edits: 2, applied: 2 });
+          const status = await b.engine.syncStatus();
+          expect(status).toMatchObject({
+            since: 7,
+            synced: 2,
+            pending: { notes: 0, events: 0, changes: 0 },
+          });
+          const next = await b.engine.prepareSync();
+          expect(next.request).toMatchObject({ since: 7, edits: [], events: [], changes: [] });
+
+          // A local rename is pushed as a rename, an edit with its base, a delete with its base.
+          b.tick();
+          const baseB = await hashOf('# B\n');
+          await b.engine.renameNote('memos/b.md', 'memos/bee.md');
+          await b.engine.saveNote('memos/a.md', '# A\n\n[[bee]]\n');
+          const third = await b.engine.prepareSync();
+          expect(third.request.edits.map((e) => [e.op, e.path, e.to ?? null, e.baseHash])).toEqual([
+            ['rename', 'memos/b.md', 'memos/bee.md', baseB],
+            [
+              'write',
+              'memos/a.md',
+              null,
+              (await b.engine.prepareSync()).request.edits[1]?.baseHash,
+            ],
+          ]);
+          expect(third.request.edits[1]?.baseHash).toBe(await hashOf('# A\n\n[[b]]\n'));
+          expect(third.request.events.every((e) => e.time > T)).toBe(true);
+          const limited = await b.engine.prepareSync({ maxEdits: 1, maxEvents: 1, maxChanges: 1 });
+          expect(limited.more).toBe(true);
+          expect(limited.request.edits).toHaveLength(1);
+          await b.engine.resetSync();
+          expect((await b.engine.syncStatus()).since).toBe(0);
+        },
+      );
+
+      it(
+        'keeps a conflicting version as a conflict file and takes the server version',
+        { timeout },
+        async () => {
+          const b = await brain();
+          await b.engine.index();
+          await b.engine.saveNote('memos/plan.md', '# Plan\n\nmine\n');
+          await b.engine.saveNote('memos/list.md', '# List\n\nmine too\n');
+          const prepared = await b.engine.prepareSync();
+          const [list, plan] = prepared.request.edits;
+          const theirs = '# Plan\n\ntheirs\n';
+          const theirList = '# List\n\nfrom the server\n';
+          const freshText = '# Fresh\n\n[[plan]]\n';
+          b.tick();
+          const outcome = await b.engine.applySync(prepared, {
+            mutation: 3,
+            more: false,
+            results: [
+              {
+                id: plan?.id as string,
+                status: 'conflict',
+                currentHash: await hashOf(theirs),
+                currentText: theirs,
+              },
+              {
+                id: list?.id as string,
+                status: 'refused',
+                code: 'source-immutable',
+                currentHash: await hashOf(theirList),
+                currentText: theirList,
+              },
+            ],
+            notes: [
+              { path: 'memos/plan.md', hash: await hashOf(theirs), text: theirs },
+              { path: 'memos/fresh.md', hash: await hashOf(freshText), text: freshText },
+            ],
+            events: [
+              { id: 'server-e1', kind: 'edit', item: 'memos/fresh.md', time: T, client: 'other' },
+            ],
+            changes: [
+              {
+                id: 'server-c1',
+                time: T,
+                client: 'other',
+                message: 'update plan',
+                op: 'update',
+                paths: ['memos/fresh.md', 'memos/plan.md'],
+              },
+            ],
+          });
+          expect(outcome.conflicts).toEqual([
+            {
+              path: 'memos/list.md',
+              status: 'refused',
+              code: 'source-immutable',
+              conflictPath: `memos/list.conflict-conformance-client-${localDate(T + 60)}.md`,
+            },
+            {
+              path: 'memos/plan.md',
+              status: 'conflict',
+              code: null,
+              conflictPath: `memos/plan.conflict-conformance-client-${localDate(T + 60)}.md`,
+            },
+          ]);
+          expect(outcome.more).toBe(true);
+          expect(await b.content.read('memos/plan.md')).toBe(theirs);
+          expect(await b.content.read(outcome.conflicts[1]?.conflictPath as string)).toBe(
+            '# Plan\n\nmine\n',
+          );
+          expect(await b.content.read('memos/fresh.md')).toBe(freshText);
+          expect((await b.engine.readNote('memos/fresh.md', { record: false })).links).toEqual([
+            { target: 'memos/plan.md', dangling: false },
+          ]);
+          // No edit was logged for the server's versions or the conflict files.
+          const kinds = (await b.stores.events.readAfter(0)).filter((e) => e.time > T + 59);
+          expect(kinds).toEqual([]);
+          const log = await b.engine.log({ all: true });
+          expect(log.map((c) => c.message)).toContain(
+            "sync conflict: kept this copy's version of memos/plan.md",
+          );
+          // The next round pushes the two conflict files as creates, and the server's entries are not pushed back.
+          const next = await b.engine.prepareSync();
+          expect(next.request.edits.map((e) => [e.op, e.path, e.baseHash])).toEqual([
+            ['write', outcome.conflicts[0]?.conflictPath as string, null],
+            ['write', outcome.conflicts[1]?.conflictPath as string, null],
+          ]);
+          expect(next.request.events.map((e) => e.id)).not.toContain('server-e1');
+          expect(next.request.changes.map((c) => c.id)).not.toContain('server-c1');
+        },
+      );
+
+      it(
+        'does not overwrite a local change with a server version; the next push conflicts',
+        { timeout },
+        async () => {
+          const b = await brain();
+          await b.engine.index();
+          await b.engine.saveNote('memos/n.md', '# N\n\nv1\n');
+          const first = await b.engine.prepareSync();
+          await b.engine.applySync(first, {
+            mutation: 1,
+            more: false,
+            results: [
+              {
+                id: first.request.edits[0]?.id as string,
+                status: 'applied',
+                hash: await hashOf('# N\n\nv1\n'),
+              },
+            ],
+            notes: [],
+            events: [],
+            changes: [],
+          });
+          b.tick();
+          await b.engine.saveNote('memos/n.md', '# N\n\nlocal v2\n');
+          const empty = await b.engine.prepareSync({ maxEdits: 1 });
+          const remote = '# N\n\nremote v2\n';
+          const outcome = await b.engine.applySync(
+            { ...empty, request: { ...empty.request, edits: [] } },
+            {
+              mutation: 2,
+              more: false,
+              results: [],
+              notes: [
+                { path: 'memos/n.md', hash: await hashOf(remote), text: remote },
+                { path: 'memos/gone.md', deleted: true },
+              ],
+              events: [],
+              changes: [],
+            },
+          );
+          expect(outcome.waiting).toEqual(['memos/n.md']);
+          expect(outcome.more).toBe(true);
+          expect(await b.content.read('memos/n.md')).toBe('# N\n\nlocal v2\n');
+          const next = await b.engine.prepareSync();
+          expect(next.request.edits.map((e) => [e.path, e.baseHash])).toEqual([
+            ['memos/n.md', await hashOf('# N\n\nv1\n')],
+          ]);
+          await expect(
+            b.engine.applySync(next, {
+              ...outcome,
+              mutation: 0,
+              results: [],
+              notes: [],
+              events: [],
+              changes: [],
+              more: false,
+            } as never),
+          ).rejects.toBeInstanceOf(EngineError);
+        },
+      );
     });
 
     describe.each(seeds)('replaying the synthetic brain (seed %i)', (seed) => {

@@ -19,3 +19,6 @@ events.jsonl
 test-results/
 playwright-report/
 apps/web/e2e-storage/dist/
+
+# Agent worktrees
+.claude/worktrees/

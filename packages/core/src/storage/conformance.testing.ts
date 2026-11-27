@@ -160,26 +160,19 @@ function toInputs(drafts: readonly Draft[], prefix = 'e'): LogInput[] {
 
 /**
  * A deliberately naive model of `foldPending`'s semantics: each event lands
- * on the item that the renames known when it arrived lead to (only renames at
- * or after its time apply), and each rename moves everything stored under its
- * old name. Scores are then summed per item with `combineAll`.
+ * on the item that every rename record in the log leads to by time (only
+ * renames at or after its time apply, then the next rename of the new name
+ * after that one, and so on), whatever order the entries arrived in. Scores
+ * are then summed per item with `combineAll`.
  */
 function modelScores(
   entries: readonly LogEntry[],
   halfLives: HalfLives = HALF_LIVES,
 ): Map<string, ItemScores<string>> {
-  const known: StoredRename[] = [];
+  const known = entries.filter((e): e is StoredRename => e.kind === 'rename');
   const lists = new Map<string, { kind: EventKind; time: number }[]>();
   for (const e of entries) {
-    if (e.kind === 'rename') {
-      const moved = lists.get(e.item);
-      if (moved) {
-        lists.delete(e.item);
-        lists.set(e.to, [...(lists.get(e.to) ?? []), ...moved]);
-      }
-      known.push(e);
-      continue;
-    }
+    if (e.kind === 'rename') continue;
     let item = e.item;
     let at: [number, number] = [e.time, -Infinity];
     for (;;) {
@@ -868,6 +861,52 @@ export function describeStorageConformance(
         );
         expect(note?.day?.edit).toBe(eventScore(1, NOW - 300, day));
       });
+
+      it(
+        'folds a rename that arrives after later-dated events by time, whatever the arrival order',
+        { timeout },
+        async () => {
+          const entries = [
+            ev('o1', 'read', 'memos/x.md', NOW - 100),
+            ev('o2', 'read', 'memos/x.md', NOW - 10), // after the rename: a new note at x
+            rn('o3', 'memos/x.md', 'memos/y.md', NOW - 50),
+            ev('o4', 'edit', 'memos/y.md', NOW - 20),
+            rn('o5', 'memos/y.md', 'memos/z.md', NOW - 30), // a chain, also late
+          ];
+          const day = HALF_LIVES.day as number;
+          const results: Map<string, ItemScores<string>>[] = [];
+          for (const order of [
+            [0, 1, 2, 3, 4],
+            [2, 4, 0, 1, 3],
+            [4, 3, 1, 0, 2],
+          ]) {
+            const s = await openStores();
+            for (const i of order) {
+              await s.events.append([entries[i] as LogInput]);
+              await foldPending(s.events, s.scores);
+            }
+            const scores = await s.scores.getAll();
+            expectScoresClose(scores, modelScores(await s.events.readAfter(0)));
+            results.push(scores);
+            await rebuildScores(s.events, s.scores);
+            expectScoresClose(await s.scores.getAll(), scores);
+            await s.close();
+          }
+          expectScoresClose(
+            results[1] as Map<string, ItemScores<string>>,
+            results[0] as Map<string, ItemScores<string>>,
+          );
+          expectScoresClose(
+            results[2] as Map<string, ItemScores<string>>,
+            results[0] as Map<string, ItemScores<string>>,
+          );
+          const first = results[0] as Map<string, ItemScores<string>>;
+          expect(first.get('memos/x.md')?.day?.read).toBe(eventScore(1, NOW - 10, day));
+          expect(first.get('memos/z.md')?.day?.read).toBe(eventScore(1, NOW - 100, day));
+          expect(first.get('memos/y.md')?.day?.edit).toBe(eventScore(1, NOW - 20, day));
+          expect(first.has('memos/y.md') && first.get('memos/y.md')?.day?.read).toBeFalsy();
+        },
+      );
 
       it(
         'sends late events dated before a rename to the new name, through chains',
