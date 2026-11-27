@@ -46,7 +46,7 @@ Common rules:
 
 - **Errors** are `{"error": {"code", "message"}}` with a fitting status, for example 400 `invalid-argument`, 401 `unauthorized`, 404 `not-found`, 409 on a stale save, 503 `no-database`.
 - **Same origin only.** There are no CORS headers, and a request whose `Origin` header names another host gets 403.
-- **Failed tokens are rate-limited:** after 20 failures from one address within 10 minutes (200 in all), requests get 429 until the window passes.
+- **Failed tokens are throttled, never the right one:** after 20 failures from one address within 10 minutes (or once 200 have failed in all, for any address that has failed in that window), that address's requests are answered one per second and its failures get 429 with `Retry-After`. A request with a valid token always succeeds, and an address with no failures is never slowed.
 - **`X-Somememos-Client: <id>`** names the client: the server records events and change records under that id and authors git commits with it. Without it they are recorded as `server`.
 - **Paths** are brain-relative note paths ending in `.md`, with no `..` or dot folders. Notes are at most 2 MiB.
 

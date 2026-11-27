@@ -627,15 +627,28 @@ export function createApp(options: AppOptions): App {
       if (down) return down;
 
       const address = info.clientAddress ?? 'unknown';
-      const wait = limiter.blockedFor(address);
-      if (wait > 0) {
+      const admission = limiter.admit(address);
+      if (admission.kind === 'refuse') {
         throw new HttpError(429, 'too-many-attempts', 'too many failed attempts; try again later', {
-          'retry-after': String(wait),
+          'retry-after': String(admission.retryAfter),
         });
       }
+      // A throttled address waits for its turn before its token is compared,
+      // so it learns nothing sooner by giving up on a slow answer.
+      if (admission.delayMs > 0) await new Promise((r) => setTimeout(r, admission.delayMs));
       const principal = await (authorizer as Authorizer).authorize(request);
       if (!principal) {
         limiter.fail(address);
+        if (limiter.throttled(address)) {
+          throw new HttpError(
+            429,
+            'too-many-attempts',
+            'too many failed attempts; try again later',
+            {
+              'retry-after': String(limiter.retryAfter()),
+            },
+          );
+        }
         throw new HttpError(401, 'unauthorized', 'a valid bearer token is required', {
           'www-authenticate': 'Bearer realm="somememos"',
         });

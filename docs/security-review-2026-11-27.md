@@ -16,7 +16,7 @@ Method: the route table was enumerated and every route was called without a toke
 |---|---|---|---|
 | 1 | Stripping inline markdown from a heading took quadratic time: one note freezes the server | High | Fixed (`e0e3d76`) |
 | 2 | Both markdown renderers took quadratic time on many unclosed `[[` | Medium | Fixed (`2e8e9a0`) |
-| 3 | Failed-login limits can lock the owner out of the API | Medium | Left for the owner |
+| 3 | Failed-login limits can lock the owner out of the API | Medium | Fixed: failures are throttled, a valid token always passes |
 | 4 | The app had no content security policy and could be framed | Low | Fixed (`0865d33`) |
 | 5 | The container ran the server as root | Low | Fixed (`60b4fa9`) |
 | 6 | A file or folder name over 255 bytes failed with a 500, logged the note's path, and jammed a device's sync | Low | Fixed (`7919aac`) |
@@ -38,11 +38,13 @@ Fix: the five rules are now linear scans with exactly the old output; a randomiz
 
 The app's note view (`apps/web/src/lib/ui/markdown.ts`) and the public blog's renderer (`apps/web/src/lib/server/blog/render.ts`) searched the whole rest of the text for `]]` at every `[[`. Demonstration: a 400 KB body of `[a][` repeated took 78 to 80 seconds to render in each. In the app this freezes the owner's tab when they open a note synced from a compromised device; on the server it blocks the process the first time anyone requests such a published post (rendering is then cached per commit). Fix: the scan stops at the first bracket or line break, which cannot be inside a link anyway, so the same links render. Tests in both renderers' test files.
 
-### 3. Failed-login limits as a lockout lever (medium, left for the owner)
+### 3. Failed-login limits as a lockout lever (medium, fixed)
 
 `FailureLimiter` (`packages/server/src/auth.ts`) refuses every request with 429 once 200 failed attempts were made by all addresses together in a 10-minute window, or 20 by one address, "even with a valid token, so guessing gains nothing". Demonstration (by reading; not run as a test): an anonymous client sends `GET /api/brains` with `Authorization: Bearer x` 200 times from any addresses; for the rest of the window every request, including the owner's with the right token, gets 429. Twenty such requests a minute keep the API closed indefinitely. If `ADDRESS_HEADER` is not set (docs/deploy.md asks for it), every client shares the proxy's address and 20 failures suffice.
 
 This trades availability for brute-force resistance, a choice the code makes deliberately, so it is not changed here. Tokens are at least 24 characters and the documented way to make one gives about 190 bits, so guessing is already hopeless; the limiter is defence in depth. Options, in order of preference: let a request with a valid token through when only the total limit is reached (per-address limits still cap each address's guesses); or count the total limit only toward addresses that have failed before; or raise the total limit substantially. Whatever is chosen, keep `ADDRESS_HEADER=X-Forwarded-For` and `XFF_DEPTH=1` in the deployment.
+
+**Fixed afterwards.** The limiter no longer refuses; it throttles. An address over its own limit (20 failures in the window), or any address that has failed in the window once the total (200) is reached, has its requests spaced one second apart *before* the token is compared, and its failures answer 429 instead of 401. Every admitted request is compared in constant time, so a valid token always passes, and an address with no failures is never slowed by anyone else's. Guessing stays bounded: a throttled address learns at most one result per second however many connections it opens, and abandoning a slow answer reveals nothing because the comparison has not yet happened; past the total, each fresh address gets one guess before it is throttled too. The only outright refusal left is for an address whose own queue is over 30 seconds long. Without `ADDRESS_HEADER`, everyone shares the proxy's address, so a flooding attacker slows the owner to one request a second (and can fill that queue) rather than locking them out completely; the header remains required. Tests: `packages/server/src/config.test.ts` and `http.test.ts`.
 
 ### 4. No content security policy or frame protection on the app (low, fixed)
 
@@ -102,7 +104,7 @@ On a future multi-user server, `POST /api/brains` answers `brain-exists` for ano
 
 ## What the owner must decide
 
-1. The lockout trade-off in finding 3.
+1. ~~The lockout trade-off in finding 3.~~ Settled: throttle failures, never refuse a valid token.
 2. How sync should treat a note and folder with the same name (finding 7).
 3. Whether HTML comments in published posts should be dropped (finding 8).
 4. Whether remote images in notes are worth the tracking risk (finding 9).
