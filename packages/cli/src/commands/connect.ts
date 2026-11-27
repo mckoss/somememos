@@ -16,6 +16,7 @@ import { type RemoteClient, createRemoteClient } from '../remote/client.js';
 import {
   ENV,
   checkBrainId,
+  checkDeviceName,
   checkServerTransport,
   checkTokenFile,
   insecureAllowed,
@@ -50,6 +51,9 @@ Options:
   --token-file <path>  Read the token from this file (outside <dir>)
   --allow-insecure     Allow a plain http:// server on another host (trusted
                        networks only: the token travels unencrypted)
+  --name <device-name> This folder's client id, shown in history and as the
+                       commit author (1-40 letters, digits, '.', '_' or '-';
+                       default: a random id). Give each device its own.
 
 ${GLOBAL_OPTIONS_HELP}
 
@@ -93,8 +97,9 @@ export async function prepareRemote(
   positionals: string[],
   tokenFileOption: string | undefined,
   defaultDir: (brainId: string) => string,
-  allowInsecure = false,
+  options: { readonly allowInsecure?: boolean; readonly name?: string | undefined } = {},
 ) {
+  const allowInsecure = options.allowInsecure ?? false;
   if (positionals.length < 2 || positionals.length > 3) {
     throw new UsageError('give the server URL, the brain id and, optionally, a directory');
   }
@@ -106,7 +111,7 @@ export async function prepareRemote(
   const tokenFile =
     tokenFileOption === undefined ? null : checkTokenFile(ctx.cwd, tokenFileOption, root);
   const token = resolveToken(ctx.env, tokenFile, ctx.cwd);
-  const clientId = randomUUID();
+  const clientId = options.name === undefined ? randomUUID() : checkDeviceName(options.name, token);
   const client = createRemoteClient({
     server,
     brainId,
@@ -125,13 +130,18 @@ export const connectCommand: Command = {
   async run(args, ctx) {
     const { values, positionals, globals } = parseCommandArgs(
       args,
-      { 'token-file': { type: 'string' }, 'allow-insecure': { type: 'boolean' } },
+      {
+        'token-file': { type: 'string' },
+        'allow-insecure': { type: 'boolean' },
+        name: { type: 'string' },
+      },
       { allowPositionals: true },
     );
     if (globals.help) {
       ctx.stdout(usage);
       return EXIT_OK;
     }
+    if (values.name !== undefined) checkDeviceName(values.name);
     if (positionals[0] !== undefined) {
       checkServerTransport(
         normalizeServerUrl(positionals[0]),
@@ -148,13 +158,10 @@ export const connectCommand: Command = {
         `${dir} holds markdown files, which commit would send as new notes; connect an empty folder`,
       );
     }
-    const prepared = await prepareRemote(
-      ctx,
-      positionals,
-      values['token-file'],
-      () => '.',
-      values['allow-insecure'] === true,
-    );
+    const prepared = await prepareRemote(ctx, positionals, values['token-file'], () => '.', {
+      allowInsecure: values['allow-insecure'] === true,
+      name: values.name,
+    });
     mkdirSync(prepared.root, { recursive: true });
     const config = writeWorkFolderConfig(prepared.root, {
       mode: 'remote',

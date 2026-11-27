@@ -27,6 +27,7 @@ import {
   type CloneRemote,
   ENV,
   checkBrainId,
+  checkDeviceName,
   checkTokenFile,
   insecureAllowed,
   normalizeServerUrl,
@@ -57,6 +58,9 @@ Options:
   --token-file <path>  Read the token from this file (outside <dir>)
   --allow-insecure     Allow a plain http:// server on another host (trusted
                        networks only: the token travels unencrypted)
+  --name <device-name> This copy's client id, shown in history and as the
+                       commit author (1-40 letters, digits, '.', '_' or '-';
+                       default: a random id). Give each device its own.
 
 ${GLOBAL_OPTIONS_HELP}
 
@@ -252,21 +256,23 @@ export const cloneCommand: Command = {
   async run(args, ctx) {
     const { values, positionals, globals } = parseCommandArgs(
       args,
-      { 'token-file': { type: 'string' }, 'allow-insecure': { type: 'boolean' } },
+      {
+        'token-file': { type: 'string' },
+        'allow-insecure': { type: 'boolean' },
+        name: { type: 'string' },
+      },
       { allowPositionals: true },
     );
     if (globals.help) {
       ctx.stdout(cloneUsage);
       return EXIT_OK;
     }
+    if (values.name !== undefined) checkDeviceName(values.name);
     const allowInsecure = values['allow-insecure'] === true;
-    const prepared = await prepareRemote(
-      ctx,
-      positionals,
-      values['token-file'],
-      (id) => id,
+    const prepared = await prepareRemote(ctx, positionals, values['token-file'], (id) => id, {
       allowInsecure,
-    );
+      name: values.name,
+    });
     const root = prepared.root;
     let entries: string[] = [];
     try {

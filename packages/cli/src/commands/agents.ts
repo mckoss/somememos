@@ -26,7 +26,8 @@ whether the brain is a local folder or on a server (remote mode):
 
 Every command reminds you of uncommitted edits. \`--json\` gives full records.
 Exit codes: 0 ok, 1 error, 2 bad usage. \`somememos help setup\` covers remote
-mode; \`somememos help <command>\` explains any command.
+mode (set SOMEMEMOS_CLIENT_ID to name your session in \`somememos history\`);
+\`somememos help <command>\` explains any command.
 `;
 
 /** Placeholder for the bundle's download URL: there is no release yet. */
@@ -50,18 +51,28 @@ command is a request to the server.
                       secret store, never in a file in a repository)
 
 Notes you read go to the working folder, SOMEMEMOS_WORKDIR (default
-~/somememos/<brain id>); edit them there and commit.
+~/somememos/<brain id>); edit them there and commit. Optionally:
+
+  SOMEMEMOS_CLIENT_ID a readable name for this device or session, e.g.
+                      cloud-agent (letters, digits, '.', '_', ':' or '-');
+                      \`somememos history\` and the server's git commits show
+                      it as the author. Default: an id derived from this
+                      machine, user and working folder. Never put a secret
+                      in it.
 
 Or make a folder a working folder once (the token still comes from
 SOMEMEMOS_TOKEN, or --token-file outside the folder; it is never stored):
 
-  somememos connect https://brain.example.com <brain-id> ~/brain
+  somememos connect https://brain.example.com <brain-id> ~/brain --name work-laptop
   cd ~/brain && somememos hot
 
 For offline use (or local models), make a full copy and sync it:
 
-  somememos clone https://brain.example.com <brain-id> ~/brain
+  somememos clone https://brain.example.com <brain-id> ~/brain --name work-laptop
   somememos sync
+
+--name gives the folder or copy its client id (1-40 letters, digits, '.',
+'_' or '-'; default a random id), shown in history; give each device its own.
 
 The server must be https://: the CLI refuses to send the token over plain
 http:// (anyone on the network could read it), except to this machine

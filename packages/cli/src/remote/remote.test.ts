@@ -16,7 +16,7 @@ import { type AddressInfo, createServer } from 'node:net';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { fakeContext, tempDir, writeTestConfig } from '../brain/testing.js';
-import { EXIT_FAILURE, EXIT_OK, run } from '../index.js';
+import { EXIT_FAILURE, EXIT_OK, EXIT_USAGE, run } from '../index.js';
 import {
   EXCLUDED_FOLDER,
   type SyntheticBrain,
@@ -724,6 +724,37 @@ describePg(
         await ok(one, ['commit', '-m', 'remove catkin']);
         await ok(one, ['sync']);
         await ok(two, ['sync']);
+      });
+
+      it('connect and clone --name give the device a readable id that history shows', async () => {
+        const named = newDir('named-wf');
+        await ok(tmp.dir, ['connect', server.url, 'garden', named, '--name', 'study-desk']);
+        const config = JSON.parse(readFileSync(join(named, '.somememos/config.json'), 'utf8'));
+        expect(config.clientId).toBe('study-desk');
+        mkdirSync(join(named, 'memos'), { recursive: true });
+        writeFileSync(join(named, 'memos/birch-bark.md'), '# Birch bark\n\nPeeling.\n');
+        await ok(named, ['commit', '-m', 'ingest birch bark']);
+        const history = await json<{ versions: { client: string }[] }>(named, [
+          'history',
+          'memos/birch-bark.md',
+        ]);
+        expect(history.versions[0]?.client).toBe('study-desk');
+
+        const copy = newDir('named-copy');
+        await ok(tmp.dir, ['clone', server.url, 'garden', copy, '--name', 'cabin.laptop']);
+        const copyConfig = JSON.parse(readFileSync(join(copy, '.somememos/config.json'), 'utf8'));
+        expect(copyConfig.clientId).toBe('cabin.laptop');
+
+        const bad = await cli(tmp.dir, [
+          'connect',
+          server.url,
+          'garden',
+          newDir('bad-name'),
+          '--name',
+          TEST_TOKEN,
+        ]);
+        expect(bad.code).toBe(EXIT_USAGE);
+        expect(bad.stderr).not.toContain(TEST_TOKEN);
       });
 
       it('sync in a brain with no server says how to set one', async () => {

@@ -18,6 +18,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir, hostname, userInfo } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { CommandError } from '../brain/output.js';
+import { UsageError } from '../context.js';
 import { SIDECAR_DIR } from '../store/open.js';
 
 export const CONFIG_FILE = 'config.json';
@@ -41,6 +42,37 @@ export const ENV = {
 } as const;
 
 type Env = Readonly<Record<string, string | undefined>>;
+
+/** A device name given with `--name`: short and readable, since history shows it. */
+export const DEVICE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,39}$/;
+
+/**
+ * Checks a `--name <device-name>` (stored as the client id, shown in
+ * `history` and git authorship): 1-40 letters, digits, '.', '_' or '-',
+ * starting with a letter or digit, and nothing that could be a secret: not
+ * the token or part of it, and no long run of mixed letters and digits as
+ * keys and tokens have. Errors never repeat the name.
+ */
+export function checkDeviceName(name: string, token?: string): string {
+  if (!DEVICE_NAME.test(name)) {
+    throw new UsageError(
+      "--name must be 1 to 40 letters, digits, '.', '_' or '-', starting with a letter or digit, e.g. --name work-laptop",
+    );
+  }
+  const secretLike = name
+    .split(/[._-]/)
+    .some((part) => part.length >= 16 && /[A-Za-z]/.test(part) && /\d/.test(part));
+  const isToken =
+    token !== undefined &&
+    token !== '' &&
+    (name.includes(token) || (name.length >= 8 && token.includes(name)));
+  if (secretLike || isToken) {
+    throw new UsageError(
+      '--name looks like a secret (the token, or a long run of mixed letters and digits); a device name is shown to anyone who reads the history, so pick a plain one such as work-laptop',
+    );
+  }
+  return name;
+}
 
 /** Hosts a plain `http://` server may be on: this machine only. */
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);

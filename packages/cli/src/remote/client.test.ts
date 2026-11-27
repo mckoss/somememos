@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../brain/testing.js';
 import { RemoteError, createRemoteClient, encodeNotePath } from './client.js';
 import {
+  checkDeviceName,
   checkServerTransport,
   checkTokenFile,
   derivedClientId,
@@ -202,6 +203,25 @@ describe('working-folder config', () => {
       /no credentials/,
     );
     expect(() => normalizeServerUrl('brain.example.test')).toThrow(/not a server URL/);
+  });
+
+  it('accepts short readable device names and nothing that looks like a secret', () => {
+    for (const ok of ['work-laptop', 'cabin.laptop', 'phone_2', 'a', 'x'.repeat(40)]) {
+      expect(checkDeviceName(ok, TOKEN), ok).toBe(ok);
+    }
+    for (const bad of ['', '-lead', 'has space', 'x'.repeat(41), 'naïve', 'a/b', 'a:b']) {
+      expect(() => checkDeviceName(bad), bad).toThrow(/--name must be 1 to 40/);
+    }
+    for (const secret of [TOKEN.slice(0, 40), 'tok-unit-7c1d9e3f', 'k3y9Xq2Lm8Pz4Rt7Wv']) {
+      let message = '';
+      try {
+        checkDeviceName(secret, TOKEN);
+      } catch (error) {
+        message = (error as Error).message;
+      }
+      expect(message, secret).toMatch(/looks like a secret/);
+      expect(message).not.toContain(secret);
+    }
   });
 
   it('refuses to send the token over plain http except to this machine, unless allowed', async () => {
