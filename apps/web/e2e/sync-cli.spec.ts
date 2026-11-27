@@ -19,7 +19,9 @@ skipWithoutServer();
 const CLI = join(import.meta.dirname, '../../../packages/cli/bin/somememos.js');
 const run = promisify(execFile);
 
-test('every remote command works against the built app', async ({ browserName: _browser }, info) => {
+test('every remote command works against the built app', async ({
+  browserName: _browser,
+}, info) => {
   test.skip(info.project.name !== 'desktop', 'the CLI has no viewport; one run is enough');
   test.setTimeout(180_000);
   const brainId = uniqueBrainId(info, 'cli');
