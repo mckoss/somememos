@@ -33,7 +33,7 @@ Goal: on one machine, Mike indexes his vault, imports its git history, gets usef
 
 ### Event log and scores
 
-- [ ] **1.1 Config.** `.somememos/config.json` with `exclude` globs, `score` globs (which notes are scored items; default all), half-lives, per-kind weights and `α`. `somememos init` writes defaults and a client id. Excluded paths must never reach the event log, the index, the scores or any CLI output; test that explicitly.
+- [ ] **1.1 Config.** `.somememos/config.json` with folder roles (`memo`, `dated`, `source`, `excluded`) as path patterns, with every file a `memo` when none are declared, half-lives, per-kind weights and `α`. `somememos init` writes defaults and a client id. Excluded paths must never reach the event log, the index, the scores or any CLI output; test that explicitly.
 - [ ] **1.2 Event log.** `events.sqlite` with the `events` table from PLAN.md section 4. An `appendEvent` function in core that assigns a unique id (a random UUID for live events), rejects future-dated events, and is idempotent on id.
 - [ ] **1.3 Folding (core).** Fold events after a stored cursor into per-kind scores in `index.sqlite`, cursor and scores in one transaction. Apply rename records by moving an item's scores. A full refold after deleting `index.sqlite` must give the same scores as incremental folding; property-test that with random event sequences, including renames.
 - [ ] **1.4 Schema versions.** A `schema_version` in each database. A mismatch in `index.sqlite` triggers a rebuild. A mismatch in `events.sqlite` runs an explicit migration and never drops data.
@@ -50,7 +50,7 @@ Goal: on one machine, Mike indexes his vault, imports its git history, gets usef
 
 ### Git import
 
-- [ ] **1.11 `import-git`.** Read the whole history with one `git log` call (`--name-status -M`, author time, patch for added lines). For each commit: an `edit` event per changed scored note and a `mention` event per `[[link]]` added, at the commit's author time, with rename records for renames. Event ids are a hash of commit, path, kind and target, so a second run adds nothing. Stop at the moment the brain was first indexed, so a commit and its live-detected edit are never both counted.
+- [ ] **1.11 `import-git`.** Read the whole history with one `git log` call (`--name-status -M`, author time, patch for added lines). For each commit: an `edit` event per changed scored note and a `mention` event per `[[link]]` added, at the commit's author time, with rename records for renames. An `--ignore-commit` option skips named commits as events while still following their renames, for mass rewrites such as the vault's `wiki/` to `memos/` rename. Event ids are a hash of commit, path, kind and target, so a second run adds nothing. Stop at the moment the brain was first indexed, so a commit and its live-detected edit are never both counted.
   - Tests build fixture repos in a temp directory: a rename, a merge commit, a note linked before it existed, an excluded folder, and a repeated import.
 
 ### Querying
@@ -60,6 +60,7 @@ Goal: on one machine, Mike indexes his vault, imports its git history, gets usef
 - [ ] **1.14 `hot`, `trending`, `neglected`.** Activation-only lists, including dangling links, marked as such.
 - [ ] **1.15 `read` and `commit`.** `read` prints the note and logs a `read` event at the current time. It refuses excluded paths, and reading a note that isn't a scored item prints it and logs nothing. `commit` runs the index pass, so its edits are logged at once; it exists in local mode so agents follow the same search, read, edit, commit flow they will use against the server.
 - [ ] **1.16 Output.** Plain text by default: one result per line (path, heading, snippet), stable across runs. `--json` gives full records with score components. Exit codes 0, 1 and 2. Complete `--help` for every command.
+- [ ] **1.16a Roles and `diary`.** Only `memo` files are scored items. A `dated` pattern yields the entry's date from its path, and `search` accepts `--since` and `--until` on it. A changed `source` file is reported, not logged as an edit. `somememos diary` prints today's entry path, creating the file if needed. `somememos init` in an empty directory creates `memos/`, `diary/` and `sources/`.
 - [ ] **1.17 `status` and `export`.** `status` shows note and section counts, events by kind, and the weights in effect. `export` writes `events.jsonl`; a round-trip test imports it into an empty brain and compares scores.
 - [ ] **1.18 Concurrency.** WAL mode and a busy timeout on both databases, so several agents can run commands at once. A test runs parallel `read` commands and checks that no event is lost or folded twice.
 
@@ -72,6 +73,7 @@ Goal: on one machine, Mike indexes his vault, imports its git history, gets usef
   - Search cases from imported git history: for a sampled commit, the query is its message plus any changelog text it added; the answers are the scored notes it changed that already existed. The keyword index is built from the parent commit's tree (`git ls-tree` plus `git cat-file --batch`, in an in-memory database), with no working-tree checkout.
   - Hand-written cases: a JSONL file of `{query, time?, answers}` kept in the brain.
 - [ ] **1.22 `somememos eval`.** Run a named set of parameter settings over the cases and print a table of recall@k and MRR per setting, with a `--json` form. Sampling is seeded so runs repeat. Per-case detail is shown only on request and never written outside the brain.
+- [ ] **1.22a Prepare the vault.** In `mckoss/2nd-brain` (not here), before the first import: rename `wiki/` to `memos/` and rewrite the links and instructions that name it, in one commit; add `.somememos/config.json` with the roles and exclusions; ignore the two database files in git; tidy the stray root-level note and the loose files in `raw/`. Then run `import-git`, ignoring the rename commit.
 - [ ] **1.23 First experiments on Mike's vault.** Run, in this order, and record the aggregate results and chosen defaults in PLAN.md:
   1. Check the search cases. Read a sample of generated cases to see whether they describe their tasks. If they don't, write 30 to 50 cases by hand first.
   2. Baseline: keyword only (`all` mode) vs keyword plus activation.
@@ -93,7 +95,7 @@ Goal: Mike's agents on his main machine use somememos for orientation and readin
 - [ ] **2.1 One-file build.** Bundle the CLI and core into a single JavaScript file that needs only Node. Smoke-test the bundle in CI on a clean Node install.
 - [ ] **2.2 Distribution.** Attach the bundle to a GitHub release and document a one-line install. Decide here whether to also publish to npm.
 - [ ] **2.3 Agent instructions.** A short `AGENTS.md` snippet and a skill, shipped in this repo: `somememos hot` to orient at session start, `somememos search` before grep, `somememos read` in place of `cat`, edit notes with ordinary tools, and `somememos commit` after editing.
-- [ ] **2.4 Amend the vault.** In `mckoss/2nd-brain` (not here): add `.somememos/config.json` with the exclusions, ignore the two database files in git, replace the `rg "^## " logs | tail -40` step, and update the "No RAG pipeline" and Obsidian Sync text.
+- [ ] **2.4 Amend the vault.** In `mckoss/2nd-brain` (not here): replace the `rg "^## " logs | tail -40` step; and update the "No RAG pipeline" and Obsidian Sync text.
 - [ ] **2.5 Back up the event log.** Until the server exists, the log lives on one machine. Schedule `somememos export` to a backed-up location and document it.
 - [ ] **2.6 Dogfood review.** After two weeks of use: is `hot` output the right size and shape for a session start, do agents follow the instructions, and how fast is the CLI in practice? Adjust output and instructions from what the sessions show.
 - [ ] **2.7 Read experiments.** With reads now in the log, measure the read weight on orientation cases, and check whether agent reads make the hot list reinforce itself.

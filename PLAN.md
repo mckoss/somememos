@@ -172,6 +172,22 @@ The event log is the source of truth for all scores.
 
 An existing vault that has lived in git (Mike's has) carries years of history. `somememos import-git` reads that history once and writes it into the event log: an `edit` event for each commit that changed a note, and a `mention` event for each `[[link]]` a commit added, both at the commit's time, following renames. Imported events get ids derived from the commit, so running the import twice adds nothing. After the import, clients have no further use for git. When the vault moves to the server, its repository becomes the brain's version store (section 7).
 
+### Folder roles and the default layout
+
+A brain's config maps **roles** to path patterns. somememos works with whatever a brain declares, and a brain that declares nothing treats every file as a memo.
+
+| Role       | Default folder | Treatment                                                                          |
+|------------|----------------|------------------------------------------------------------------------------------|
+| `memo`     | `memos/`       | A lasting note. Scored and searchable; what `hot`, `trending` and `neglected` show |
+| `dated`    | `diary/`       | An entry for one day, with the date known from the path. Searchable and a source of mentions. Whether dated entries are scored is an experiment |
+| `source`   | `sources/`     | Immutable source material. Searchable; a commit that changes one is refused        |
+| `excluded` | (none)         | Never indexed, logged or shown                                                     |
+
+- **A lasting note is called a memo**, in keeping with the name somememos. (Elsewhere in this plan, "note" means any markdown file in a brain.)
+- **New brains start with `memos/`, `diary/` and `sources/`.** The layout is a default, not a requirement: any brain can map the roles to its own folders.
+- **A dated entry's date is content, not an event time.** It is used to filter and display (for example, "what did I write last week"). The TimeScore event is still dated when the entry was actually written.
+- `somememos diary` prints the path of today's dated entry, creating it if needed, so agents always write to the right place.
+
 ### What does *not* count
 
 - **Search results and activation lists are not events.** Appearing in `search`, `hot`, `trending` or `neglected` output never adds to the log. Counting them would make popular results more popular.
@@ -188,7 +204,7 @@ Every brain is a directory of markdown files plus a `.somememos/` directory:
 my-brain/
   notes...md
   .somememos/
-    config.json     exclusions, half-lives, weights
+    config.json     folder roles, exclusions, half-lives, weights
     events.sqlite   the event log: original data, backed up and synced
     index.sqlite    derived: keyword index, links and scores; safe to delete
 ```
@@ -305,6 +321,7 @@ somememos hot | trending | neglected list notes by activation only
 somememos read <path>                place the note in the working folder, print it, log a read event
 somememos commit [paths]             send edited notes to the brain and log the edits
 somememos status                     edited notes not yet committed; counts; config in effect
+somememos diary                      print the path of today's dated entry, creating it if needed
 somememos index [--rebuild]          update the derived index and scores (local mode)
 somememos import-git                 one-time: write a vault's git history into the event log
 somememos export                     write the event log as events.jsonl
@@ -434,9 +451,10 @@ Each milestone should leave something usable. [IMPLEMENTATION.md](IMPLEMENTATION
 
 ## 11. Dogfooding on Mike's vault
 
-- The vault is `mckoss/2nd-brain`: wiki notes in `wiki/`, daily diaries in `diary/YYYY/MM/YYYY-MM-DD.md`, changelogs in `logs/YYYY/MM/YYYY-MM-DD.md`, immutable sources in `raw/`. Its `AGENTS.md` describes the conventions.
+- The vault is `mckoss/2nd-brain`: lasting notes in `wiki/`, daily diaries in `diary/YYYY/MM/YYYY-MM-DD.md`, changelogs in `logs/YYYY/MM/YYYY-MM-DD.md`, immutable sources in `raw/`. Its `AGENTS.md` describes the conventions.
+- **`wiki/` will be renamed `memos/`** (decided 2026-11-27), before the git history is imported. The rename rewrites links in most files, so the import must not count that one commit as an edit to every memo. The topic folders inside it (`people/`, `projects/` and so on) stay as they are, and `raw/` keeps its name, mapped to the `source` role in config.
 - **Must be excluded from indexing and scoring:** `personal.encrypted/` (git-crypt-encrypted private notes) and `personal/` (legacy, local only). Their names must never appear in the event log, the index or any output.
-- Likely scored items: `wiki/**` notes. Diaries and logs are mainly *sources of mention events*, not items to surface.
+- Roles for the vault: `memos/**` is `memo`; `diary/**`, `todo/**` and `logs/**` are `dated`; `raw/**` is `source`. Diaries and logs are mainly *sources of mention events*, not items to surface.
 - The vault's `AGENTS.md` currently says "No RAG pipeline" and still describes Obsidian Sync. It will need a deliberate amendment once somememos is in use. Make that change in the vault, not here.
 
 - The vault lives in git today. Its history is imported once with `somememos import-git`. From milestone 3 the server holds the vault, and git stops being how it moves between machines.
@@ -446,7 +464,7 @@ Each milestone should leave something usable. [IMPLEMENTATION.md](IMPLEMENTATION
 
 Settled on 2026-11-27, and removed from this list: the primary purpose (agent memory), dangling links (in from M1), the look-ahead channel (events are dated by interaction, so calendar dates are just content), how scoring choices get made (by experiment), raw activity (an event log is kept), and git (the server's version store, one repository per brain, with no git interface exposed).
 
-1. **Evaluation queries.** Are the vault's changelog entries and commit messages descriptive enough to serve as search cases, or is a hand-written case file needed from the start?
+1. **Evaluation queries.** Partly answered by reading the vault's logs on 2026-11-27: the `ingest` entries and the wiki `update` entries make good search cases, but the nightly diary entries and the older untimed headings don't. Expect 50 to 100 usable cases, so a small hand-written case file is still needed. How many is enough?
 2. **Ranking parameters, all to be answered by experiment:** per-kind weights, `α`, half-lives per mode, how bursts of edits count, heading vs body weight, link spreading (whether, which direction, how strong), and section-level vs note-level scoring.
 3. **The read feedback loop.** Does counting agent reads make the hot list reinforce itself, and does the read weight need a guard?
 4. **Semantic search.** No embeddings for now. Revisit only if experiments show keyword search missing notes that rephrasing doesn't find. If added, it is one more ranking signal (for example with sqlite-vec), with section-level vectors.
@@ -457,3 +475,4 @@ Settled on 2026-11-27, and removed from this list: the primary purpose (agent me
 9. **Conflict handling.** After the first "keep both" version, a three-way merge or a CRDT?
 10. **Event log retention for hosted users** (milestone 5).
 11. **Forgotten commits.** The client reminds the agent about edited files that were never committed. Should it commit them itself instead? That saves work lost at the end of a session, but can store half-finished edits.
+12. **A server-side change log (proposed, not yet confirmed by Mike).** Today agents write a changelog file by hand for every change. Instead, `somememos commit -m "<op> <summary>"` would carry the reason, the server would store it with the git commit and add the time and the list of changed notes itself, and `somememos log` would show it, hiding routine diary and todo maintenance by default. `logs/` would stop growing at milestone 3. A read of the vault's 160 log files supports this: each entry is already a subject line plus per-file reasons, most of its content is a list of changed files the server would know, and recent logs are mostly nightly diary boilerplate.
