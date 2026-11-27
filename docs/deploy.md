@@ -1,6 +1,6 @@
 # Deploying the somememos server
 
-The server is the SvelteKit app in `apps/web`, built with `adapter-node`. One process serves the offline web app and the API under `/api`. These notes are for Railway (PLAN.md section 9), but nothing in them is Railway-only: any host that runs a container, gives it a Postgres database and a persistent disk will do. Nothing here has been deployed yet.
+The server is the SvelteKit app in `apps/web`, built with `adapter-node`. One process serves the offline web app and the API under `/api`. These notes are for Railway (PLAN.md section 9), but nothing in them is Railway-only: any host that runs a container, gives it a Postgres database and a persistent disk will do. The project's own server runs this way at https://web-production-04386931.up.railway.app (first deployed 2026-11-27, v0.6.2).
 
 ## What the server stores, and where
 
@@ -18,7 +18,12 @@ The server is the SvelteKit app in `apps/web`, built with `adapter-node`. One pr
 6. **Health check.** `GET /api/health` (no token). It answers 200 with `{ version, status: "ok", database: { configured, connected, migration: { current, expected } } }` (or `database: { configured: false }` when `DATABASE_URL` is unset, since the web app still works), and 503 when the database is unreachable, migrations are pending, or the configuration is invalid (with the problems listed). A deploy whose configuration is wrong therefore fails its health check instead of going live.
 7. **Create a brain.** `curl -X POST https://<domain>/api/brains -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' -d '{"id":"main"}'`. Pass `"config": { "roles": { ... } }` to use folder roles other than the default layout; clients must use the same roles.
 
-Do not use the Railway CLI for any of this; the dashboard is enough, and GitHub pushes trigger deploys.
+8. **Domain port.** Railway sets `PORT` itself (8080 on the first deploy), overriding the Dockerfile's 3000. A generated domain must target the port the start log reports (`Listening on http://0.0.0.0:<port>`), or it answers 502 while the health check passes.
+9. **Deploy after CI.** In the service's settings, connect the repository's `main` branch and turn on **Wait for CI**. A push to `main` then deploys only once its GitHub Actions run has passed; a failed run deploys nothing.
+
+Do not use the Railway CLI for any of this; the dashboard (or Railway's API) is enough, and GitHub is the control plane: merging to `main` is how a release ships. After a merge, check that `/api/health` reports the new version before calling it live.
+
+The Postgres service runs the Postgres 16 image (`ghcr.io/railwayapp-templates/postgres-ssl:16`), the version CI tests against.
 
 ## Variables
 

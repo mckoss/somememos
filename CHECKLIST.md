@@ -29,7 +29,7 @@ Status key: `[x]` merged to `main` with CI green, `[~]` in progress, `[ ]` not s
 - [x] Server: one git repository per brain, sync API, engine over HTTP, note history and restore
 - [x] Sync in the web app (v0.5.0)
 - [x] Single-user access token, with a seam for real sign-in
-- [!] Deploy to Railway (needs Mike: see QUESTIONS.md). Dockerfile, railway.json and docs/deploy.md are written; the image has not been built, because this environment has no Docker daemon
+- [x] Deploy to Railway (v0.6.2, 2026-11-27): project `somememos` with Postgres 16 and a volume at `/data`; deploys from `main` after CI passes; health check verified. No brain has been created on the server yet
 
 ## Agents (milestone 4)
 
