@@ -460,9 +460,9 @@ Set `SOMEMEMOS_DEBUG=1` for stack traces.
 
 | Preset | Compares |
 |---|---|
-| `baseline` (default) | keywords only (mode all) against keywords plus activation (mode hot) |
+| `baseline` (default with search cases) | keywords only (mode all) against keywords plus activation (mode hot) |
 | `weights` | the mention weight (edit = 1) and α |
-| `half-lives` | which half-life drives hot: day, week, month or year |
+| `half-lives` (default without search cases) | which half-life drives hot: day, week, month or year |
 | `bursts` | the burst window: off, 10 minutes, 1 hour, 1 day |
 | `keyword` | BM25F's k1, the title weight and body length normalization |
 | `spreading` | spreading activation along links, in several directions and strengths |
@@ -490,7 +490,7 @@ mode=hot  0.686  0.886  0.886  0.886  0.781     35        0
 
 `R@10` is recall at 10: the share of right answers that appear in the top ten, averaged over cases. `MRR` is the mean reciprocal rank: 1 divided by the position of the first right answer (1.0 when it is first, 0.5 when second), averaged. Higher is better for both. Differences of a couple of hundredths are noise on a brain this size.
 
-Orientation cases have no keywords, so `mode=all` and `mode=hot` rank them identically and the two orientation rows always match; compare settings on the search table, or use a preset such as `half-lives` for orientation:
+Orientation cases have no keywords, so `mode=all` and `mode=hot` rank them identically and the two orientation rows always match; compare settings on the search table, or use a preset such as `half-lives` for orientation. Plain `somememos eval`, with no `--cases` or `--from-git`, has only orientation cases, so it compares `half-lives` instead of `baseline` and prints a note saying so; `--preset baseline` without search cases prints a note that its rows cannot differ:
 
 ```
 $ somememos eval --preset half-lives --window 1d
