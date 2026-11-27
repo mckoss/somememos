@@ -248,11 +248,31 @@ CREATE TABLE burst_last (
 ALTER TABLE links ADD COLUMN display text;  -- a dangling link's text as written; otherwise NULL
 `;
 
+// A brain's public blog (PLAN.md section 8, "Publishing a blog"; served by
+// packages/server/src/blog.ts): off until the owner turns it on, under a
+// public slug unique across the server (never the brain id). Only settings
+// live here: which posts are public is read from the brain's repository at
+// its recorded commit, so there is nothing derived to keep in step.
+const BLOG = `
+CREATE TABLE server_blogs (
+  brain_id    text COLLATE "C" PRIMARY KEY REFERENCES server_brains ON DELETE CASCADE,
+  enabled     boolean NOT NULL DEFAULT false,
+  slug        text COLLATE "C" UNIQUE,      -- NULL until chosen; required to enable
+  title       text,                         -- required to enable
+  description text,
+  author      text,
+  language    text NOT NULL DEFAULT 'en',
+  updated_at  bigint NOT NULL,              -- Unix seconds
+  CHECK (NOT enabled OR (slug IS NOT NULL AND title IS NOT NULL))
+);
+`;
+
 /** Every migration, in order. Append only. */
 export const MIGRATIONS: readonly Migration[] = [
   { version: 1, name: 'initial', sql: INITIAL },
   { version: 2, name: 'server', sql: SERVER },
   { version: 3, name: 'burst-and-display', sql: BURST_AND_DISPLAY },
+  { version: 4, name: 'blog', sql: BLOG },
 ];
 
 /** The derived tables of a brain, in an order safe to delete from. */
