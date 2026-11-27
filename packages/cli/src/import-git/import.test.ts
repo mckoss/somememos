@@ -635,6 +635,26 @@ describe('importGitHistory on hand-built repositories', () => {
     ]);
   });
 
+  it('ignores attachment links and embeds, as the live pass does', async () => {
+    const dir = tempDir();
+    git(dir, ['init', '--quiet', '--initial-branch=main']);
+    write(dir, 'memos/node.js.md', '# Node\n');
+    write(
+      dir,
+      'memos/album.md',
+      '# Album\n\n![[photo.png]] [[scan.pdf|scan]] [[node.js]] [[v1.2]]\n',
+    );
+    commitAll(dir, T0, 'ingest album');
+    const config = writeConfig(dir);
+    const { entries } = await importRepo(dir, config);
+    expect(summary(entries)).toEqual([
+      '0 edit memos/album.md',
+      '0 edit memos/node.js.md',
+      '0 mention memos/node.js.md',
+      '0 mention v1.2',
+    ]);
+  });
+
   it('fails clearly outside a git repository and for an unknown --ignore-commit', async () => {
     const dir = tempDir();
     const config = writeConfig(dir);

@@ -1,5 +1,6 @@
 // The storage conformance suite. Every implementation of the storage
-// interfaces runs it: memory (core), SQLite (cli), and Postgres (M3).
+// interfaces runs it: memory (core), SQLite (@somememos/sqlite-store, with the
+// node:sqlite driver now and the WebAssembly driver in a browser), and Postgres (M3).
 //
 //   import { describeStorageConformance } from '@somememos/core/testing/storage';
 //   describeStorageConformance('sqlite', () => harness);

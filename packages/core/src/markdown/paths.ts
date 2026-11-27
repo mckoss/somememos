@@ -41,3 +41,20 @@ export function normalizePath(path: string): string | null {
   }
   return out.join('/');
 }
+
+const FILE_EXTENSION = /\.([A-Za-z0-9]{1,10})$/;
+
+/**
+ * True when the last segment of a link target ends in a file extension other
+ * than `.md` (`photo.png`, `scan.PDF`, `diagram.excalidraw`): a link or embed
+ * of an attachment, not of a note. An extension needs at least one letter, so
+ * `v1.2` is not one. The indexer ignores such a target unless it resolves to
+ * an existing note (`[[node.js]]` with a note `node.js.md`).
+ */
+export function hasNonMarkdownExtension(target: string): boolean {
+  const last = baseName(target.trim());
+  const m = FILE_EXTENSION.exec(last);
+  if (!m || m.index === 0) return false;
+  const ext = (m[1] as string).toLowerCase();
+  return ext !== 'md' && /[a-z]/.test(ext);
+}

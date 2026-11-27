@@ -83,3 +83,15 @@ export {
   parseBrainConfig,
   serializeBrainConfig,
 } from './config.js';
+export {
+  type ContentEntry,
+  type ContentStore,
+  type ContentWriteOptions,
+  type MemoryContentStore,
+  type MemoryContentStoreOptions,
+  contentFingerprint,
+  contentHash,
+  createMemoryContentStore,
+  sha256Hex,
+  utf8Length,
+} from './content.js';

@@ -1,14 +1,18 @@
-// The SQLite schema of an offline client's two files (PLAN.md section 4,
+// The SQLite schema of an offline client's two databases (PLAN.md section 4,
 // "Sidecar layout" and "SQLite schema"). Plain tables and ordinary SQL only,
 // so a Postgres implementation can mirror it (with a brain id on every row).
 //
-// - `events.sqlite`: original data. A schema version it doesn't know is an
-//   error (`MigrationRequiredError`); nothing in it is ever dropped.
-// - `index.sqlite`: derived data. A schema version it doesn't know means its
-//   tables are dropped and recreated empty, to be rebuilt.
+// - The original-data database (`events.sqlite` in the CLI): the event log,
+//   change records, durable meta and, in a host that keeps note text in
+//   SQLite (the web app), the `content` table. A schema version it doesn't
+//   know is an error (`MigrationRequiredError`); nothing in it is ever
+//   dropped.
+// - The derived database (`index.sqlite` in the CLI). A schema version it
+//   doesn't know means its tables are dropped and recreated empty, to be
+//   rebuilt.
 
 import { storage } from '@somememos/core';
-import type { Database } from '../sqlite/database.js';
+import type { Db } from './db.js';
 
 /** Bump when `events.sqlite` changes shape; add a migration from every older version. */
 export const EVENTS_SCHEMA_VERSION = 1;
@@ -134,7 +138,7 @@ CREATE TABLE scores (
 /** The tables of the index file, in an order safe to delete from. */
 export const INDEX_TABLES = ['postings', 'sections', 'links', 'notes', 'scores', 'user_meta'];
 
-function userTables(db: Database): string[] {
+function userTables(db: Db): string[] {
   return db
     .all<{ name: string }>(
       `SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%'`,
@@ -142,7 +146,7 @@ function userTables(db: Database): string[] {
     .map((r) => r.name);
 }
 
-function schemaVersion(db: Database): string | undefined {
+function schemaVersion(db: Db): string | undefined {
   return db.get<{ value: string }>(`SELECT value FROM meta WHERE key = :key`, {
     key: SCHEMA_VERSION_KEY,
   })?.value;
@@ -153,7 +157,7 @@ function schemaVersion(db: Database): string | undefined {
  * existing one. Throws `MigrationRequiredError`, changing nothing, for a file
  * with another schema version or one that is not a somememos event log.
  */
-export function ensureEventsSchema(db: Database): void {
+export function ensureEventsSchema(db: Db): void {
   db.transaction(() => {
     const tables = userTables(db);
     if (tables.length === 0) {
@@ -184,7 +188,7 @@ export function ensureEventsSchema(db: Database): void {
  * no) schema version is derived data: its tables are dropped and recreated
  * empty. Returns true when the file was (re)created.
  */
-export function ensureIndexSchema(db: Database): boolean {
+export function ensureIndexSchema(db: Db): boolean {
   return db.transaction(() => {
     const tables = userTables(db);
     if (tables.length > 0) {
@@ -201,22 +205,24 @@ export function ensureIndexSchema(db: Database): boolean {
   });
 }
 
-let savepointCounter = 0;
-
 /**
- * Runs `fn` atomically: in a new transaction, or in a savepoint when one is
- * already open on this connection (for example inside `indexTransaction`).
+ * Note text, for hosts whose `ContentStore` is a table (`SqliteContentStore`).
+ * Optional within event schema version 1: created on first use, beside the
+ * event log, because the text is original data. The CLI keeps text in files
+ * and never creates it.
  */
-export function atomic<T>(db: Database, fn: () => T): T {
-  if (!db.raw.isTransaction) return db.transaction(() => fn());
-  const name = `somememos_${++savepointCounter}`;
-  db.exec(`SAVEPOINT ${name}`);
-  try {
-    const result = fn();
-    db.exec(`RELEASE ${name}`);
-    return result;
-  } catch (error) {
-    if (db.raw.isOpen && db.raw.isTransaction) db.exec(`ROLLBACK TO ${name}; RELEASE ${name}`);
-    throw error;
-  }
+const CONTENT_SCHEMA = `
+CREATE TABLE IF NOT EXISTS content (
+  path  TEXT PRIMARY KEY,   -- brain-relative, '/' separators
+  text  TEXT NOT NULL,      -- byte for byte what was saved
+  size  INTEGER NOT NULL,   -- UTF-8 bytes
+  mtime INTEGER NOT NULL,   -- Unix seconds
+  hash  TEXT NOT NULL       -- storage.contentHash(text)
+) WITHOUT ROWID;
+`;
+
+/** Ensures the event log's schema (see `ensureEventsSchema`) and the `content` table. */
+export function ensureContentSchema(db: Db): void {
+  ensureEventsSchema(db);
+  db.transaction(() => db.exec(CONTENT_SCHEMA));
 }

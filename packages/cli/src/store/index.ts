@@ -19,4 +19,3 @@ export {
   loadBrainConfig,
   writeDefaultConfig,
 } from './config.js';
-export { EVENTS_SCHEMA_VERSION, INDEX_SCHEMA_VERSION } from './schema.js';

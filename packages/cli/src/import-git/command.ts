@@ -1,9 +1,15 @@
 // `somememos import-git`: the command around `importGitHistory`.
 
 import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { parseArgs } from 'node:util';
 import { storage } from '@somememos/core';
+import {
+  GLOBAL_OPTIONS_HELP,
+  brainOptions,
+  findBrainRoot,
+  parseCommandArgs,
+  printJson,
+  withBrain,
+} from '../brain/index.js';
 import type { Command } from '../commands/types.js';
 import { EXIT_OK, UsageError, type Context } from '../context.js';
 import { brainPaths, loadBrainConfig, openBrainStores, type BrainStores } from '../store/index.js';
@@ -24,22 +30,56 @@ The import stops where live indexing began (the time the brain was first
 indexed, when recorded), so no change is counted twice. Scores are folded
 afterwards.
 
+Like other commands, it first runs the index pass (unless --no-index or
+--dry-run); on a brain never indexed, that pass is the baseline, and the
+import stops just before it.
+
 Options:
-  --brain <dir>            The brain's directory (default: the current directory)
   --ignore-commit <commit> Skip this commit's events and change record, but still
                            follow its renames. For mass rewrites, such as a folder
                            rename that rewrote links in every note. Repeatable.
   --until <date|commit>    Stop at this point: a date (YYYY-MM-DD, the whole day
                            in UTC, or an ISO date-time), @<unix seconds>, or a commit
-  --dry-run                Count what would be imported; write nothing
-  --json                   Print the summary as JSON
-  -h, --help               Show this help
+  --dry-run                Count what would be imported; write nothing (and
+                           skip the index pass)
+
+${GLOBAL_OPTIONS_HELP}
 
 Output lists counts only, never note paths.
 
 Example:
   somememos import-git --brain ~/vault --ignore-commit 3f2a9c1 --dry-run
 `;
+
+/** Imports into open stores, then folds: what the command does after its index pass. */
+async function importAndFold(options: {
+  readonly brainDir: string;
+  readonly config: storage.BrainConfig;
+  readonly stores: BrainStores | null;
+  readonly dryRun: boolean;
+  readonly ignoreCommits?: readonly string[];
+  readonly until?: string;
+  readonly now?: number;
+}): Promise<ImportGitCommandResult> {
+  const { stores, dryRun } = options;
+  const result = await importGitHistory({
+    brainDir: options.brainDir,
+    config: options.config,
+    stores,
+    dryRun,
+    ...(options.ignoreCommits ? { ignoreCommits: options.ignoreCommits } : {}),
+    ...(options.until !== undefined ? { until: options.until } : {}),
+    ...(options.now !== undefined ? { now: options.now } : {}),
+  });
+  let folded: ImportGitCommandResult['folded'] = null;
+  if (!dryRun && stores) {
+    const f = await storage.foldPending(stores.events, stores.scores, {
+      halfLives: options.config.halfLives,
+    });
+    folded = { events: f.events, renames: f.renames };
+  }
+  return { ...result, folded };
+}
 
 export interface ImportGitCommandResult extends ImportGitResult {
   /** Events and renames folded into scores afterwards; null for a dry run. */
@@ -71,7 +111,10 @@ function openBrain(brainDir: string, dryRun: boolean): OpenedBrain {
   };
 }
 
-/** Runs the import and the fold, as the command does, and returns the summary. */
+/**
+ * Runs the import and the fold on the brain at `brainDir` (no index pass),
+ * and returns the summary. A dry run opens the stores only if they exist.
+ */
 export async function runImportGit(options: {
   readonly brainDir: string;
   readonly ignoreCommits?: readonly string[];
@@ -82,23 +125,7 @@ export async function runImportGit(options: {
   const dryRun = options.dryRun ?? false;
   const brain = openBrain(options.brainDir, dryRun);
   try {
-    const result = await importGitHistory({
-      brainDir: options.brainDir,
-      config: brain.config,
-      stores: brain.stores,
-      dryRun,
-      ...(options.ignoreCommits ? { ignoreCommits: options.ignoreCommits } : {}),
-      ...(options.until !== undefined ? { until: options.until } : {}),
-      ...(options.now !== undefined ? { now: options.now } : {}),
-    });
-    let folded: ImportGitCommandResult['folded'] = null;
-    if (!dryRun && brain.stores) {
-      const f = await storage.foldPending(brain.stores.events, brain.stores.scores, {
-        halfLives: brain.config.halfLives,
-      });
-      folded = { events: f.events, renames: f.renames };
-    }
-    return { ...result, folded };
+    return await importAndFold({ ...options, config: brain.config, stores: brain.stores, dryRun });
   } finally {
     await brain.close();
   }
@@ -154,33 +181,47 @@ export const importGitCommand: Command = {
   summary: 'Import the brain’s git history into the event log, once',
   usage: USAGE,
   async run(args: string[], ctx: Context): Promise<number> {
-    const { values, positionals } = parseArgs({
+    const { values, positionals, globals } = parseCommandArgs(
       args,
-      options: {
-        brain: { type: 'string' },
+      {
         'ignore-commit': { type: 'string', multiple: true },
         until: { type: 'string' },
         'dry-run': { type: 'boolean' },
-        json: { type: 'boolean' },
-        help: { type: 'boolean', short: 'h' },
       },
-      strict: true,
-      allowPositionals: true,
-    });
-    if (values.help) {
+      { allowPositionals: true },
+    );
+    if (globals.help) {
       ctx.stdout(USAGE);
       return EXIT_OK;
     }
     if (positionals.length > 0) throw new UsageError(`unexpected argument '${positionals[0]}'`);
     if (values.until === '') throw new UsageError('--until needs a date or a commit');
-
-    const result = await runImportGit({
-      brainDir: resolve(ctx.cwd, values.brain ?? '.'),
+    const dryRun = values['dry-run'] ?? false;
+    const common = {
       ignoreCommits: values['ignore-commit'] ?? [],
-      dryRun: values['dry-run'] ?? false,
+      dryRun,
       ...(values.until !== undefined ? { until: values.until } : {}),
-    });
-    ctx.stdout(values.json ? `${JSON.stringify(result, null, 2)}\n` : formatSummary(result));
-    return EXIT_OK;
+    };
+    const print = (result: ImportGitCommandResult): number => {
+      if (globals.json) printJson(ctx, result);
+      else ctx.stdout(formatSummary(result));
+      return EXIT_OK;
+    };
+
+    if (dryRun) {
+      // Writes nothing: no index pass, and stores are opened only if they exist.
+      const brainDir = findBrainRoot(ctx, globals.brain);
+      return print(await runImportGit({ brainDir, ...common }));
+    }
+    return withBrain(ctx, brainOptions(globals), async (brain) =>
+      print(
+        await importAndFold({
+          brainDir: brain.root,
+          config: brain.config,
+          stores: brain.stores,
+          ...common,
+        }),
+      ),
+    );
   },
 };

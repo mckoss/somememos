@@ -10,11 +10,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { storage } from '@somememos/core';
 import { expectScoresClose } from '@somememos/core/testing/storage';
 import { afterEach, beforeEach, expect, it } from 'vitest';
-import { openBrainStores } from './open.js';
+import { openSqliteFiles } from './files.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const cliRoot = join(here, '..', '..');
+const packageRoot = join(here, '..', '..');
 const storeUrl = pathToFileURL(join(here, 'index.ts')).href;
+
+const openBrainStores = (dir: string) =>
+  openSqliteFiles({ eventsPath: join(dir, 'events.sqlite'), indexPath: join(dir, 'index.sqlite') });
 
 // Lets a plain `node` child load this package's TypeScript source: imports
 // written as `./x.js` resolve to `./x.ts`.
@@ -36,11 +39,12 @@ registerHooks({
 
 const WORKER = `
 const [brainDir, worker, rounds, perRound] = process.argv.slice(1);
-const { openBrainStores } = await import(${JSON.stringify(storeUrl)});
+const { openSqliteFiles } = await import(${JSON.stringify(storeUrl)});
+const { join } = await import('node:path');
 const { storage } = await import('@somememos/core');
 const items = ['memos/a.md', 'memos/b.md', 'memos/c.md', 'some key'];
 const now = Math.floor(Date.now() / 1000);
-const stores = openBrainStores(brainDir);
+const stores = openSqliteFiles({ eventsPath: join(brainDir, 'events.sqlite'), indexPath: join(brainDir, 'index.sqlite') });
 let appended = 0;
 let conflicts = 0;
 for (let r = 0; r < Number(rounds); r++) {
@@ -79,7 +83,7 @@ function runWorker(
         '--',
         ...args,
       ],
-      { cwd: cliRoot, stdio: ['ignore', 'pipe', 'pipe'] },
+      { cwd: packageRoot, stdio: ['ignore', 'pipe', 'pipe'] },
     );
     let stdout = '';
     let stderr = '';

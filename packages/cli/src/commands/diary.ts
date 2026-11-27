@@ -1,8 +1,7 @@
 // `somememos diary [--date YYYY-MM-DD]`: the path of a day's dated entry, created if missing.
 
-import { mkdirSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { markdown } from '@somememos/core';
+import { join } from 'node:path';
+import { engine, markdown } from '@somememos/core';
 import {
   CommandError,
   GLOBAL_OPTIONS_HELP,
@@ -39,11 +38,7 @@ Examples:
 `;
 
 /** The local calendar date of a Unix time, `YYYY-MM-DD`. */
-export function localDate(unixSeconds: number): string {
-  const d = new Date(unixSeconds * 1000);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
+export const localDate = engine.localDate;
 
 export interface DiaryRecord {
   path: string;
@@ -66,36 +61,23 @@ export const diaryCommand: Command = {
       throw new UsageError(`--date must be a calendar date like 2026-01-31, not '${values.date}'`);
     }
     return withBrain(ctx, brainOptions(globals), async (brain) => {
-      const pattern = brain.classifier.datedPatterns[0];
-      if (pattern === undefined) {
-        throw new CommandError(
-          `this brain declares no dated pattern; add one to "roles" in ${SIDECAR_DIR}/config.json, e.g. "dated": ["diary/{YYYY}/{MM}/{YYYY}-{MM}-{DD}.md"]`,
-        );
-      }
-      const date = values.date ?? localDate(brain.now());
-      let path: string;
+      let entry: engine.DiaryEntry;
       try {
-        path = markdown.renderDatedPath(pattern, date);
+        entry = await brain.engine.ensureDiary(values.date);
       } catch (error) {
-        throw new CommandError(
-          `the first dated pattern '${pattern}' cannot name an entry: ${(error as Error).message}`,
-        );
+        if (engine.isEngineError(error) && error.code === 'no-dated-pattern') {
+          throw new CommandError(
+            error.message.replace('in its config', `in ${SIDECAR_DIR}/config.json`),
+          );
+        }
+        throw error;
       }
-      if (brain.classifier.classify(path)?.role !== 'dated') {
-        throw new CommandError(
-          `the first dated pattern '${pattern}' names a path whose role is not dated; check the roles in ${SIDECAR_DIR}/config.json`,
-        );
-      }
-      const file = join(brain.root, path);
-      let created = false;
-      try {
-        mkdirSync(dirname(file), { recursive: true });
-        writeFileSync(file, `# ${date}\n`, { flag: 'wx' });
-        created = true;
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error;
-      }
-      const record: DiaryRecord = { path, file, date, created };
+      const record: DiaryRecord = {
+        path: entry.path,
+        file: join(brain.root, entry.path),
+        date: entry.date,
+        created: entry.created,
+      };
       emit(ctx, globals.json, record, (r) => brain.displayPath(r.path));
       return EXIT_OK;
     });

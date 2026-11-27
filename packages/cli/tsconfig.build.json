@@ -7,5 +7,7 @@
     "rootDir": "src",
     "outDir": "dist"
   },
-  "exclude": ["src/**/*.test.ts"]
+  // Tests and the test-only synthetic brain helpers (src/testing/) stay out of
+  // the build.
+  "exclude": ["src/**/*.test.ts", "src/testing/**"]
 }

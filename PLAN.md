@@ -194,6 +194,17 @@ Implemented in `packages/core/src/storage` (interfaces, folding, an in-memory re
 - Folding is safe when several processes run at once: a fold that loses the race is recomputed, never double-counted.
 - Every implementation must pass one shared conformance test suite, which the Postgres implementation will also run.
 
+### One engine for every host
+
+The CLI, the web app and the server all run the same code (restructured 2026-11-27):
+
+- **`packages/core/src/engine`** is the single interface a host calls: index, search, list, read a note, save, rename, delete, commit, show the change log, status, and export or import the log. Calls are serialized. Results are plain data that can cross a worker or network boundary, and a refused request raises a typed error that never names an excluded path.
+- **`packages/core/src/indexing`** holds every rule about how a changed note becomes index entries and events.
+- **A content store** is where note text lives: files on disk for the CLI, a table beside the event log for the browser. A note's content hash is the SHA-256 of its UTF-8 text.
+- **`packages/sqlite-store`** is the one SQLite implementation of storage, written against a small synchronous driver interface. `node:sqlite` is one driver; SQLite compiled for the browser is another.
+- **Saving through the engine carries the hash the edit was based on.** If the stored note has changed since, the save is refused and the current text is returned to merge against. This is the same check sync will use.
+- A link or embed of a file that isn't markdown (for example `![[photo.png]]`) is ignored unless it resolves to a note.
+
 ### One-time import from git
 
 An existing vault that has lived in git (Mike's has) carries years of history. `somememos import-git` reads that history once and writes it into the event log: an `edit` event for each commit that changed a note, and a `mention` event for each `[[link]]` a commit added, both at the commit's time, following renames. Imported events get ids derived from the commit, so running the import twice adds nothing. After the import, clients have no further use for git. When the vault moves to the server, its repository becomes the brain's version store (section 7).
@@ -207,10 +218,11 @@ A brain's config maps **roles** to path patterns. somememos works with whatever 
 | `memo`     | `memos/`       | A lasting note. Scored and searchable; what `hot`, `trending` and `neglected` show |
 | `dated`    | `diary/`       | An entry for one day, with the date known from the path. Searchable and a source of mentions. Whether dated entries are scored is an experiment |
 | `source`   | `sources/`     | Immutable source material. Searchable; a commit that changes one is refused        |
+| `blog`     | `blog/`        | A dated post the owner can publish on the somememos website (section 8). Scored and searchable like a memo, with its date known from the path |
 | `excluded` | (none)         | Never indexed, logged or shown                                                     |
 
 - **A lasting note is called a memo**, in keeping with the name somememos. (Elsewhere in this plan, "note" means any markdown file in a brain.)
-- **New brains start with `memos/`, `diary/` and `sources/`.** The layout is a default, not a requirement: any brain can map the roles to its own folders.
+- **New brains start with `memos/`, `diary/`, `blog/` and `sources/`.** The layout is a default, not a requirement: any brain can map the roles to its own folders.
 - **A dated entry's date is content, not an event time.** It is used to filter and display (for example, "what did I write last week"). The TimeScore event is still dated when the entry was actually written.
 - `somememos diary` prints the path of today's dated entry, creating it if needed, so agents always write to the right place.
 
@@ -477,6 +489,20 @@ Git is an internal detail of the server. Clients send and receive whole notes wi
 - **Export:** the user's markdown plus the event log (`events.jsonl`).
 - **Event log retention.** A person's reading history is sensitive. Decide at milestone 5 how long the hosted service keeps it and what control the user gets.
 
+### Publishing a blog
+
+Decided 2026-11-27: a brain has a `blog/` folder of dated posts that its owner can publish directly on the somememos website.
+
+- **A post is an ordinary note** in `blog/`, with its date in the path (for example `blog/2026/2026-11-27-why-memos.md`). It is written, edited, searched and scored like any memo, in the same editor, online or offline.
+- **A post is public only when its front matter says `published: true`** (decided 2026-11-27). Anything else in the blog folder is a draft and stays private, so a half-written post can't go public by accident. Removing the line, or setting it to `false`, takes the post down.
+- **The editor has a publish control for blog posts.** When the open note is in the blog folder, the editor shows whether it is a draft or published, and a control that publishes or unpublishes it. The control only writes or removes the `published: true` line in the front matter, which the person can also type by hand, so the markdown stays the single record of the post's state. Publishing asks for confirmation, since it makes the post public. Until the post has synced, the editor says it is waiting to be published.
+- **Publishing happens on the server**, when the post syncs. The site serves the rendered post at a public address under the owner's name, with an index of posts and a feed.
+- **It is the one public part of an otherwise private brain, so the boundary has to be strict:**
+  - Only files in the blog folder can ever be public. Nothing else in a brain is reachable from a public page.
+  - A `[[link]]` from a post to another published post becomes a normal link. A link to anything private is shown as plain text and exposes neither the note's content nor its path. An embed of a private note is never inlined.
+  - Public page views are not events and never change a score.
+- **To settle before building:** the address scheme, images and other attachments in posts, a custom domain, and whether an unpublished post leaves any public trace.
+
 ## 9. Technical stack
 
 Decided by Mike on 2026-11-26:
@@ -517,7 +543,7 @@ Each milestone should leave something usable. [IMPLEMENTATION.md](IMPLEMENTATION
 - **M2 — Web app, local first.** The installable PWA of section 6, working entirely on data in the browser: editor with live preview, search with score breakdowns, activation views, backlinks and folder import, on phone and desktop. Done when Mike can import his vault into the app and use it offline in place of Obsidian for reading, searching and editing.
 - **M3 — Server and sync.** A SvelteKit server on Railway with Postgres and one git repository per brain; the app and an optional `somememos clone` sync with it by mutation counter; single-user sign-in. Done when the same brain stays in step across a phone and a desktop.
 - **M4 — Agents everywhere.** A one-file CLI build with remote mode (`search`, `read` and `commit` as requests to the server, with a working folder), the `AGENTS.md` snippet and skill, and the vault's instructions amended. Done when Mike's agents on any machine, including disposable cloud sessions, use the brain with only the CLI and a credential, and record their reasons with `somememos commit -m`.
-- **M5 — Hosted multi-user and MCP.** Accounts, per-user storage, remote MCP with authentication plus local stdio MCP, privacy policy, event log retention, and export. Launch at the somememos domain.
+- **M5 — Hosted multi-user and MCP.** Accounts, per-user storage, published blogs (section 8), remote MCP with authentication plus local stdio MCP, privacy policy, event log retention, and export. Launch at the somememos domain.
 
 ## 11. Dogfooding on Mike's vault
 

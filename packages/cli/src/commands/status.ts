@@ -10,7 +10,7 @@ import {
   withBrain,
 } from '../brain/index.js';
 import { EXIT_OK } from '../context.js';
-import { type IndexSummary, firstIndexedAt, readUncommitted } from '../indexer/index.js';
+import type { IndexSummary } from '../indexer/index.js';
 import type { Command } from './types.js';
 
 const usage = `Usage: somememos status
@@ -102,33 +102,15 @@ export const statusCommand: Command = {
       ctx.stdout(usage);
       return EXIT_OK;
     }
-    return withBrain(ctx, brainOptions(globals), async (brain) => {
-      const { stores, config } = brain;
-      const notes = await stores.notes.listNotes();
-      const byRole = { memo: 0, dated: 0, source: 0 };
-      for (const n of notes) byRole[n.role]++;
+    return withBrain(ctx, brainOptions(globals, { remind: false }), async (brain) => {
+      const status = await brain.engine.status();
       const record: StatusRecord = {
         root: brain.root,
-        clientId: config.clientId,
-        notes: { total: notes.length, ...byRole },
-        sections: (await stores.terms.statistics()).sectionCount,
-        dangling: (await stores.notes.danglingTargets()).length,
-        events: await stores.events.countByKind(),
-        changes: (await stores.events.changes()).length,
-        uncommitted: await readUncommitted(stores.meta),
-        fold: {
-          cursor: (await stores.scores.foldState()).cursor,
-          lastSeq: await stores.events.lastSeq(),
-        },
-        firstIndexedAt: await firstIndexedAt(stores.meta),
-        config: {
-          weights: config.weights,
-          alpha: config.alpha,
-          halfLives: config.halfLives,
-          roles: config.roles,
-          analyzer: config.analyzer,
-          changeOps: config.changeOps,
-        },
+        ...status,
+        notes: { ...status.notes },
+        events: { ...status.events },
+        fold: { ...status.fold },
+        config: { ...status.config },
         index: brain.index,
       };
       emit(ctx, globals.json, record, formatStatus);

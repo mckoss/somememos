@@ -1,14 +1,9 @@
-// The local-mode indexer: an incremental pass over a brain's working tree that
-// keeps the derived stores current and logs the edits, mentions and renames it
-// finds (IMPLEMENTATION.md tasks 1.7 to 1.10).
+// The local-mode indexer: the file walk and a file-system `ContentStore` that
+// feed core's index pass (`indexing.runIndexPass`), which holds every rule
+// (IMPLEMENTATION.md tasks 1.7 to 1.10 and 2.0).
 
-export {
-  type IndexPassOptions,
-  type IndexSummary,
-  contentHash,
-  derivedId,
-  runIndexPass,
-} from './pass.js';
+export { createFsContentStore } from './fs-content.js';
+export { type IndexPassOptions, type IndexSummary, runIndexPass } from './pass.js';
 export {
   META_BASELINE,
   META_FILES,
@@ -20,4 +15,4 @@ export {
   readUncommitted,
   writeUncommitted,
 } from './state.js';
-export { SKIPPED_DIRS, type WalkResult, type WalkedFile, fingerprint, walkBrain } from './walk.js';
+export { SKIPPED_DIRS, type WalkedFile, fingerprint, statFile, walkMarkdown } from './walk.js';

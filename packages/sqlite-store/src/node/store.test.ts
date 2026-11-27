@@ -4,14 +4,27 @@ import { join } from 'node:path';
 import { markdown, storage } from '@somememos/core';
 import { describeStorageConformance, expectScoresClose } from '@somememos/core/testing/storage';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { open } from '../sqlite/database.js';
-import { generateBrain } from '../testing/index.js';
-import { type BrainStores, brainPaths, openBrainStores } from './open.js';
-import { EVENTS_SCHEMA_VERSION } from './schema.js';
+import { generateBrain } from '@somememos/core/testing/brain';
+import { EVENTS_SCHEMA_VERSION } from '../schema.js';
+import { open } from './database.js';
+import { type OpenSqliteFilesOptions, type SqliteFileStores, openSqliteFiles } from './files.js';
 
-// The conformance suite, against SQLite (a fresh temp brain per open) and,
-// for comparison, the in-memory reference.
-describeStorageConformance('sqlite', () => {
+/** The two files in `dir`, as the CLI lays them out. */
+function filesIn(dir: string): { eventsPath: string; indexPath: string } {
+  return { eventsPath: join(dir, 'events.sqlite'), indexPath: join(dir, 'index.sqlite') };
+}
+
+function openBrainStores(
+  dir: string,
+  options: Omit<OpenSqliteFilesOptions, 'eventsPath' | 'indexPath'> = {},
+): SqliteFileStores {
+  mkdirSync(dir, { recursive: true });
+  return openSqliteFiles({ ...filesIn(dir), ...options });
+}
+
+// The conformance suite, against SQLite with the node:sqlite driver (fresh
+// temp files per open) and, for comparison, the in-memory reference.
+describeStorageConformance('sqlite (node:sqlite)', () => {
   const dirs: string[] = [];
   const dirOf = new Map<storage.Stores, string>();
   return {
@@ -34,16 +47,16 @@ describeStorageConformance('sqlite', () => {
   };
 });
 
-describeStorageConformance('memory (from cli)', () => ({
+describeStorageConformance('memory (from sqlite-store)', () => ({
   open: (options) => storage.createMemoryStores(options),
   reopen: (stores, options) =>
     storage.createMemoryStores({ ...options, data: (stores as storage.MemoryStores).data }),
 }));
 
-describe('openBrainStores', () => {
+describe('openSqliteFiles', () => {
   let dir: string;
-  const opened: BrainStores[] = [];
-  const openHere = (options?: Parameters<typeof openBrainStores>[1]): BrainStores => {
+  const opened: SqliteFileStores[] = [];
+  const openHere = (options?: Parameters<typeof openBrainStores>[1]): SqliteFileStores => {
     const s = openBrainStores(dir, options);
     opened.push(s);
     return s;
@@ -57,10 +70,10 @@ describe('openBrainStores', () => {
     rmSync(dir, { recursive: true, force: true });
   });
 
-  it('creates .somememos/ with the two files', () => {
+  it('creates the two files', () => {
     const s = openHere();
-    const paths = brainPaths(dir);
-    expect(s.sidecarDir).toBe(paths.sidecarDir);
+    const paths = filesIn(dir);
+    expect(s.eventsPath).toBe(paths.eventsPath);
     expect(existsSync(paths.eventsPath)).toBe(true);
     expect(existsSync(paths.indexPath)).toBe(true);
     expect(s.indexCreated).toBe(true);
@@ -164,8 +177,7 @@ describe('openBrainStores', () => {
   });
 
   it('refuses an events.sqlite that is not an event log', () => {
-    const { sidecarDir, eventsPath } = brainPaths(dir);
-    mkdirSync(sidecarDir, { recursive: true });
+    const { eventsPath } = filesIn(dir);
     const db = open(eventsPath);
     db.exec(`CREATE TABLE something (x INTEGER)`);
     db.close();
