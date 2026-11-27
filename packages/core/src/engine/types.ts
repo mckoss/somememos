@@ -104,11 +104,12 @@ export interface SearchOptions {
   /** At most this many results. Default 20. */
   readonly limit?: number;
   /**
-   * Only dated notes whose date (`YYYY-MM-DD`, from the path) is on or after
-   * this date. Giving `since` or `until` restricts the results to dated notes.
+   * Only notes whose date (`YYYY-MM-DD`, from the path) is on or after this
+   * date. Giving `since` or `until` restricts the results to notes with a
+   * date: dated entries and dated blog posts.
    */
   readonly since?: string;
-  /** Only dated notes whose date is on or before this date (inclusive). */
+  /** Only notes whose date is on or before this date (inclusive). */
   readonly until?: string;
 }
 
@@ -128,8 +129,14 @@ export interface ResultView {
   readonly title: string;
   /** The note's role; null for a dangling item. */
   readonly role: NoteRole | null;
-  /** A dated note's date; otherwise null. */
+  /** A dated note's (or dated blog post's) date; otherwise null. */
   readonly date: string | null;
+  /**
+   * For a blog post, whether its front matter says `published: true`; null
+   * otherwise (dangling items included). Always set by the engine; optional so
+   * older callers' literals still type-check.
+   */
+  readonly published?: boolean | null;
   /** The best-matching section (search only), `<path>#<index>`. */
   readonly sectionId: string | null;
   readonly heading: string | null;
@@ -156,7 +163,7 @@ export interface SearchResponse {
 // Notes
 
 export interface ReadNoteOptions {
-  /** Log a `read` event (memos only). Default true. */
+  /** Log a `read` event (scored notes only: memos and blog posts). Default true. */
   readonly record?: boolean;
 }
 
@@ -180,12 +187,17 @@ export interface NoteView {
   readonly title: string;
   readonly role: NoteRole;
   readonly date: string | null;
+  /**
+   * For a blog post: true when its front matter says `published: true`
+   * (`markdown.isPublished`), false for a draft. Null for every other role.
+   */
+  readonly published: boolean | null;
   readonly sections: SectionView[];
   /** Outgoing links: resolved note paths, or dangling keys (`dangling: true`). Sorted. */
   readonly links: NoteLink[];
   /** Notes linking here, sorted. */
   readonly backlinks: string[];
-  /** True when this read was logged as a `read` event. */
+  /** True when this read was logged as a `read` event (scored notes only: memos and blog posts). */
   readonly recorded: boolean;
 }
 
@@ -307,6 +319,13 @@ export interface NoteTitle {
   readonly path: string;
   readonly title: string;
   readonly role: NoteRole;
+  /**
+   * A dated note's (or dated blog post's) date; otherwise null. Always set by
+   * the engine; optional so older callers' literals still type-check.
+   */
+  readonly date?: string | null;
+  /** For a blog post, whether it is published (`NoteView.published`); null otherwise. Always set by the engine. */
+  readonly published?: boolean | null;
 }
 
 export interface DiaryPath {
@@ -370,9 +389,9 @@ export interface Engine {
   index(options?: IndexOptions): Promise<IndexSummary>;
   /** Keyword search over every indexed role. An empty query is `list(mode)`. Logs nothing. */
   search(query: string, options?: SearchOptions): Promise<SearchResponse>;
-  /** The activation list for `mode` (default `'hot'`): memos and dangling items. Logs nothing. */
+  /** The activation list for `mode` (default `'hot'`): scored notes (memos, blog posts) and dangling items. Logs nothing. */
   list(mode?: RankMode, options?: ListOptions): Promise<SearchResponse>;
-  /** A note with its sections, links and backlinks; logs a `read` for a memo unless `record: false`. */
+  /** A note with its sections, links and backlinks; logs a `read` for a memo or blog post unless `record: false`. */
   readNote(path: string, options?: ReadNoteOptions): Promise<NoteView>;
   /** Writes a note (creating it if needed), indexes it, and records a change. */
   saveNote(path: string, text: string, options?: SaveNoteOptions): Promise<SaveResult>;

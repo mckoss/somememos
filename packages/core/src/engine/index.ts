@@ -42,4 +42,10 @@ export {
   type SearchOptions,
   type SearchResponse,
   type SectionView,
+  type ChangeRecord,
+  type DanglingCount,
+  type IndexSummary,
+  type NoteLink,
+  type NoteRole,
+  type RankMode,
 } from './types.js';

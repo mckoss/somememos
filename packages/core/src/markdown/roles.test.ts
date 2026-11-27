@@ -6,6 +6,8 @@ import {
   classifyPath,
   compilePathPattern,
   createRoleClassifier,
+  isPublished,
+  isScoredRole,
   isValidCalendarDate,
   matchDatedPath,
   renderDatedPath,
@@ -136,5 +138,67 @@ describe('role classification', () => {
     expect(() => createRoleClassifier({ dated: ['diary/{YYYY}-{MM}.md'] })).toThrow(
       PathPatternError,
     );
+  });
+
+  it('classifies blog posts: dated from the path when the pattern has a date', () => {
+    const c = createRoleClassifier(DEFAULT_FOLDER_ROLES);
+    expect(c.classify('blog/2026/2026-11-27-why-memos.md')).toEqual({
+      role: 'blog',
+      pattern: 'blog/{YYYY}/{YYYY}-{MM}-{DD}-*.md',
+      date: '2026-11-27',
+    });
+    expect(c.classify('blog/about.md')).toEqual({ role: 'blog', pattern: 'blog/' });
+    expect(c.classify('blog/drafts/idea.md')?.date).toBeUndefined();
+    // An impossible or mismatched date falls through to the undated pattern.
+    expect(c.classify('blog/2026/2026-02-30-x.md')).toEqual({ role: 'blog', pattern: 'blog/' });
+    expect(c.classify('blog/2025/2026-01-01-x.md')).toEqual({ role: 'blog', pattern: 'blog/' });
+  });
+
+  it('puts blog after excluded, source and dated, and before memo', () => {
+    const c = createRoleClassifier({
+      memo: ['**'],
+      blog: ['posts/'],
+      dated: ['posts/{YYYY}-{MM}-{DD}.md'],
+      source: ['posts/quoted/'],
+      excluded: ['posts/private/'],
+    });
+    expect(c.classify('posts/x.md')?.role).toBe('blog');
+    expect(c.classify('posts/2026-01-02.md')?.role).toBe('dated');
+    expect(c.classify('posts/quoted/x.md')?.role).toBe('source');
+    expect(c.classify('posts/private/x.md')?.role).toBe('excluded');
+    expect(c.classify('memos/x.md')?.role).toBe('memo');
+    expect(c.datedPatterns).toEqual(['posts/{YYYY}-{MM}-{DD}.md']);
+  });
+
+  it('accepts blog patterns with a full date or none, not part of one', () => {
+    expect(() => createRoleClassifier({ blog: ['blog/'] })).not.toThrow();
+    expect(() => createRoleClassifier({ blog: ['blog/{YYYY}/'] })).toThrow(PathPatternError);
+  });
+
+  it('scores memos and blog posts only', () => {
+    expect(
+      ['memo', 'dated', 'source', 'blog', 'excluded'].filter((r) => isScoredRole(r as never)),
+    ).toEqual(['memo', 'blog']);
+    expect(isScoredRole(null)).toBe(false);
+  });
+});
+
+describe('publish state', () => {
+  it.each([
+    ['---\npublished: true\n---\n# Post\n', true],
+    ['---\npublished: True\n---\n', true],
+    ['---\npublished: yes  # ready\n---\n', true],
+    ['---\ntitle: A\npublished:   TRUE\n...\nbody\n', true],
+    ['---\npublished: false\n---\n', false],
+    ['---\npublished: "true"\n---\n', false],
+    ['---\npublished: truely\n---\n', false],
+    ['---\npublished:\n---\n', false],
+    ['---\npublished: true\npublished: false\n---\n', false],
+    ['---\n  published: true\n---\n', false],
+    ['---\npublished: true\n', false],
+    ['# Post\n\npublished: true\n', false],
+    ['', false],
+  ])('%j is %s', (text, expected) => {
+    expect(isPublished(text)).toBe(expected);
   });
 });

@@ -67,3 +67,33 @@ describe('runIndexPass paths', () => {
     expect(seen).toMatchObject({ indexed: 1, events: { edit: 1, mention: 1, rename: 0 } });
   });
 });
+
+describe('blog posts in the index pass', () => {
+  const blogConfig = parseBrainConfig({
+    clientId: 'c',
+    roles: { memo: ['memos/'], blog: ['blog/{YYYY}/{YYYY}-{MM}-{DD}-*.md', 'blog/'] },
+  });
+
+  it('logs edits and mentions like a memo, and moves history between memo and blog', async () => {
+    const content = createMemoryContentStore({ now: () => 100 });
+    const stores = createMemoryStores({ now: () => 300 });
+    const pass = (now: number) =>
+      runIndexPass({ stores, content, config: blogConfig, now: () => now });
+    await content.write('memos/kite.md', '# Kite\n', { mtime: 100 });
+    await pass(100);
+    await content.write('blog/2026/2026-04-01-spring.md', '# Spring\n\n[[kite]]\n', {
+      mtime: 200,
+    });
+    const first = await pass(200);
+    expect(first.events).toEqual({ edit: 1, mention: 1, rename: 0 });
+    const note = await stores.notes.getNote('blog/2026/2026-04-01-spring.md');
+    expect(note).toMatchObject({ role: 'blog', date: '2026-04-01' });
+
+    // Promote the memo to a post, unchanged: a rename, not a new note.
+    await content.rename('memos/kite.md', 'blog/kite.md');
+    const moved = await pass(300);
+    expect(moved.events).toEqual({ edit: 0, mention: 0, rename: 1 });
+    const renames = (await stores.events.readAfter(0)).filter((e) => e.kind === 'rename');
+    expect(renames).toMatchObject([{ item: 'memos/kite.md', to: 'blog/kite.md' }]);
+  });
+});

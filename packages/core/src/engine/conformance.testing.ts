@@ -282,6 +282,57 @@ export function describeEngineConformance(
     );
 
     it(
+      'scores blog posts like memos, dates them from the path, and reads their publish state',
+      { timeout },
+      async () => {
+        const b = await brain(configWith({ ...ROLES, blog: markdown.DEFAULT_FOLDER_ROLES.blog }));
+        await b.content.write('memos/loom.md', '# Loom\n', { mtime: T - 10 });
+        await b.engine.index();
+        b.tick();
+        const draft = '# Weaving notes\n\nWarp and weft on the [[loom]].\n';
+        const live = '---\ntitle: Dye pots\npublished: true\n---\n\nIndigo dye pots.\n';
+        await b.engine.saveNote('blog/2027/2027-03-04-weaving.md', draft);
+        await b.engine.saveNote('blog/about.md', live);
+        const entries = await b.entries();
+        expect(entries).toContainEqual({
+          kind: 'edit',
+          item: 'blog/2027/2027-03-04-weaving.md',
+          time: T + 60,
+        });
+        expect(entries).toContainEqual({ kind: 'edit', item: 'blog/about.md', time: T + 60 });
+        expect(entries).toContainEqual({ kind: 'mention', item: 'memos/loom.md', time: T + 60 });
+
+        const dated = await b.engine.readNote('blog/2027/2027-03-04-weaving.md');
+        expect(dated).toMatchObject({
+          role: 'blog',
+          date: '2027-03-04',
+          published: false,
+          recorded: true,
+        });
+        const undated = await b.engine.readNote('blog/about.md', { record: false });
+        expect(undated).toMatchObject({ role: 'blog', date: null, published: true });
+        expect((await b.engine.readNote('memos/loom.md', { record: false })).published).toBe(null);
+        expect((await b.engine.status()).notes).toMatchObject({ total: 3, memo: 1, blog: 2 });
+
+        const hot = await b.engine.list('hot');
+        expect(hot.results.map((r) => r.item)).toContain('blog/2027/2027-03-04-weaving.md');
+        const post = hot.results.find((r) => r.item === 'blog/about.md');
+        expect(post).toMatchObject({ role: 'blog', published: true, date: null });
+        expect(hot.results.find((r) => r.item === 'memos/loom.md')?.published).toBeNull();
+        const inMarch = await b.engine.search('weft', { since: '2027-03-01' });
+        expect(inMarch.results.map((r) => r.path)).toEqual(['blog/2027/2027-03-04-weaving.md']);
+        const titles = await b.engine.noteTitles();
+        expect(titles.find((t) => t.path === 'blog/about.md')).toEqual({
+          path: 'blog/about.md',
+          title: 'Dye pots',
+          role: 'blog',
+          date: null,
+          published: true,
+        });
+      },
+    );
+
+    it(
       'rejects a stale base hash with the current version, and skips an unchanged save',
       { timeout },
       async () => {

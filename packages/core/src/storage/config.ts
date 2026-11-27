@@ -83,7 +83,8 @@ const OP_NAME = /^[a-z][a-z0-9_-]*$/;
 
 /**
  * The config `init` writes for a new brain: the default folder layout
- * (`memos/`, `diary/`, `sources/`) and every other default.
+ * (`memos/`, `diary/`, `sources/`, `blog/`) and every other default. A brain
+ * whose config has no `blog` key simply has no blog role.
  */
 export function defaultBrainConfig(clientId: string): BrainConfig {
   return parseBrainConfig({ clientId, roles: DEFAULT_FOLDER_ROLES });

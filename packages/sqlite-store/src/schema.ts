@@ -85,8 +85,8 @@ CREATE TABLE notes (
   title        TEXT NOT NULL,
   content_hash TEXT NOT NULL,
   mtime        INTEGER NOT NULL,
-  role         TEXT NOT NULL,     -- 'memo' | 'dated' | 'source'
-  date         TEXT               -- YYYY-MM-DD for dated notes
+  role         TEXT NOT NULL,     -- 'memo' | 'dated' | 'source' | 'blog'
+  date         TEXT               -- YYYY-MM-DD for dated notes and dated blog posts
 ) WITHOUT ROWID;
 
 CREATE TABLE links (
