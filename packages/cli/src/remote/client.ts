@@ -143,16 +143,18 @@ export function createRemoteClient(options: RemoteClientOptions): RemoteClient {
     for (const [key, value] of Object.entries(opts.query ?? {})) {
       if (value !== undefined) url.searchParams.set(key, String(value));
     }
+    // Content-Type on every request, with or without a body: SvelteKit, in
+    // front of the API, refuses a cross-site POST, PUT, PATCH or DELETE whose
+    // content type is missing or form-like ("Cross-site … form submissions
+    // are forbidden"), and a CLI request has no Origin to make it same-site.
     const headers: Record<string, string> = {
       accept: 'application/json',
+      'content-type': 'application/json',
       'x-somememos-client': clientId,
     };
     if (!opts.anonymous) headers.authorization = `Bearer ${token}`;
     let body: string | undefined;
-    if (opts.body !== undefined) {
-      headers['content-type'] = 'application/json';
-      body = JSON.stringify(opts.body);
-    }
+    if (opts.body !== undefined) body = JSON.stringify(opts.body);
     const timeoutMs = opts.timeoutMs ?? defaultTimeout;
     const idempotent = opts.idempotent ?? method === 'GET';
     let response: Response;

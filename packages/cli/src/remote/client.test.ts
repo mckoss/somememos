@@ -57,6 +57,23 @@ function networkError(code: string): Error {
 }
 
 describe('the remote client', () => {
+  it('declares a JSON content type on every request, with or without a body', async () => {
+    // SvelteKit refuses a body-less DELETE (or POST, PUT) with no content type
+    // as a cross-site form submission (403); the API behind it never sees it.
+    const { c, calls } = client(
+      ['GET', 'DELETE', 'POST', 'PUT'].map(() => jsonResponse(200, { ok: true })),
+    );
+    await c.brain('GET', 'status');
+    await c.brain('DELETE', 'notes/memos/a.md');
+    await c.brain('POST', 'diary');
+    await c.brain('PUT', 'config', { body: {} });
+    for (const call of calls) {
+      expect((call.init.headers as Record<string, string>)['content-type']).toBe(
+        'application/json',
+      );
+    }
+  });
+
   it('sends the token, the client id and JSON, and encodes note paths', async () => {
     const { c, calls } = client([jsonResponse(200, { status: 'saved' })]);
     const remote = createRemoteEngine(c);
