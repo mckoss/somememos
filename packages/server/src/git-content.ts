@@ -21,7 +21,7 @@ import {
   type Dirent,
 } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { sync, type storage } from '@somememos/core';
+import { engine, sync, type storage } from '@somememos/core';
 
 interface Stat {
   readonly size: number;
@@ -49,12 +49,41 @@ function entryOf(path: string, s: Stat): storage.ContentEntry {
   };
 }
 
+/**
+ * True when a note at `path` cannot be stored under `root` because a file and
+ * a folder would share a name: a folder on the way is an existing file
+ * (`a.md` when writing `a.md/b.md`), or `path` itself is an existing folder.
+ * Other stores have no folders, so a copy may hold such a pair; the server
+ * refuses the second one instead of failing.
+ */
+export function folderClash(root: string, path: string): boolean {
+  const segments = path.split('/');
+  const kind = (full: string): 'file' | 'folder' | null => {
+    try {
+      return lstatSync(full).isDirectory() ? 'folder' : 'file';
+    } catch {
+      return null;
+    }
+  };
+  for (let i = 1; i < segments.length; i++) {
+    const k = kind(join(root, ...segments.slice(0, i)));
+    if (k === 'file') return true;
+    if (k === null) return false; // nothing deeper exists
+  }
+  return kind(join(root, ...segments)) === 'folder';
+}
+
 /** The content store over `root`, a brain repository's working tree. */
 export function createGitContentStore(root: string): storage.ContentStore {
   const inside = (path: string): string => {
     const problem = sync.syncPathProblem(path);
     if (problem !== null) throw new RangeError(`not a note path the server stores: ${problem}`);
     return join(root, ...path.split('/'));
+  };
+  const refuseClash = (path: string): void => {
+    if (folderClash(root, path)) {
+      throw new engine.EngineError('exists', 'a note and a folder cannot have the same name', path);
+    }
   };
 
   /** Removes now-empty folders above a removed file, up to the root. */
@@ -112,6 +141,7 @@ export function createGitContentStore(root: string): storage.ContentStore {
     write(path, text, options) {
       if (typeof text !== 'string') throw new TypeError('text must be a string');
       const full = inside(path);
+      refuseClash(path);
       mkdirSync(dirname(full), { recursive: true });
       writeFileSync(full, text, 'utf8');
       if (options?.mtime !== undefined) utimesSync(full, options.mtime, options.mtime);
@@ -131,6 +161,7 @@ export function createGitContentStore(root: string): storage.ContentStore {
       const target = inside(to);
       if (!statOf(source)) throw new RangeError(`no such file: ${from}`);
       if (statOf(target)) throw new RangeError(`already exists: ${to}`);
+      refuseClash(to);
       mkdirSync(dirname(target), { recursive: true });
       renameSync(source, target);
       prune(source);
