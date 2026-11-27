@@ -18,6 +18,7 @@
 import fc from 'fast-check';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MemoryKeywordIndex } from '../keyword/memory-index.js';
+import { MAX_TERM_LENGTH } from '../keyword/tokenize.js';
 import { searchSource } from '../keyword/search.js';
 import { HALF_LIVES } from '../timescore/halfLives.js';
 import { FutureEventError, InvalidEventError, type ItemScores } from '../timescore/events.js';
@@ -1512,6 +1513,32 @@ export function describeStorageConformance(
         expect(await s.terms.sectionsOf('memos/garden.md')).toEqual([]);
       });
 
+      it('does not index or search for an over-long word', { timeout }, async () => {
+        const s = await openStores();
+        // One 600 KB word: far more than a Postgres index row can hold.
+        const huge = 'w'.repeat(600_000);
+        const long = `${'v'.repeat(MAX_TERM_LENGTH)}x`;
+        await s.terms.replaceSections('memos/blob.md', `Lichen ${long}`, [
+          { heading: null, body: `granite ${huge} lichen moss` },
+        ]);
+        expect(await s.terms.documentFrequency('granit')).toBe(1);
+        expect(await s.terms.documentFrequency(huge)).toBe(0);
+        expect(await s.terms.documentFrequency(long)).toBe(0);
+        const fresh = new MemoryKeywordIndex();
+        for (const sec of await s.terms.sectionsOf('memos/blob.md')) {
+          fresh.add(sec.id, { title: sec.title, heading: sec.heading ?? '', body: sec.body });
+        }
+        for (const q of ['lichen', '"granite lichen"', '"lichen moss"', long, `granite ${huge}`]) {
+          expect(await searchSource(s.terms, q), q.slice(0, 40)).toEqual(fresh.search(q));
+        }
+        // The word is skipped, not removed: a phrase does not match across it.
+        expect(await searchSource(s.terms, '"granite lichen"')).toEqual([]);
+        expect((await searchSource(s.terms, long)).length).toBe(0);
+        expect((await searchSource(s.terms, `granite ${huge}`)).map((h) => h.id)).toEqual([
+          'memos/blob.md#0',
+        ]);
+      });
+
       it(
         'matches a fresh MemoryKeywordIndex after any replaces and removes (property)',
         { timeout },
@@ -1605,15 +1632,15 @@ export function describeStorageConformance(
 
       it('records its analyzer and reports a mismatch until reset', { timeout }, async () => {
         let s = await openStores({ analyzer: { stem: true } });
-        expect(s.terms.analyzer).toEqual({ stem: true });
+        expect(s.terms.analyzer).toMatchObject({ stem: true });
         expect(s.terms.analyzerMismatch({ stem: true })).toBeNull();
         expect(s.terms.analyzerMismatch()).toBeNull();
         await s.terms.replaceSections('memos/one.md', 'Tomatoes', [
           { heading: null, body: 'planting' },
         ]);
         s = await reopen(s, { analyzer: { stem: false } });
-        expect(s.terms.analyzer).toEqual({ stem: true });
-        expect(s.terms.analyzerMismatch({ stem: false })).toEqual({
+        expect(s.terms.analyzer).toMatchObject({ stem: true });
+        expect(s.terms.analyzerMismatch({ stem: false })).toMatchObject({
           stored: { stem: true },
           requested: { stem: false },
         });
@@ -1623,20 +1650,20 @@ export function describeStorageConformance(
         ]);
         expect(await s.terms.documentFrequency('plant')).toBe(2);
         await s.resetIndex({ analyzer: { stem: false } });
-        expect(s.terms.analyzer).toEqual({ stem: false });
+        expect(s.terms.analyzer).toMatchObject({ stem: false });
         expect(s.terms.analyzerMismatch({ stem: false })).toBeNull();
         await s.terms.replaceSections('memos/one.md', 'Tomatoes', [
           { heading: null, body: 'planting' },
         ]);
         expect(await s.terms.documentFrequency('planting')).toBe(1);
         s = await reopen(s, { analyzer: { stem: false } });
-        expect(s.terms.analyzer).toEqual({ stem: false });
+        expect(s.terms.analyzer).toMatchObject({ stem: false });
       });
 
       it('adopts the requested analyzer when the index is empty', { timeout }, async () => {
         let s = await openStores({ analyzer: { stem: true } });
         s = await reopen(s, { analyzer: { stem: false } });
-        expect(s.terms.analyzer).toEqual({ stem: false });
+        expect(s.terms.analyzer).toMatchObject({ stem: false });
         expect(s.terms.analyzerMismatch({ stem: false })).toBeNull();
       });
     });

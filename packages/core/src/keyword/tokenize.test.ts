@@ -1,7 +1,7 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { analyze } from './analyze.js';
-import { tokenize } from './tokenize.js';
+import { ANALYZER_FORMAT, analyze, resolveAnalyzerOptions } from './analyze.js';
+import { MAX_TERM_LENGTH, tokenize } from './tokenize.js';
 
 const texts = (s: string): string[] => tokenize(s).map((t) => t.text);
 
@@ -115,5 +115,27 @@ describe('analyze', () => {
       'running',
       'connections',
     ]);
+  });
+});
+
+describe('over-long tokens', () => {
+  it('drops a run longer than MAX_TERM_LENGTH but keeps its position', () => {
+    const long = 'q'.repeat(MAX_TERM_LENGTH + 1);
+    const edge = 'k'.repeat(MAX_TERM_LENGTH);
+    const tokens = tokenize(`alpha ${long} beta ${edge}`);
+    expect(tokens.map((t) => [t.text, t.position])).toEqual([
+      ['alpha', 0],
+      ['beta', 2],
+      [edge, 3],
+    ]);
+    expect(analyze(`${'Z'.repeat(300_000)} gamma`).map((t) => t.text)).toEqual(['gamma']);
+  });
+
+  it('is part of the analyzer format', () => {
+    expect(ANALYZER_FORMAT).toBeGreaterThanOrEqual(2);
+    expect(resolveAnalyzerOptions({ stem: false })).toEqual({
+      stem: false,
+      format: ANALYZER_FORMAT,
+    });
   });
 });

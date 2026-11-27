@@ -4,7 +4,7 @@
 
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { markdown } from '@somememos/core';
+import { keyword, markdown } from '@somememos/core';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { fakeContext, tempDir, writeTestConfig } from '../../brain/testing.js';
 import { EXIT_FAILURE, EXIT_OK, EXIT_USAGE, run } from '../../index.js';
@@ -313,7 +313,7 @@ describe('search cases from git history', () => {
 
   it('builds the index as of the parent, so later text cannot leak the answer', async () => {
     const classifier = markdown.createRoleClassifier(ROLES);
-    const snapshots = new GitSnapshots(dir, classifier, { stem: true });
+    const snapshots = new GitSnapshots(dir, classifier, keyword.DEFAULT_ANALYZER_OPTIONS);
     try {
       const before = await snapshots.at(parent);
       expect(before.index.search('zeppelinar')).toEqual([]);
