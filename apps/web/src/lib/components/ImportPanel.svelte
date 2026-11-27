@@ -162,24 +162,31 @@
       <Icon name="folder" size={32} />
       <p>Choose the folder that holds your markdown notes, or drop it here.</p>
       <div class="row">
-        <label class="button primary picker">
-          <input
-            bind:this={input}
-            class="visually-hidden"
-            type="file"
-            webkitdirectory
-            multiple
-            data-testid="import-folder"
-            onchange={(e) => {
-              const list = e.currentTarget.files;
-              if (list) choose(filesFromInput(list));
-            }}
-          />
+        <!-- One button. Where the browser can open a folder directly (File
+             System Access), that is used: it reads in place and skips the
+             folder input's "upload these files?" prompt, which is misleading
+             here since nothing leaves the device. -->
+        <button
+          type="button"
+          class="primary picker"
+          onclick={() => (pickerAvailable ? void pickWithApi() : input?.click())}
+        >
           Choose a folder
-        </label>
-        {#if pickerAvailable}
-          <button type="button" onclick={pickWithApi}>Open folder…</button>
-        {/if}
+        </button>
+        <input
+          bind:this={input}
+          class="visually-hidden"
+          type="file"
+          webkitdirectory
+          multiple
+          tabindex="-1"
+          aria-label="Folder to import"
+          data-testid="import-folder"
+          onchange={(e) => {
+            const list = e.currentTarget.files;
+            if (list) choose(filesFromInput(list));
+          }}
+        />
       </div>
       <p class="hint">
         Files are read on this device and nothing is uploaded. Next, you can mark private folders as
@@ -264,11 +271,6 @@
 
   .drop .row {
     justify-content: center;
-  }
-
-  .picker:has(input:focus-visible) {
-    outline: 3px solid var(--focus);
-    outline-offset: 2px;
   }
 
   .review,

@@ -66,15 +66,16 @@ export function weeklyPace(scoreNow: number, halfLifeSeconds: number): number {
   return perDay * 7;
 }
 
-/** "about 3 a week", "less than one a week", "none". */
+/** "about 3.2 a week", "about once a week", "less than once a month", "none". */
 export function describePace(perWeek: number): string {
   if (!(perWeek > 0)) return 'none';
   if (perWeek < 0.05) return 'almost none';
+  const times = (n: number) => (formatNumber(n) === '1.0' ? 'once' : formatNumber(n));
   if (perWeek < 0.95) {
     const perMonth = (perWeek * 30) / 7;
-    return perMonth >= 0.95 ? `about ${formatNumber(perMonth)} a month` : 'less than one a month';
+    return perMonth >= 0.95 ? `about ${times(perMonth)} a month` : 'less than once a month';
   }
-  return `about ${formatNumber(perWeek)} a week`;
+  return `about ${times(perWeek)} a week`;
 }
 
 /**
@@ -86,7 +87,7 @@ export function describePace(perWeek: number): string {
 export function describeCount(perWeek: number, days: number): string {
   if (!(perWeek > 0) || !(days > 0)) return 'none';
   const count = (perWeek / 7) * days;
-  if (count < 0.05) return 'almost none';
+  if (count < 0.01) return 'almost none';
   if (count < 0.75) return 'less than once';
   const n = Math.max(1, count >= 100 ? Math.round(count / 10) * 10 : Math.round(count));
   return n === 1 ? 'about once' : `about ${n.toLocaleString('en-US')} times`;
@@ -261,7 +262,11 @@ export function scoreSummary(
   }
   if (mode === 'neglected') {
     const s = neglectedSignal(result, halfLives);
-    return s.value === null ? s.label : `${s.label} · ${formatNumber(s.value)}× quieter`;
+    // "Busier lately · 0.6× quieter" would contradict itself: the number is
+    // only shown when it says how much quieter.
+    return s.tone === 'down' && s.value !== null
+      ? `${s.label} · ${formatNumber(s.value)}× quieter`
+      : s.label;
   }
   const week = paceRows(result, halfLives).find((r) => r.name === 'week');
   const pace = week ? describePace(week.perWeek) : 'none';

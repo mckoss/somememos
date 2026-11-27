@@ -82,7 +82,18 @@
       borderRadius: 'var(--radius-sm)',
       boxShadow: 'var(--shadow)',
     },
-    '.cm-tooltip-autocomplete > ul': { fontFamily: 'var(--font-sans)', maxHeight: '16em' },
+    // As specific as CodeMirror's own rules, so these win (its default is a
+    // monospace list as wide as its longest line).
+    '.cm-tooltip.cm-tooltip-autocomplete': { maxWidth: 'calc(100vw - 2rem)' },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul': {
+      fontFamily: 'var(--font-sans)',
+      maxHeight: '16em',
+      maxWidth: '100%',
+    },
+    '.cm-tooltip.cm-tooltip-autocomplete > ul > li > .cm-completionDetail': {
+      minWidth: '0',
+      overflowWrap: 'anywhere',
+    },
     '.cm-tooltip-autocomplete > ul > li': {
       padding: '0.45em 0.7em !important',
       minHeight: 'var(--target)',

@@ -350,6 +350,50 @@ test('writing a note from “Not written yet” resolves its links', async ({ pa
   await expect(link).not.toHaveClass(/wikilink-missing/);
 });
 
+test('every control on the main screens has a name', async ({ page }) => {
+  await importBrain(page, { blog: true });
+  const unnamed = async () =>
+    page.evaluate(() => {
+      const visible = (el: Element) => {
+        const r = el.getBoundingClientRect();
+        const style = getComputedStyle(el);
+        return style.visibility !== 'hidden' && style.display !== 'none' && r.width + r.height > 0;
+      };
+      const named = (el: HTMLElement) =>
+        Boolean(
+          el.getAttribute('aria-label')?.trim() ||
+          el.getAttribute('aria-labelledby') ||
+          (el as HTMLInputElement).labels?.length ||
+          el.closest('label') ||
+          el.textContent?.trim() ||
+          el.getAttribute('title')?.trim(),
+        );
+      return [...document.querySelectorAll<HTMLElement>('a[href], button, input, textarea, select')]
+        .filter((el) => (el as HTMLInputElement).type !== 'hidden')
+        .filter((el) => visible(el) || el.matches('input[type=file]'))
+        .filter((el) => !named(el))
+        .map((el) => el.outerHTML.slice(0, 120));
+    });
+  const screens = ['/', '/hot', '/trending', '/neglected', '/dangling', '/new', '/more'];
+  for (const href of screens) {
+    await clientGo(page, href);
+    await page.waitForTimeout(200);
+    expect(await unnamed(), href).toEqual([]);
+  }
+  await nav(page, 'Search');
+  await page.getByRole('searchbox').fill('hive');
+  await page.getByText('Why this rank').first().click();
+  expect(await unnamed(), 'search').toEqual([]);
+  const hot = await engineCall<{ results: { path: string | null }[] }>(page, 'list', 'hot', {});
+  const path = hot.results.find((r) => r.path)!.path!;
+  await clientGo(page, `/note/${path}`);
+  await expect(page.getByRole('heading', { name: 'History' })).toBeVisible();
+  expect(await unnamed(), 'note').toEqual([]);
+  await clientGo(page, `/edit/${path}`);
+  await expect(page.locator('.cm-content')).toBeVisible();
+  expect(await unnamed(), 'editor').toEqual([]);
+});
+
 function hexToRgb(hex: string): string {
   const n = Number.parseInt(hex.slice(1), 16);
   return `rgb(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255})`;
