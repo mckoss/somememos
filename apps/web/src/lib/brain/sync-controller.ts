@@ -112,6 +112,11 @@ function viewFromError(error: SyncHttpError): coreSync.ConfigView | null {
   return { revision, config: config as coreSync.SharedConfig };
 }
 
+/** How long a sync request (which may carry megabytes) may take to answer. */
+export const SYNC_REQUEST_TIMEOUT_MS = 120_000;
+/** How long any other request may take. */
+export const REQUEST_TIMEOUT_MS = 30_000;
+
 const nowSeconds = (): number => Math.floor(Date.now() / 1000);
 const enc = encodeURIComponent;
 
@@ -305,6 +310,12 @@ export class SyncController {
     };
     if (token !== null) headers.authorization = `Bearer ${token}`;
     if (body !== undefined) headers['content-type'] = 'application/json';
+    // A request that never answers must not hold sync forever (one run at a
+    // time): give up after a while; the retry is safe (ids deduplicate).
+    const signal = AbortSignal.timeout(
+      body !== undefined ? SYNC_REQUEST_TIMEOUT_MS : REQUEST_TIMEOUT_MS,
+    );
+    const timedOut = () => new SyncHttpError(0, 'timeout', 'the server took too long to answer');
     let response: Response;
     try {
       response = await this.fetchFn(`${this.deps.origin}/api${path}`, {
@@ -314,8 +325,10 @@ export class SyncController {
         cache: 'no-store',
         credentials: 'same-origin',
         redirect: 'error',
+        signal,
       });
     } catch {
+      if (signal.aborted) throw timedOut();
       throw new SyncHttpError(0, 'network', 'no answer from the server');
     }
     const type = response.headers.get('content-type') ?? '';
@@ -324,6 +337,7 @@ export class SyncController {
       try {
         json = await response.json();
       } catch {
+        if (signal.aborted) throw timedOut();
         json = null;
       }
     }
@@ -349,6 +363,9 @@ export class SyncController {
   private connectError(error: unknown): Error {
     if (error instanceof ConnectPlanError) return error;
     if (error instanceof SyncHttpError) {
+      if (error.code === 'timeout') {
+        return new ConnectPlanError('The server took too long to answer. Try again in a moment.');
+      }
       if (error.status === 0) {
         return new ConnectPlanError(
           'The server can’t be reached. Check that this device is online, then try again.',
@@ -389,6 +406,7 @@ export class SyncController {
       response = await this.fetchFn(`${this.deps.origin}/api/health`, {
         cache: 'no-store',
         credentials: 'omit',
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
     } catch {
       return {
@@ -827,6 +845,15 @@ export class SyncController {
       at,
     });
     if (error instanceof SyncHttpError) {
+      if (error.code === 'timeout') {
+        return {
+          problem: problem(
+            'server',
+            'The server took too long to answer. Your changes are kept here; it will try again shortly.',
+          ),
+          result: { ok: false, kind: 'server' },
+        };
+      }
       if (error.status === 0) {
         const online = this.deps.online?.() ?? true;
         return {

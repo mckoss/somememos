@@ -40,3 +40,16 @@ Status key: `[x]` merged to `main` with CI green, `[~]` in progress, `[ ]` not s
 ## Blog publishing (milestone 5, pulled forward if time allows)
 
 - [~] Public pages for posts marked `published: true`, with the privacy rules in PLAN.md section 8 (v0.5.0 PR)
+
+## Added during the night
+
+- [~] Shared settings (folder roles) that sync between devices, a blog settings screen, one remote commit as one change, `history` and `restore` from a clone (v0.5.0 PR)
+- [~] Independent security review of the server, with fixes (v0.5.0 PR)
+- [~] README and user guides under `docs/` (v0.5.0 PR)
+- [~] Fix for the sync browser test that fails on CI (agent running)
+- [~] Final polish: lockout fix, export of notes from the app, and eight smaller fixes (agent running)
+
+## Interruptions
+
+- The coding agents hit the account's usage limit at about 10:10 UTC and stopped until it reset at 11:40 UTC. Their work was saved and they were resumed.
+

@@ -443,6 +443,13 @@ somememos eval [--cases file]        run the ranking experiments (section 5)
 - The repo ships a short `AGENTS.md` snippet (and a skill) to paste into a brain: run `somememos hot` to orient, `somememos search` before grep, `somememos log` to see what changed recently, `somememos read` in place of `cat`, and `somememos commit -m` with a reason after editing.
 - somememos requires no other structure from agents. There is no citation step and no handle to pass back.
 
+### Additions in v0.5.0
+
+- **One remote commit is one change.** `somememos commit` in remote mode sends all its files as one change set: one change-log entry and one commit on the server, or nothing if any file is stale.
+- **`somememos config`** shows a brain's shared settings; `config pull` and `config push` settle a disagreement with the server.
+- **`history` and `restore` work from a clone** as well as from a working folder.
+- **A working folder's bookkeeping is locked,** so several agents can use one folder at once.
+
 ### The CLI as built (v0.4.0)
 
 - **Choosing the mode.** A folder whose `.somememos/config.json` says `"mode": "remote"` is a working folder for a brain on a server; any other brain folder is local. With no folder at all, setting `SOMEMEMOS_SERVER`, `SOMEMEMOS_BRAIN_ID` and `SOMEMEMOS_TOKEN` runs in remote mode, with fetched notes kept under `~/somememos/<brain-id>` (never the current directory, so notes can't land in an unrelated repository).
@@ -548,7 +555,12 @@ Implemented on 2026-11-27 in `packages/server`, mounted by the web app under `/a
 - **Status** is a small indicator in the header (synced, syncing, changes waiting, offline, needs attention), with detail in More. Not being connected is a normal state with no indicator and no nagging.
 - **Conflicts** are listed with both versions side by side, and the person keeps theirs, the server's, or both. The conflict copy syncs like any note, so every device shows it until one resolves it.
 - **A blog post's badge** reads "Published, waiting to sync" until the server has the note's current version.
-- **Known gap:** folder roles changed on one device while connected are not pushed to the server, so devices can drift. The app warns that the change applies to that device only.
+- **A brain's shared settings sync too** (added 2026-11-27): folder roles, half-lives, weights and the other ranking settings, everything except the device's own id. The server keeps them with a revision number. A device that changes them sends the change before anything else; a device whose copy is out of date applies the newer settings and re-indexes before it sends or receives any note. If two devices changed them while offline, the second to sync is stopped and the person chooses which to keep; neither is overwritten silently.
+- **Excluding a folder never deletes its notes.** They stay on every device and in the server's repository and history. They leave every index, list, search and public page, and sync stops carrying them. If the folder is accepted again, every copy receives them.
+
+### Security review (2026-11-27)
+
+An independent review of the server found 11 issues; the write-up is `docs/security-review-2026-11-27.md`. The one high-severity issue, a way to freeze the server with a single specially shaped note, is fixed, as are slow rendering of hostile links, missing security headers, the container running as root, and two inputs that caused server errors. The remaining items are low severity and listed in QUESTIONS.md.
 
 ### Edits and conflicts
 
@@ -590,7 +602,8 @@ Decided 2026-11-27: a brain has a `blog/` folder of dated posts that its owner c
   - Only files in the blog folder can ever be public. Nothing else in a brain is reachable from a public page.
   - A `[[link]]` from a post to another published post becomes a normal link. A link to anything private is shown as plain text and exposes neither the note's content nor its path. An embed of a private note is never inlined.
   - Public page views are not events and never change a score.
-- **Still to settle:** images and other attachments in posts (not served at all yet), redirects after a post is renamed, a custom domain, and a screen in the app for the blog settings (today they are set through the API).
+- **Still to settle:** images and other attachments in posts (not served at all yet), redirects after a post is renamed, and a custom domain.
+- **The app has a Public blog section** in More when connected: turn the blog on or off (both confirmed), choose its public name with a live check, and set the title, description and author. A published, synced post shows its public address.
 
 **Public pages as built (v0.5.0):**
 
