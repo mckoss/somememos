@@ -5,7 +5,7 @@
 import { existsSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { engine, markdown, ranking } from '@somememos/core';
-import type { Brain } from '../brain/index.js';
+import type { Session } from '../brain/index.js';
 import { UsageError } from '../context.js';
 
 /** `--limit N`: a whole number >= 0, or the default. */
@@ -69,7 +69,7 @@ export function parseTimeOption(
  * work from anywhere), else the working-directory reading for the engine to
  * refuse. Throws a UsageError for a path outside the brain.
  */
-export function resolveNotePath(brain: Brain, userPath: string): string {
+export function resolveNotePath(brain: Session, userPath: string): string {
   const fromCwd = brain.brainPath(userPath);
   if (fromCwd !== null && fromCwd !== '' && existsSync(join(brain.root, fromCwd))) return fromCwd;
   const rel = isAbsolute(userPath) ? null : markdown.normalizePath(userPath);
@@ -114,7 +114,10 @@ export function activityIndicator(r: engine.ResultView, mode: ranking.RankMode):
   return `${h.hot} ${formatScore(a[h.hot])}`;
 }
 
-/** The path as `brain.displayPath` shows it, or the dangling item marked as such. */
-export function resultLabel(brain: Brain, r: engine.ResultView): string {
-  return r.path === null ? `(not written yet) ${r.item}` : brain.displayPath(r.path);
+/**
+ * The path as `brain.displayPath` shows it, or a dangling item marked as such,
+ * with its link text as written (`title`, capitals kept; else the key).
+ */
+export function resultLabel(brain: Session, r: engine.ResultView): string {
+  return r.path === null ? `(not written yet) ${r.title || r.item}` : brain.displayPath(r.path);
 }

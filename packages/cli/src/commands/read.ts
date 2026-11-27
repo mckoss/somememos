@@ -8,8 +8,11 @@ import {
   brainOptions,
   parseCommandArgs,
   printJson,
-  withBrain,
+  warn,
+  withSession,
 } from '../brain/index.js';
+import { fetchIntoFolder } from '../remote/flow.js';
+import { checkNotePath } from '../remote/workfolder.js';
 import { EXIT_OK, UsageError } from '../context.js';
 import { resolveNotePath } from './shared.js';
 import type { Command } from './types.js';
@@ -31,10 +34,17 @@ Options:
 
 ${GLOBAL_OPTIONS_HELP}
 
+In remote mode (a working folder; see 'somememos help setup') the note is
+also placed in the working folder at the same path, for you to edit there
+and send back with 'somememos commit'. Reading it again fetches the server's
+newer version if you have not edited the file; if you have, it prints your
+copy and warns when the server's version moved on.
+
 Output: the note's text. With --json: {path, text, hash, mtime, title, role,
 date, published, sections: [{index, heading, startLine, endLine}], links:
 [{target, dangling}], backlinks, recorded}; pass hash back when saving
-through the web app or the server.
+through the web app or the server. In remote mode it adds file (the working
+folder copy) and local (true when text is your edited copy).
 
 Examples:
   somememos read memos/compost-tea.md
@@ -59,9 +69,28 @@ export const readCommand: Command = {
     if (positionals.length !== 1) throw new UsageError('give exactly one note path');
     const userPath = positionals[0] as string;
     const record = !(values['no-record'] ?? false);
-    return withBrain(ctx, brainOptions(globals), async (brain) => {
-      const path = resolveNotePath(brain, userPath);
-      const note = await brain.engine.readNote(path, { record });
+    return withSession(ctx, brainOptions(globals), async (session) => {
+      const path = resolveNotePath(session, userPath);
+      if (session.remote) {
+        checkNotePath(path);
+        const result = await fetchIntoFolder(session.remote, path, {
+          record,
+          display: session.displayPath,
+        });
+        if (globals.json) {
+          printJson(ctx, {
+            ...(result.note ?? { path }),
+            text: result.text,
+            local: !result.wrote && result.note?.text !== result.text,
+            file: session.remote.folder.file(path),
+          });
+        } else {
+          ctx.stdout(result.text);
+          for (const notice of result.notices) warn(ctx, notice);
+        }
+        return EXIT_OK;
+      }
+      const note = await session.engine.readNote(path, { record });
       if (globals.json) printJson(ctx, note);
       else ctx.stdout(note.text);
       return EXIT_OK;

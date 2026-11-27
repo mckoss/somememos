@@ -195,13 +195,13 @@ describe('on a brain with imported history', () => {
 
     it('marks dangling links as not written yet', async () => {
       const list = await json<{
-        results: { dangling: boolean; item: string; role: string | null }[];
+        results: { dangling: boolean; item: string; title: string; role: string | null }[];
       }>(dir, ['hot', '--limit', '200']);
       const dangling = list.results.filter((r) => r.dangling);
       expect(dangling.length).toBeGreaterThan(0);
       for (const r of list.results) expect(r.dangling || r.role === 'memo').toBe(true);
       const text = (await cli(dir, ['hot', '--limit', '200'])).stdout;
-      for (const d of dangling) expect(text).toContain(`(not written yet) ${d.item}  week `);
+      for (const d of dangling) expect(text).toContain(`(not written yet) ${d.title}  week `);
     });
 
     it('takes --limit and refuses words', async () => {
@@ -212,7 +212,13 @@ describe('on a brain with imported history', () => {
   });
 
   describe('log', () => {
-    type Change = { time: number; op: string | null; message: string | null; paths: string[] };
+    type Change = {
+      id: string;
+      time: number;
+      op: string | null;
+      message: string | null;
+      paths: string[];
+    };
     const changes = async (args: string[]) =>
       (await json<{ changes: Change[] }>(dir, ['log', ...args])).changes;
 
@@ -251,6 +257,16 @@ describe('on a brain with imported history', () => {
       expect(until.every((c) => c.time <= mid)).toBe(true);
       expect(since.length + until.length).toBeGreaterThanOrEqual(all.length);
       expect((await cli(dir, ['log', '--since', 'soon'])).code).toBe(EXIT_USAGE);
+
+      // --query: every word of it in the message (the last word of a message, so it is a real word).
+      const sample = all.find(
+        (c) => (c.message ?? '').split(/\s+/).length > 2,
+      ) as (typeof all)[number];
+      const word = (sample.message as string).trim().split(/\s+/).at(-1) as string;
+      const found = await changes(['--all', '--query', word, '--limit', '0']);
+      expect(found.map((c) => c.id)).toContain(sample.id);
+      expect(found.length).toBeLessThanOrEqual(all.length);
+      expect(await changes(['--all', '-q', 'zzzunlikelyword', '--limit', '0'])).toEqual([]);
     });
 
     it('summarizes changes with many paths', async () => {

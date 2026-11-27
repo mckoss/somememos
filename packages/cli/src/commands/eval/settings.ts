@@ -64,12 +64,16 @@ export const PRESETS: Readonly<Record<string, Preset>> = {
   },
 };
 
-/** The settings base from a brain's config: its weights, alpha, keyword parameters and half-lives. */
+/**
+ * The settings base from a brain's config: its weights, alpha, keyword
+ * parameters, half-lives and burst window, so the baseline scores the way
+ * live folding does (`storage.foldOptions`).
+ */
 export function configBase(config: storage.BrainConfig): evaluation.GridBase {
   return {
     mode: 'hot',
     ranking: { weights: { ...config.weights }, alpha: config.alpha, keyword: config.keyword },
-    fold: { halfLives: { ...config.halfLives } },
+    fold: { halfLives: { ...config.halfLives }, burst: { window: config.burstWindow } },
   };
 }
 

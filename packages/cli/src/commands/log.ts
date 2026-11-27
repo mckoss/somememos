@@ -7,9 +7,9 @@ import {
   brainOptions,
   emit,
   parseCommandArgs,
-  withBrain,
+  withSession,
 } from '../brain/index.js';
-import type { Brain } from '../brain/index.js';
+import type { Session } from '../brain/index.js';
 import { EXIT_OK, UsageError } from '../context.js';
 import { oneLineText, parseLimit, parseTimeOption, resolveNotePath } from './shared.js';
 import type { Command } from './types.js';
@@ -17,8 +17,8 @@ import type { Command } from './types.js';
 /** Paths listed in full under a change; more are summarized. */
 export const LOG_PATHS_SHOWN = 5;
 
-const usage = `Usage: somememos log [path] [--op <op>] [--since <time>] [--until <time>]
-                     [--limit N] [--all]
+const usage = `Usage: somememos log [path] [--op <op>] [--query <words>] [--since <time>]
+                     [--until <time>] [--limit N] [--all]
 
 Show the change log, newest first: one record per 'somememos commit' (and per
 imported git commit), with its time, operation tag, message and the notes it
@@ -32,6 +32,8 @@ Options:
                      working directory or the brain's root)
   --op <op>          Only changes with this operation tag (the message's
                      first word, e.g. ingest, update, session, query, lint)
+  -q, --query <words>  Only changes whose message has every word (matched
+                     like search: stemmed; "quoted words" as a phrase)
   --since <time>     Only changes at or after this time: a local date
                      (2026-01-31), a date-time (2026-01-31T09:30) or @<unix seconds>
   --until <time>     Only changes up to this time (a date includes the whole day)
@@ -51,6 +53,7 @@ Examples:
   somememos log
   somememos log memos/compost-tea.md
   somememos log --op ingest --since 2026-11-01 --limit 5
+  somememos log --query "watering schedule"
   somememos log --all --json
 `;
 
@@ -72,7 +75,7 @@ export function messageSubject(change: storage.ChangeRecord): string {
   return oneLineText(first, 100);
 }
 
-export function formatChange(brain: Brain, change: storage.ChangeRecord): string[] {
+export function formatChange(brain: Session, change: storage.ChangeRecord): string[] {
   const lines = [`${formatLocalTime(change.time)}  ${change.op ?? '-'}  ${messageSubject(change)}`];
   const paths = change.paths;
   const shown = paths.length > LOG_PATHS_SHOWN ? paths.slice(0, LOG_PATHS_SHOWN - 1) : paths;
@@ -90,6 +93,7 @@ export const logCommand: Command = {
       args,
       {
         op: { type: 'string' },
+        query: { type: 'string', short: 'q' },
         since: { type: 'string' },
         until: { type: 'string' },
         limit: { type: 'string', short: 'n' },
@@ -105,12 +109,13 @@ export const logCommand: Command = {
     const since = parseTimeOption('since', values.since);
     const until = parseTimeOption('until', values.until);
     const limit = parseLimit(values.limit, 20) as number;
-    return withBrain(ctx, brainOptions(globals), async (brain) => {
+    return withSession(ctx, brainOptions(globals), async (brain) => {
       const path =
         positionals[0] === undefined ? undefined : resolveNotePath(brain, positionals[0]);
       const changes = await brain.engine.log({
         ...(path === undefined ? {} : { path }),
         ...(values.op === undefined ? {} : { op: values.op }),
+        ...(values.query === undefined ? {} : { query: values.query }),
         ...(since === undefined ? {} : { since }),
         ...(until === undefined ? {} : { until }),
         ...(limit === 0 ? {} : { limit }),

@@ -63,7 +63,10 @@ function privateStrings(brain: SyntheticBrain): string[] {
   return [...out].filter((s) => s.length >= 8);
 }
 
-describe('eval on a brain with imported history', () => {
+// Each `eval --from-git` run rebuilds the index as of every sampled commit's
+// parent: under a second on an idle machine, but CPU-bound, so a loaded
+// machine (several times oversubscribed) pushed it past the default 5 s.
+describe('eval on a brain with imported history', { timeout: 30_000 }, () => {
   let tmp: ReturnType<typeof tempDir>;
   let dir: string;
   let brain: SyntheticBrain;
@@ -98,7 +101,19 @@ describe('eval on a brain with imported history', () => {
     for (const args of [
       ['eval', '--from-git', '--samples', '20'],
       ['eval', '--from-git', '--samples', '20', '--json'],
-      ['eval', '--preset', 'spreading', '--preset', 'half-lives', '--from-git', '--json'],
+      // Twenty cases are enough to check privacy; every case under two whole
+      // presets took over five seconds on a loaded machine.
+      [
+        'eval',
+        '--preset',
+        'spreading',
+        '--preset',
+        'half-lives',
+        '--from-git',
+        '--samples',
+        '20',
+        '--json',
+      ],
     ]) {
       const r = await cli(dir, args);
       expect(r.code, r.stderr).toBe(EXIT_OK);

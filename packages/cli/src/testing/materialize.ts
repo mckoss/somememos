@@ -2,7 +2,7 @@
 // with one commit per step.
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { filesAfter } from '@somememos/core/testing/brain';
 import type { Step, SyntheticBrain } from '@somememos/core/testing/brain';
@@ -92,26 +92,60 @@ export function git(cwd: string, args: string[], time?: number): string {
   });
 }
 
+/** A path for a fast-import command, C-style quoted (it may hold spaces). */
+function quotePath(path: string): string {
+  return `"${path.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+}
+
 /**
  * Build a git repository in `dir` (empty or absent) with one commit per step,
- * dated at the step's time, with the step's message and a fixed author. Renames
- * are pure (content unchanged), so `git log -M` reports them. Returns the commit
- * hashes, in step order.
+ * dated at the step's time, with the step's message and a fixed author, and
+ * check out the last one. Renames are pure (content unchanged), so `git log
+ * -M` reports them. Returns the commit hashes, in step order.
+ *
+ * The whole history goes through one `git fast-import` stream: a handful of
+ * git processes in all, instead of two per step. (Spawning ~120 of them took
+ * seconds on a loaded machine, enough to time out the tests that build a
+ * history.)
  */
 export function materializeGitHistory(dir: string, timeline: Timeline): string[] {
   assertEmpty(dir);
   git(dir, ['init', '--quiet', '--initial-branch=main']);
-  for (const step of stepsOf(timeline)) {
+  const steps = stepsOf(timeline);
+  const identity = `${TEST_AUTHOR.name} <${TEST_AUTHOR.email}>`;
+  const chunks: Buffer[] = [];
+  const line = (text: string) => chunks.push(Buffer.from(`${text}\n`, 'utf8'));
+  const data = (text: string) => {
+    const bytes = Buffer.from(text, 'utf8');
+    line(`data ${bytes.length}`);
+    chunks.push(bytes, Buffer.from('\n'));
+  };
+  steps.forEach((step, i) => {
+    line('commit refs/heads/main');
+    line(`mark :${i + 1}`);
+    line(`author ${identity} ${step.time} +0000`);
+    line(`committer ${identity} ${step.time} +0000`);
+    data(`${step.message}\n`);
+    if (i > 0) line(`from :${i}`);
     for (const change of step.changes) {
-      if (change.type === 'write') writeFile(dir, change.path, change.content);
-      else if (change.type === 'delete') rmSync(join(dir, change.path));
-      else {
-        mkdirSync(dirname(join(dir, change.to)), { recursive: true });
-        renameSync(join(dir, change.from), join(dir, change.to));
+      if (change.type === 'write') {
+        line(`M 100644 inline ${quotePath(change.path)}`);
+        data(change.content);
+      } else if (change.type === 'delete') {
+        line(`D ${quotePath(change.path)}`);
+      } else {
+        line(`R ${quotePath(change.from)} ${quotePath(change.to)}`);
       }
     }
-    git(dir, ['add', '--all']);
-    git(dir, ['commit', '--quiet', '--allow-empty', '--no-verify', '-m', step.message], step.time);
-  }
+    line('');
+  });
+  execFileSync('git', [...GIT_CONFIG, 'fast-import', '--quiet', '--date-format=raw'], {
+    cwd: dir,
+    env: gitEnv(),
+    input: Buffer.concat(chunks),
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  if (steps.length === 0) return [];
+  git(dir, ['reset', '--hard', '--quiet']);
   return git(dir, ['rev-list', '--reverse', 'HEAD']).trim().split('\n');
 }

@@ -1,5 +1,5 @@
 import { VERSION } from '@somememos/core';
-import { AGENTS_GUIDE } from './commands/agents.js';
+import { AGENTS_GUIDE, SETUP_GUIDE } from './commands/agents.js';
 import { commands, findCommand } from './commands/index.js';
 import { EXIT_FAILURE, EXIT_OK, EXIT_USAGE, UsageError, processContext } from './context.js';
 import type { Context } from './context.js';
@@ -13,7 +13,7 @@ export function usage(): string {
   const width = Math.max(4, ...commands.map((command) => command.name.length));
   const list = [
     ...commands.map((command) => `  ${command.name.padEnd(width)}  ${command.summary}`),
-    `  ${'help'.padEnd(width)}  Show help for a command; 'help agents' for the agent guide`,
+    `  ${'help'.padEnd(width)}  Show help for a command; 'help agents', 'help setup' for the guides`,
   ].join('\n');
   return `somememos ${VERSION}: a second brain of markdown notes with time-aware working memory.
 
@@ -21,6 +21,7 @@ Usage:
   somememos <command> [options]
   somememos help <command>
   somememos help agents    The search, read, edit, commit flow for AI agents
+  somememos help setup     Using a brain on a server from a new machine or cloud session
 
 Commands:
 ${list}
@@ -32,7 +33,9 @@ Options:
 Global options (before or after the command):
   --brain <dir>  Use the brain at <dir> (default: $SOMEMEMOS_BRAIN, else the
                  nearest folder at or above the working directory holding
-                 .somememos/config.json)
+                 .somememos/config.json, else remote mode when
+                 SOMEMEMOS_SERVER, SOMEMEMOS_BRAIN_ID and SOMEMEMOS_TOKEN
+                 are set)
   --no-index     Skip the automatic index pass that commands run first
   --json         Print one JSON record instead of plain text
 
@@ -110,6 +113,10 @@ export async function run(argv: string[], ctx: Context = processContext()): Prom
     }
     if (topic === 'agents') {
       ctx.stdout(AGENTS_GUIDE);
+      return EXIT_OK;
+    }
+    if (topic === 'setup') {
+      ctx.stdout(SETUP_GUIDE);
       return EXIT_OK;
     }
     const command = findCommand(topic);

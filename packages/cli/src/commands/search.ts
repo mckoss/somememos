@@ -8,11 +8,11 @@ import {
   brainOptions,
   emit,
   parseCommandArgs,
-  withBrain,
+  withSession,
 } from '../brain/index.js';
-import type { Brain } from '../brain/index.js';
+import type { Session } from '../brain/index.js';
 import { EXIT_OK, UsageError } from '../context.js';
-import { oneLineText, parseDateOption, parseLimit } from './shared.js';
+import { oneLineText, parseDateOption, parseLimit, resultLabel } from './shared.js';
 import type { Command } from './types.js';
 
 const usage = `Usage: somememos search <words…> [--mode hot|trending|neglected|all] [--limit N]
@@ -56,8 +56,8 @@ Examples:
 `;
 
 /** One result as a line: path, heading (if any), and a one-line snippet. */
-export function formatSearchLine(brain: Brain, r: engine.ResultView): string {
-  const parts = [r.path === null ? `(not written yet) ${r.item}` : brain.displayPath(r.path)];
+export function formatSearchLine(brain: Session, r: engine.ResultView): string {
+  const parts = [resultLabel(brain, r)];
   if (r.heading) parts.push(`## ${oneLineText(r.heading, 60)}`);
   const snippet = r.snippet ? oneLineText(r.snippet.text) : '';
   if (snippet !== '') parts.push(snippet);
@@ -92,7 +92,7 @@ export const searchCommand: Command = {
     const limit = parseLimit(values.limit);
     const since = parseDateOption('since', values.since);
     const until = parseDateOption('until', values.until);
-    return withBrain(ctx, brainOptions(globals), async (brain) => {
+    return withSession(ctx, brainOptions(globals), async (brain) => {
       const response = await brain.engine.search(query, {
         mode,
         ...(limit === undefined ? {} : { limit }),

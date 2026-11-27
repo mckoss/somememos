@@ -10,6 +10,7 @@ import { type Context, clockOf } from '../context.js';
 import { createFsContentStore } from '../indexer/index.js';
 import { type BrainStores, SIDECAR_DIR, loadBrainConfig, openBrainStores } from '../store/index.js';
 import type { GlobalOptions } from './args.js';
+import { sidecarKind } from '../remote/config.js';
 import { CommandError, plural, warn } from './output.js';
 
 type IndexSummary = indexing.IndexSummary;
@@ -51,6 +52,11 @@ export function findBrainRoot(ctx: Context, explicit?: string): string {
     const parent = dirname(dir);
     if (parent === dir) break;
     dir = parent;
+  }
+  if (ctx.env.SOMEMEMOS_SERVER && ctx.env.SOMEMEMOS_BRAIN_ID) {
+    throw new BrainNotFoundError(
+      `no local brain found in ${resolve(ctx.cwd)} or any folder above it, and this command works only in local mode (SOMEMEMOS_SERVER selects remote mode for the other commands); for an offline copy, run somememos clone`,
+    );
   }
   throw new BrainNotFoundError(
     `no brain found in ${resolve(ctx.cwd)} or any folder above it; run 'somememos init' to create one, or pass --brain <dir>`,
@@ -137,6 +143,12 @@ export async function withBrain<T>(
   fn: (brain: Brain) => T | Promise<T>,
 ): Promise<T> {
   const root = findBrainRoot(ctx, options.brain);
+  const kind = sidecarKind(root);
+  if (kind.kind === 'remote') {
+    throw new CommandError(
+      `this command works only in local mode, and ${root} is a working folder for brain ${kind.config.brainId} on ${kind.config.server}; for an offline copy, run somememos clone`,
+    );
+  }
   const config = loadBrainConfig(root);
   const classifier = markdown.createRoleClassifier(config.roles);
   const now = clockOf(ctx);

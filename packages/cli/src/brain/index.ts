@@ -20,3 +20,12 @@ export {
   withBrain,
 } from './brain.js';
 export { CommandError, emit, oneLine, plural, printJson, printLines, warn } from './output.js';
+export {
+  type BrainLocation,
+  type RemoteSession,
+  type Session,
+  locateBrain,
+  openRemote,
+  remindRemote,
+  withSession,
+} from './session.js';

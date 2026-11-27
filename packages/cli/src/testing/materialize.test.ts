@@ -68,15 +68,17 @@ describe('materializeBrain', () => {
 describe('materializeGitHistory', () => {
   const dir = freshDir();
   let hashes: string[] = [];
-  let elapsed = 0;
 
-  it('builds one commit per step in well under 5 seconds', () => {
+  // No wall-clock bound here: on a loaded machine any bound fails from timing
+  // alone. It is fast by construction (one fast-import stream, a handful of
+  // git processes in all), and the duration is printed for a human to see.
+  it('builds one commit per step and checks out the last', () => {
     const t0 = performance.now();
     hashes = materializeGitHistory(dir, brain);
-    elapsed = performance.now() - t0;
-    console.info(`git history: ${hashes.length} commits in ${Math.round(elapsed)} ms`);
+    console.info(
+      `git history: ${hashes.length} commits in ${Math.round(performance.now() - t0)} ms`,
+    );
     expect(hashes).toHaveLength(brain.steps.length);
-    expect(elapsed).toBeLessThan(5000);
     expect(git(dir, ['status', '--porcelain'])).toBe('');
     expect(listFiles(dir)).toEqual(Object.keys(brain.files));
   });

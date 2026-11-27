@@ -98,7 +98,7 @@ describe('baseline', () => {
     expect(await readUncommitted(stores.meta)).toEqual([]);
     expect(await stores.notes.linksFrom('memos/a.md')).toEqual([
       { target: 'memos/b.md', dangling: false },
-      { target: 'nowhere', dangling: true },
+      { target: 'nowhere', dangling: true, display: 'nowhere' },
     ]);
   });
 
@@ -261,8 +261,8 @@ describe('renames, carry-over and deletes', () => {
     expect(await stores.scores.getItem('memos/new-name.md')).toEqual(scoresBefore);
     // The linker's [[old-name]] now dangles; it was re-resolved without being edited.
     expect(await stores.notes.linksFrom('memos/linker.md')).toEqual([
-      { target: 'future topic', dangling: true },
-      { target: 'old-name', dangling: true },
+      { target: 'future topic', dangling: true, display: 'future topic' },
+      { target: 'old-name', dangling: true, display: 'old-name' },
     ]);
     expect(await readUncommitted(stores.meta)).toEqual(
       expect.arrayContaining(['memos/old-name.md', 'memos/new-name.md']),
@@ -375,7 +375,7 @@ describe('excluded folders and roles', () => {
     write('memos/a.md', '# A\n\n[[secret]] [[private/secret]] [[private/not-there]] [[open]]\n');
     await pass();
     expect(await stores.notes.linksFrom('memos/a.md')).toEqual([
-      { target: 'open', dangling: true },
+      { target: 'open', dangling: true, display: 'open' },
     ]);
     expect((await logAfter(0)).map((e) => e.item)).toEqual(['memos/a.md', 'open']);
   });

@@ -14,9 +14,12 @@ import {
   parseCommandArgs,
   plural,
   warn,
-  withBrain,
+  withSession,
 } from '../brain/index.js';
-import { EXIT_OK, UsageError } from '../context.js';
+import type { RemoteSession, Session } from '../brain/index.js';
+import { EXIT_FAILURE, EXIT_OK, UsageError } from '../context.js';
+import type { Context } from '../context.js';
+import { type CommitOutcome, commitFolder } from '../remote/flow.js';
 import type { IndexSummary } from '../indexer/index.js';
 import type { Command } from './types.js';
 
@@ -32,6 +35,15 @@ earlier command's automatic index pass already found. Give paths (files or
 folders, relative to the working directory) to commit only those; the rest
 stay uncommitted. With nothing to commit it says so and exits 0.
 
+In remote mode (a working folder; see 'somememos help setup') commit sends
+each file you edited, and each new .md file, to the server with the hash it
+had when you read it. If someone else changed a note meanwhile, that file is
+refused: the server's version is saved beside it as <name>.server.md (yours is
+never touched), and commit says to merge, delete the .server.md copy and
+commit again; the other files still go through, and the exit code is 1.
+Deleting a local file never deletes a note: use 'somememos rm'. New files in
+excluded folders are never sent.
+
 Options:
   -m, --message <text>  The reason for the change (repeat for more paragraphs)
 
@@ -40,6 +52,9 @@ ${GLOBAL_OPTIONS_HELP}
 
 Output: the change and its notes, one per line. With --json: {committed,
 change: {id, time, client, message, op, paths} | null, remaining, index}.
+In remote mode: {committed, saved: [{path, hash, created, change}],
+unchanged, conflicts: [{path, serverCopy, instruction}], failed: [{path,
+code, message}], skipped, remaining}.
 
 Examples:
   somememos commit -m "update clarify the watering schedule"
@@ -91,12 +106,14 @@ export const commitCommand: Command = {
 
     // The engine's commit runs the index pass itself, under the same lock.
     const options = brainOptions(globals, { noIndex: false, autoIndex: false, remind: false });
-    return withBrain(ctx, options, async (brain) => {
+    return withSession(ctx, options, async (brain) => {
       const filters = positionals.map((p) => {
         const path = brain.brainPath(p);
         if (path === null) throw new UsageError(`${p} is outside the brain`);
         return path;
       });
+      if (brain.remote)
+        return commitRemote(ctx, brain, brain.remote, message, filters, globals.json);
       const result: engine.CommitResult = await brain.engine.commit({ message, paths: filters });
       for (const w of result.index.warnings) warn(ctx, w);
       // The record as before the engine: the change without its local seq.
@@ -107,3 +124,50 @@ export const commitCommand: Command = {
     });
   },
 };
+
+function formatRemoteCommit(session: Session, r: CommitOutcome, message: string | null): string[] {
+  const show = session.displayPath;
+  const lines: string[] = [];
+  if (r.saved.length > 0) {
+    const op = r.saved[0]?.change?.op ?? null;
+    lines.push(
+      `committed ${plural(r.saved.length, 'note')}${op ? ` (${op})` : ''}${
+        message ? `: ${message.split('\n')[0]}` : ' (no message)'
+      }`,
+    );
+    for (const s of r.saved) lines.push(`  ${show(s.path)}${s.created ? ' (new)' : ''}`);
+  } else if (r.conflicts.length === 0 && r.failed.length === 0) {
+    lines.push(
+      r.remaining.length > 0
+        ? `nothing to commit among the given paths; ${plural(r.remaining.length, 'other changed note')} not committed`
+        : 'nothing to commit: no edited or new files in the working folder',
+    );
+  }
+  if (r.unchanged.length > 0) {
+    lines.push(`${plural(r.unchanged.length, 'note')} already matched the server`);
+  }
+  if (r.skipped.length > 0) {
+    lines.push(`not sent: ${plural(r.skipped.length, 'new file')} in excluded folders`);
+  }
+  if (r.saved.length > 0 && r.remaining.length > 0) {
+    lines.push(`${plural(r.remaining.length, 'other changed note')} not committed`);
+  }
+  return lines;
+}
+
+async function commitRemote(
+  ctx: Context,
+  session: Session,
+  remote: RemoteSession,
+  message: string | null,
+  filters: string[],
+  json: boolean,
+): Promise<number> {
+  const outcome = await commitFolder(remote, { message, filters, display: session.displayPath });
+  emit(ctx, json, outcome, (r) => formatRemoteCommit(session, r, message));
+  for (const c of outcome.conflicts) ctx.stderr(`somememos commit: ${c.instruction}\n`);
+  for (const f of outcome.failed) {
+    ctx.stderr(`somememos commit: ${session.displayPath(f.path)}: not committed: ${f.message}\n`);
+  }
+  return outcome.conflicts.length > 0 || outcome.failed.length > 0 ? EXIT_FAILURE : EXIT_OK;
+}

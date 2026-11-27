@@ -8,8 +8,10 @@ import {
   brainOptions,
   emit,
   parseCommandArgs,
-  withBrain,
+  warn,
+  withSession,
 } from '../brain/index.js';
+import { fetchIntoFolder } from '../remote/flow.js';
 import { EXIT_OK, UsageError } from '../context.js';
 import { SIDECAR_DIR } from '../store/index.js';
 import type { Command } from './types.js';
@@ -20,7 +22,9 @@ Print the path of today's dated entry (the local date), creating the file
 with a '# <date>' heading if it does not exist yet. The path comes from the
 first "dated" pattern in the brain's roles, e.g.
 diary/{YYYY}/{MM}/{YYYY}-{MM}-{DD}.md. Write to that file with your usual
-tools; the next command's index pass picks it up.
+tools; the next command's index pass picks it up. In remote mode the entry is
+created on the server and placed in the working folder; send what you write
+with 'somememos commit'.
 
 Options:
   --date <YYYY-MM-DD>  Another day's entry instead of today's
@@ -60,7 +64,7 @@ export const diaryCommand: Command = {
     if (values.date !== undefined && !markdown.parseCalendarDate(values.date)) {
       throw new UsageError(`--date must be a calendar date like 2026-01-31, not '${values.date}'`);
     }
-    return withBrain(ctx, brainOptions(globals), async (brain) => {
+    return withSession(ctx, brainOptions(globals), async (brain) => {
       let entry: engine.DiaryEntry;
       try {
         entry = await brain.engine.ensureDiary(values.date);
@@ -71,6 +75,14 @@ export const diaryCommand: Command = {
           );
         }
         throw error;
+      }
+      if (brain.remote) {
+        // Place the entry in the working folder, to write to and commit.
+        const fetched = await fetchIntoFolder(brain.remote, entry.path, {
+          record: false,
+          display: brain.displayPath,
+        });
+        for (const notice of fetched.notices) warn(ctx, notice);
       }
       const record: DiaryRecord = {
         path: entry.path,
