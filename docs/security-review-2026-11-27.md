@@ -23,7 +23,7 @@ Method: the route table was enumerated and every route was called without a toke
 | 7 | A note sharing its name with a folder failed with a 500 and logged the note's path | Low | Fixed for save and rename (`55f7884`) and for sync (`name-clash` refusal) |
 | 8 | HTML comments in a published post appear as visible text on the public blog | Low | Left for the owner |
 | 9 | Notes can load images from any https address | Low | Left for the owner |
-| 10 | The CLI sends its token to an `http://` server | Low | Left for the owner |
+| 10 | The CLI sends its token to an `http://` server | Low | Fixed: refused unless local or `--allow-insecure` |
 | 11 | Brain ids and blog slugs are one namespace across users | Low | Accepted (single-user server) |
 
 ### 1. Quadratic heading stripping (high, fixed)
@@ -76,9 +76,11 @@ The public renderer runs with raw HTML off, so `<!-- remark -->` in a published 
 
 Notes may embed `<img src="https://…">` or `![](https://…)`, and the app's CSP allows `img-src https:` to keep that working. A note synced from a compromised device can therefore make the owner's browser contact a chosen host when the note is opened (revealing the owner's address and when they read it). Restricting `img-src` to `'self' data: blob:` closes this, at the cost of remote images in notes.
 
-### 10. The CLI accepts `http://` servers (low, left for the owner)
+### 10. The CLI accepts `http://` servers (low, fixed)
 
 `packages/cli/src/remote/config.ts` accepts `http:` server URLs, so the bearer token can be sent in clear over a network. Suggest refusing `http:` except for `localhost`, `127.0.0.1` and `::1`. (Left alone: another change to the CLI is in progress.)
+
+**Fixed afterwards.** Every remote client the CLI makes (connect, clone, sync, working folders, environment-only mode, history, config) refuses an `http://` server before sending anything, unless its host is `localhost`, `127.0.0.1` or `[::1]`, with a one-line error naming the override: `--allow-insecure` on `connect`, `clone` and `sync`, or `SOMEMEMOS_ALLOW_INSECURE=1`. The override is not recorded, so it stays a choice made each time. Redirects were already refused, so an `https://` server cannot downgrade a request. Tests: `packages/cli/src/remote/client.test.ts`, `packages/cli/src/commands/commands.test.ts`.
 
 ### 11. Shared namespaces (low, accepted)
 
@@ -110,5 +112,5 @@ On a future multi-user server, `POST /api/brains` answers `brain-exists` for ano
 2. ~~How sync should treat a note and folder with the same name (finding 7).~~ Settled: a `name-clash` refusal the client does not copy.
 3. Whether HTML comments in published posts should be dropped (finding 8).
 4. Whether remote images in notes are worth the tracking risk (finding 9).
-5. Whether the CLI should refuse plain `http://` servers (finding 10).
+5. ~~Whether the CLI should refuse plain `http://` servers (finding 10).~~ Settled: refused, with an explicit override.
 6. A contact line in `SECURITY.md`, and HSTS once the domain is settled.

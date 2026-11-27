@@ -313,6 +313,8 @@ next: cd ~/garden-remote; somememos hot; somememos search <words>; somememos rea
 
 `connect` checks that the server answers and accepts the token before writing anything. It refuses a folder that already holds markdown or is already a brain. The token is never written to the folder: it comes from `SOMEMEMOS_TOKEN`, or from `--token-file <path>`, a file outside the folder whose path (not its content) is recorded. Inside a git repository it adds a `.gitignore` that keeps the folder's notes out of git.
 
+The server must be `https://`. The CLI refuses to send the token over plain `http://`, where anyone on the network can read it, except to this machine (`localhost`, `127.0.0.1`, `[::1]`). On a network you trust, pass `--allow-insecure` to `connect`, `clone` or `sync`, or set `SOMEMEMOS_ALLOW_INSECURE=1` (which every command of a working folder or environment-only mode on such a server needs).
+
 ### Read, edit, commit
 
 ```

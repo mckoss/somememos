@@ -9,8 +9,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { tempDir } from '../brain/testing.js';
 import { RemoteError, createRemoteClient, encodeNotePath } from './client.js';
 import {
+  checkServerTransport,
   checkTokenFile,
   derivedClientId,
+  insecureAllowed,
   normalizeServerUrl,
   parseWorkFolderConfig,
   resolveToken,
@@ -200,6 +202,39 @@ describe('working-folder config', () => {
       /no credentials/,
     );
     expect(() => normalizeServerUrl('brain.example.test')).toThrow(/not a server URL/);
+  });
+
+  it('refuses to send the token over plain http except to this machine, unless allowed', async () => {
+    for (const ok of [
+      'https://brain.example.test',
+      'http://localhost:4000',
+      'http://127.0.0.1:3000/x',
+      'http://[::1]:8080',
+    ]) {
+      expect(() => checkServerTransport(ok, false), ok).not.toThrow();
+    }
+    for (const bad of ['http://brain.example.test', 'http://10.0.0.5:3000', 'http://127.0.0.2']) {
+      expect(() => checkServerTransport(bad, false), bad).toThrow(
+        /refusing to send the token to .* over plain http:\/\/.*--allow-insecure .*SOMEMEMOS_ALLOW_INSECURE=1/,
+      );
+      expect(() => checkServerTransport(bad, true), bad).not.toThrow();
+    }
+    expect(insecureAllowed({})).toBe(false);
+    expect(insecureAllowed({ SOMEMEMOS_ALLOW_INSECURE: '1' })).toBe(true);
+    expect(insecureAllowed({ SOMEMEMOS_ALLOW_INSECURE: 'yes' })).toBe(false);
+    expect(insecureAllowed({}, true)).toBe(true);
+    // The client refuses before any request is made.
+    const { fn, calls } = fakeFetch([jsonResponse(200, { status: 'ok' })]);
+    expect(() =>
+      createRemoteClient({
+        server: 'http://brain.example.test',
+        brainId: 'garden',
+        token: TOKEN,
+        clientId: 'c',
+        fetch: fn,
+      }),
+    ).toThrow(/plain http/);
+    expect(calls).toEqual([]);
   });
 
   it('reads the token from the environment or a file outside the folder, and never names it', () => {

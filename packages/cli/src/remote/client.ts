@@ -9,6 +9,7 @@
 
 import { engine } from '@somememos/core';
 import { CommandError } from '../brain/output.js';
+import { checkServerTransport } from './config.js';
 
 /** The engine's error codes: a server error with one of these becomes an `EngineError`. */
 const ENGINE_CODES: ReadonlySet<string> = new Set<engine.EngineErrorCode>([
@@ -52,6 +53,12 @@ export interface RemoteClientOptions {
   readonly timeoutMs?: number;
   /** For tests. Default the global `fetch`. */
   readonly fetch?: typeof fetch;
+  /**
+   * Send the token over plain `http://` to a host other than this machine
+   * (`--allow-insecure`, `SOMEMEMOS_ALLOW_INSECURE=1`). Default false: such
+   * a server is refused before any request (`checkServerTransport`).
+   */
+  readonly allowInsecure?: boolean;
 }
 
 export interface RequestOptions {
@@ -98,6 +105,7 @@ function causeCode(error: unknown): string {
 /** Creates a client. Requests are independent; nothing is cached. */
 export function createRemoteClient(options: RemoteClientOptions): RemoteClient {
   const { server, brainId, clientId } = options;
+  checkServerTransport(server, options.allowInsecure ?? false);
   const token = options.token;
   const doFetch = options.fetch ?? fetch;
   const defaultTimeout = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;

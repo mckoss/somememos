@@ -63,5 +63,11 @@ For offline use (or local models), make a full copy and sync it:
   somememos clone https://brain.example.com <brain-id> ~/brain
   somememos sync
 
+The server must be https://: the CLI refuses to send the token over plain
+http:// (anyone on the network could read it), except to this machine
+(localhost, 127.0.0.1, [::1]). On a network you trust, pass --allow-insecure
+to connect, clone or sync, or set SOMEMEMOS_ALLOW_INSECURE=1 (needed for
+every command of a working folder or environment-only mode on such a server).
+
 Then follow \`somememos help agents\`.
 `;

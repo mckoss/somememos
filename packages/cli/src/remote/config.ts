@@ -37,9 +37,30 @@ export const ENV = {
   tokenFile: 'SOMEMEMOS_TOKEN_FILE',
   clientId: 'SOMEMEMOS_CLIENT_ID',
   workdir: 'SOMEMEMOS_WORKDIR',
+  allowInsecure: 'SOMEMEMOS_ALLOW_INSECURE',
 } as const;
 
 type Env = Readonly<Record<string, string | undefined>>;
+
+/** Hosts a plain `http://` server may be on: this machine only. */
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]']);
+
+/** Whether plain http to another host was explicitly allowed: the flag, or SOMEMEMOS_ALLOW_INSECURE=1. */
+export function insecureAllowed(env: Env, flag?: boolean): boolean {
+  return flag === true || env[ENV.allowInsecure] === '1';
+}
+
+/**
+ * Refuses to send a token over plain `http://` (security review 2026-11-27,
+ * finding 10), except to this machine or when explicitly allowed.
+ */
+export function checkServerTransport(server: string, allowInsecure: boolean): void {
+  const url = new URL(server);
+  if (url.protocol === 'https:' || allowInsecure || LOOPBACK_HOSTS.has(url.hostname)) return;
+  throw new CommandError(
+    `refusing to send the token to ${url.host} over plain http://, where anyone on the network can read it; use https://, or on a network you trust pass --allow-insecure (or set ${ENV.allowInsecure}=1)`,
+  );
+}
 
 /** Where a remote client talks to. */
 export interface RemoteTarget {

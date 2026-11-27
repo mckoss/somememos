@@ -80,6 +80,60 @@ describe('help', () => {
   });
 });
 
+describe('plain http servers', () => {
+  const TOKEN_ENV = { SOMEMEMOS_TOKEN: 'tok-plain-http-1a2b3c4d5e6f7a8b9c0d' };
+  const refused =
+    /^somememos \w+: refusing to send the token to brain\.example\.invalid over plain http:\/\/.*--allow-insecure .*SOMEMEMOS_ALLOW_INSECURE=1\)\n$/;
+
+  it('connect, clone, sync and environment-only mode refuse them before sending anything', async () => {
+    const http = 'http://brain.example.invalid';
+    for (const args of [
+      ['connect', http, 'garden', join(dir, 'wf')],
+      ['clone', http, 'garden', join(dir, 'copy')],
+    ]) {
+      const r = await cli(args, { env: TOKEN_ENV });
+      expect(r.code, args[0]).toBe(EXIT_FAILURE);
+      expect(r.stderr).toMatch(refused);
+      expect(existsSync(join(dir, 'wf'))).toBe(false);
+      expect(existsSync(join(dir, 'copy'))).toBe(false);
+    }
+    await cli(['init', join(dir, 'local')]);
+    const sync = await cli(['sync', '--server', http, '--brain-id', 'garden'], {
+      cwd: join(dir, 'local'),
+      env: TOKEN_ENV,
+    });
+    expect(sync.code).toBe(EXIT_FAILURE);
+    expect(sync.stderr).toMatch(refused);
+    expect(existsSync(join(dir, 'local/.somememos/remote.json'))).toBe(false);
+    const env = await cli(['hot'], {
+      cwd: join(dir, 'elsewhere'),
+      env: {
+        ...TOKEN_ENV,
+        SOMEMEMOS_SERVER: http,
+        SOMEMEMOS_BRAIN_ID: 'garden',
+        SOMEMEMOS_WORKDIR: join(dir, 'envwf'),
+      },
+    });
+    expect(env.code).toBe(EXIT_FAILURE);
+    expect(env.stderr).toMatch(refused);
+  });
+
+  it('the override lets the request through (here, to a host that does not exist)', async () => {
+    const http = 'http://brain.example.invalid';
+    for (const options of [
+      { args: ['--allow-insecure'], env: TOKEN_ENV },
+      { args: [], env: { ...TOKEN_ENV, SOMEMEMOS_ALLOW_INSECURE: '1' } },
+    ]) {
+      const r = await cli(['connect', http, 'garden', join(dir, 'wf'), ...options.args], {
+        env: options.env,
+      });
+      expect(r.code).toBe(EXIT_FAILURE);
+      expect(r.stderr).not.toMatch(/plain http/);
+      expect(r.stderr).toMatch(/brain\.example\.invalid/);
+    }
+  });
+});
+
 describe('init', () => {
   it('in an empty directory: default layout, folders, baseline index', async () => {
     const r = await cli(['init']);

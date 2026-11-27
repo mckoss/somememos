@@ -18,7 +18,12 @@ import type { Brain, RemoteSession, Session } from '../brain/index.js';
 import type { Context } from '../context.js';
 import { EXIT_OK, UsageError } from '../context.js';
 import { RemoteError, createRemoteClient } from '../remote/client.js';
-import { type CloneRemote, readCloneRemote, resolveToken } from '../remote/config.js';
+import {
+  type CloneRemote,
+  insecureAllowed,
+  readCloneRemote,
+  resolveToken,
+} from '../remote/config.js';
 import { type RemoteEngine, type RemoteNoteVersion, createRemoteEngine } from '../remote/engine.js';
 import { sync as coreSync } from '@somememos/core';
 import { syncWithServer } from './clone.js';
@@ -98,6 +103,7 @@ function needsServer(ctx: Context, session: Session, what: string): VersionServe
     brainId: remote.brainId,
     token: resolveToken(ctx.env, remote.tokenFile, ctx.cwd),
     clientId: brain.config.clientId,
+    allowInsecure: insecureAllowed(ctx.env),
   });
   return { engine: createRemoteEngine(client), remote: null, clone: { brain, remote } };
 }
