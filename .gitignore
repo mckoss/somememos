@@ -1,5 +1,9 @@
 node_modules/
 dist/
+build/
+.svelte-kit/
+# Generated from the root package.json by packages/core/scripts/gen-version.mjs.
+packages/core/src/version.ts
 coverage/
 *.log
 .env

@@ -1,0 +1,9 @@
+node_modules/
+dist/
+build/
+coverage/
+.svelte-kit/
+package-lock.json
+packages/core/src/version.ts
+# Prose is formatted by hand.
+*.md

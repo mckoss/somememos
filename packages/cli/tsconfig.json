@@ -1,0 +1,11 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "noEmit": true,
+    // Resolve @somememos/core to its TypeScript source, so type-checking works
+    // from a fresh clone without building core first.
+    "customConditions": ["source"]
+  },
+  "include": ["src"]
+}
