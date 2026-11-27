@@ -15,16 +15,16 @@ Conventions for every task:
 
 Goal: an empty but working workspace, with the TimeScore math proven correct.
 
-- [ ] **0.1 Workspace scaffold.** Root `package.json` (private, version `0.1.0`, npm workspaces), `tsconfig.base.json`, ESLint and Prettier, `.gitignore`, Node version pinned in `engines` and `.nvmrc`.
-- [ ] **0.1a Privacy guards.** `.gitignore` covers `.somememos/`, `*.sqlite` and `events.jsonl`. A CI step fails if any such file, or any file over a small size limit outside known source folders, is committed.
+- [x] **0.1 Workspace scaffold.** Root `package.json` (private, version `0.1.0`, npm workspaces), `tsconfig.base.json`, ESLint and Prettier, `.gitignore`, Node version pinned in `engines` and `.nvmrc`.
+- [x] **0.1a Privacy guards.** `.gitignore` covers `.somememos/`, `*.sqlite` and `events.jsonl`. A CI step fails if any such file, or any file over a small size limit outside known source folders, is committed.
 - [ ] **0.1b Synthetic brain.** A seeded generator script that builds an invented brain (memos, dated entries, sources, links, a git history with renames) for tests, examples and documentation.
-- [ ] **0.2 `packages/core` skeleton.** Builds with `tsc` to ESM. Exports a `VERSION` read from the root `package.json` at build time.
+- [x] **0.2 `packages/core` skeleton.** Builds with `tsc` to ESM. Exports a `VERSION` read from the root `package.json` at build time.
 - [ ] **0.3 TimeScore functions.** Read the blog post first (PLAN.md section 3). Implement `eventScore`, `combine`, `addEvent`, `scoreAt`, the half-life table, and `weightedTotal(scoresByKind, weights)`.
   - Unit tests against worked values from the post and its demo code.
   - Property tests (fast-check): `combine` is commutative and associative within tolerance; order is unchanged as `now` advances; two simultaneous events of value 1 add `ln 2`; weighting at read time equals weighting at record time; a future-dated event is rejected.
-- [ ] **0.4 `packages/cli` skeleton.** A `somememos` binary with `--version` and `--help`, using an argument parser with no heavy dependencies (`node:util` `parseArgs` unless it proves too limited).
-- [ ] **0.5 `apps/web` skeleton.** SvelteKit with `adapter-node`, one page whose header shows the version from the root `package.json`.
-- [ ] **0.6 CI.** A GitHub Actions workflow that runs lint, type-check, tests and the web build on every PR and on `main`.
+- [x] **0.4 `packages/cli` skeleton.** A `somememos` binary with `--version` and `--help`, using an argument parser with no heavy dependencies (`node:util` `parseArgs` unless it proves too limited).
+- [x] **0.5 `apps/web` skeleton.** SvelteKit with `adapter-node`, one page whose header shows the version from the root `package.json`.
+- [x] **0.6 CI.** A GitHub Actions workflow that runs lint, type-check, tests and the web build on every PR and on `main`.
 - [ ] **0.7 Confirm the SQLite choice.** A spike test that opens a database with `node:sqlite` and checks: FTS5 with the `porter unicode61` tokenizer, `bm25()` with column weights, the `ln` and `exp` functions, `INSERT … ON CONFLICT`, WAL mode and a busy timeout. If any check fails, repeat with `better-sqlite3`. Record the result in PLAN.md section 9.
 - [ ] **0.8 Database interface.** Define the small `Db` interface in core (`exec`, `prepare`, `transaction`) and implement it in the CLI over the chosen driver. Core's SQL runs only through this interface, so the PWA can later supply sqlite-wasm.
 

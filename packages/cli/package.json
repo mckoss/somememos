@@ -1,0 +1,33 @@
+{
+  "name": "@somememos/cli",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The somememos command-line tool.",
+  "license": "Apache-2.0",
+  "type": "module",
+  "bin": {
+    "somememos": "./bin/somememos.js"
+  },
+  "exports": {
+    ".": {
+      "source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "bin",
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22.13"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@somememos/core": "*"
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "name": "@somememos/web",
+  "version": "0.1.0",
+  "private": true,
+  "description": "The somememos server and PWA client (SvelteKit).",
+  "license": "Apache-2.0",
+  "type": "module",
+  "imports": {
+    "#lib/*": "./src/lib/*"
+  },
+  "scripts": {
+    "prepare": "svelte-kit sync || echo ''",
+    "dev": "vite dev",
+    "build": "vite build",
+    "preview": "vite preview",
+    "start": "node build",
+    "typecheck": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --fail-on-warnings",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@sveltejs/adapter-node": "^6.0.6",
+    "@sveltejs/kit": "^3.4.1",
+    "@sveltejs/vite-plugin-svelte": "^7.3.2",
+    "svelte": "^5.59.2",
+    "svelte-check": "^4.7.8",
+    "vite": "^8.4.0"
+  }
+}
