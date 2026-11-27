@@ -179,7 +179,7 @@ somememos keeps the change log itself. Agents are not asked to write changelog f
 - A message is expected but not required. A commit without one still works and still records what changed.
 - `somememos log` shows the change log, newest first. It can be narrowed to one note (that note's history, with reasons and sources), to an operation, or to a date range. By default it hides changes that touch only `dated` files, so routine diary and todo maintenance doesn't crowd out changes to memos.
 - Change records are original data. They are stored beside the event log, exported with it, and on the server each one is also the message of that change's git commit.
-- Messages are indexed for search, and they are the best source of queries for the experiments (section 5).
+- Messages can be searched (`somememos log --query`), and they are the best source of queries for the experiments (section 5).
 - Because the log is no longer a note full of links, a change no longer counts twice, once as an edit and once as a mention from its log entry.
 
 ### Storage as built
@@ -382,17 +382,21 @@ Run with `somememos eval` on one real vault: about seven months of history, impo
 | Keyword parameters | **Title weight 5 and body `b` 0.5** are best (keyword-only MRR 0.46, against 0.43 at the placeholders). `k1` makes no measurable difference |
 | Link spreading | **It hurts in every form tried.** Search MRR falls from 0.59 to between 0.30 and 0.51. Stays off |
 
-**Defaults chosen from this:** `α` 0.5, a one-hour burst window, title weight 5, body `b` 0.5, `hot` on the week half-life, mention weight 1, link spreading off. With `α` 0.5, the burst window and the keyword changes together, search MRR is 0.64 and R@10 0.81.
+**These defaults are in the code as of v0.4.0.** **Defaults chosen from this:** `α` 0.5, a one-hour burst window, title weight 5, body `b` 0.5, `hot` on the week half-life, mention weight 1, link spreading off. With `α` 0.5, the burst window and the keyword changes together, search MRR is 0.64 and R@10 0.81.
 
 **How far to trust it:** this is one vault and one kind of query, the settings were chosen and measured on the same cases, and differences under about 0.02 are noise. The read weight is unmeasured, because imported history has no reads. Section-level scoring has not been tried. Rerun as real use accumulates.
 
+### The burst rule
+
+Of one item's events of one kind, taken in time order, an event counts only if it is at least the burst window after the last one that counted. The default window is one hour, chosen by the experiments above; 0 switches the rule off. History follows a renamed note. The rule is applied when the log is folded into scores, identically in every store, and its result depends only on the set of events, never on the order they arrived in: an event that arrives late, or a rename that merges two histories, triggers a refold from the log. Changing the window rebuilds the scores, as changing a half-life does.
+
 ### Keyword scoring details
 
-Implemented in `packages/core/src/keyword`. The parameter values below are **placeholders until the experiments set them**.
+Implemented in `packages/core/src/keyword`. Title weight and body `b` below were measured on 2026-11-27 (see the results above). The heading weight, the title and heading `b`, and `k1` are still placeholders.
 
 - **Tokens:** text is lower-cased and stripped of diacritics, and a token is a run of letters and digits. `snake_case`, `kebab-case` and dotted names split at the punctuation; `camelCase` does not split. No stop words are removed.
 - **Stemming:** the Porter stemmer, on by default and switchable off. An index records whether it was built with stemming, and a query must use the same setting.
-- **Scoring:** BM25F over three fields, with an inverse document frequency that is never negative. Placeholder defaults: `k1` 1.2; `b` 0.5 for title and heading, 0.75 for body; field weights title 3, heading 2, body 1.
+- **Scoring:** BM25F over three fields, with an inverse document frequency that is never negative. Defaults: `k1` 1.2; `b` 0.5 for title, heading and body; field weights title 5, heading 2, body 1.
 - **Queries:** a section matches when it contains any query term (an option requires all of them). Quoted phrases match consecutive words within one field, which needs term positions in the index.
 - **Storage keeps counts, never scores.** Per section: the three field lengths. Per term and section: the term's frequency in each field, and its positions. Scores are computed at query time so the parameters stay tunable.
 
@@ -438,6 +442,17 @@ somememos eval [--cases file]        run the ranking experiments (section 5)
 - Exit codes are conventional (0 success, 1 error, 2 usage), and `--help` is complete enough to learn the tool from.
 - The repo ships a short `AGENTS.md` snippet (and a skill) to paste into a brain: run `somememos hot` to orient, `somememos search` before grep, `somememos log` to see what changed recently, `somememos read` in place of `cat`, and `somememos commit -m` with a reason after editing.
 - somememos requires no other structure from agents. There is no citation step and no handle to pass back.
+
+### The CLI as built (v0.4.0)
+
+- **Choosing the mode.** A folder whose `.somememos/config.json` says `"mode": "remote"` is a working folder for a brain on a server; any other brain folder is local. With no folder at all, setting `SOMEMEMOS_SERVER`, `SOMEMEMOS_BRAIN_ID` and `SOMEMEMOS_TOKEN` runs in remote mode, with fetched notes kept under `~/somememos/<brain-id>` (never the current directory, so notes can't land in an unrelated repository).
+- **The token is never stored.** It comes from `SOMEMEMOS_TOKEN` or a token file outside the folder, and is never printed or put in an error message.
+- **`somememos connect <server> <brain>`** sets up a working folder. **`somememos clone <server> <brain>`** makes a full offline copy, and **`somememos sync`** keeps it in step.
+- **A stale commit in remote mode** is refused for that file only, and the server's version is saved beside it as `<name>.server.md`. Deleting that copy tells the CLI the merge is done.
+- **Deletes and renames are explicit:** `somememos rm` and `somememos mv`. A file deleted from a working folder deletes nothing on the server.
+- **`somememos history <path>`** and **`somememos restore <path> <commit>`** use the server's git history.
+- **One-file build:** `npm run bundle -w @somememos/cli` writes a single JavaScript file that needs only Node 22.13 or later.
+- **`somememos help agents`** and **`somememos help setup`** are the guides to paste into a brain's instructions and to set up a cloud session.
 
 ### MCP server
 
