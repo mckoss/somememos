@@ -630,6 +630,54 @@ describePg(
         await ok(b, ['sync']);
       });
 
+      it('history and restore work in a clone, and restore updates the copy', async () => {
+        const copy = newDir('clone-history');
+        await ok(tmp.dir, ['clone', server.url, 'garden', copy]);
+        writeFileSync(join(copy, 'memos/lantern.md'), '# Lantern\n\nfirst wording\n');
+        await ok(copy, ['commit', '-m', 'ingest lantern']);
+        await ok(copy, ['sync']);
+        writeFileSync(join(copy, 'memos/lantern.md'), '# Lantern\n\nsecond wording\n');
+        await ok(copy, ['commit', '-m', 'update lantern']);
+        await ok(copy, ['sync']);
+
+        const history = await json<{ versions: { commit: string; message: string }[] }>(copy, [
+          'history',
+          'memos/lantern.md',
+        ]);
+        expect(history.versions.map((v) => v.message)).toEqual([
+          'update lantern',
+          'ingest lantern',
+        ]);
+        const first = (history.versions[1] as { commit: string }).commit;
+        const restored = await ok(copy, ['restore', 'memos/lantern.md', first.slice(0, 10)]);
+        expect(restored.stdout).toBe(`restored memos/lantern.md to ${first.slice(0, 12)}\n`);
+        expect(readFileSync(join(copy, 'memos/lantern.md'), 'utf8')).toBe(
+          '# Lantern\n\nfirst wording\n',
+        );
+        expect((await ok(work, ['read', 'memos/lantern.md'])).stdout).toContain('first wording');
+        expect((await ok(copy, ['sync'])).stdout).toMatch(/pushed 0 edits/);
+
+        // Offline: one clear line.
+        await server.stop();
+        try {
+          const offline = await cli(copy, ['history', 'memos/lantern.md']);
+          expect(offline.code).toBe(EXIT_FAILURE);
+          expect(offline.stderr).toMatch(
+            /^somememos history: history needs the server, which can't be reached now/,
+          );
+          const restoreOffline = await cli(copy, ['restore', 'memos/lantern.md', first]);
+          expect(restoreOffline.code).toBe(EXIT_FAILURE);
+          expect(restoreOffline.stderr).toMatch(/restore needs the server, which can't be reached/);
+        } finally {
+          await server.start();
+        }
+        // A local brain with no server still says what it needs.
+        const plain = newDir('plain-history');
+        await ok(tmp.dir, ['init', plain]);
+        const none = await cli(plain, ['history', 'memos/x.md']);
+        expect(none.stderr).toMatch(/history needs a server/);
+      });
+
       it('sync names the notes too large to sync, which stay in the copy', async () => {
         const copy = newDir('clone-big');
         await ok(tmp.dir, ['clone', server.url, 'garden', copy]);
